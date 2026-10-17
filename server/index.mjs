@@ -19,6 +19,7 @@ import { createSimTicker } from './simTicker.mjs';
 import { createCommandService } from './commands.mjs';
 import { createLocks } from './locks.mjs';
 import { createStore } from './store.mjs';
+import { createSharedWorld } from './world.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const STATIC_DIR = resolve(process.env.STATIC_DIR ?? join(here, '..', 'dist'));
@@ -117,6 +118,8 @@ export function publicView(p) {
 
 async function api(req, res, pathname) {
   const user = auth.userFrom(req);
+  // The shared world is public: guests see the same asteroid fields and NPCs.
+  if (pathname === '/api/world' && req.method === 'GET') return json(res, 200, await sharedWorld.get());
   if (pathname === '/api/me') return user ? json(res, 200, { ...user, admin: admins.has(user.id) }) : json(res, 401, { authEnabled: auth.enabled, login: '/auth/discord' });
   if (!user) return json(res, 401, { error: 'sign in with Discord first' });
   if (pathname === '/api/save' && req.method === 'GET') {
@@ -208,8 +211,10 @@ const loadSim = async () => {
 const withLock = createLocks();
 /** World time in years, fractional (one year per tick). */
 const worldTime = () => (Date.now() - CLOCK.epochMs) / CLOCK.msPerTick;
+// The galaxy everyone shares: mined asteroid fields and discovered NPC empires (server/world.mjs).
+export const sharedWorld = createSharedWorld({ file: join(store.dir, 'world.json'), loadSim, withLock, broadcast: (event, data) => chat.broadcast(event, data) });
 export const simTicker = createSimTicker({
-  store, loadSim, withLock,
+  store, loadSim, withLock, world: sharedWorld,
   publish: (p) => playerFeed.publish(p),
   // The owner's browser shows what the server decided this year.
   notifyOwner: (id, save) => chat.sendTo(id, 'state', { save }),
@@ -217,7 +222,7 @@ export const simTicker = createSimTicker({
   log: (m) => console.warn(m),
 });
 export const commands = createCommandService({
-  store, loadSim, withLock, worldTime,
+  store, loadSim, withLock, worldTime, world: sharedWorld,
   publish: (p) => playerFeed.publish(p),
   publicView: (p) => publicView(p),
 });

@@ -1,4 +1,4 @@
-import type { Mineral, Resource } from './resources';
+import type { Resource } from './resources';
 
 export interface BuildingDef {
   readonly id: string;
@@ -48,5 +48,3 @@ export const STORAGE = {
 /** Building slots: bigger worlds hold more; the capital gets two extra. */
 export const slotsOf = (size: number, capital = false): number => size + 1 + (capital ? 2 : 0);
 
-/** Every system has an asteroid belt; planets add their own minerals. */
-export const BELT_MINERALS: readonly Mineral[] = ['metals'];

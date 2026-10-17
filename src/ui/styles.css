@@ -720,3 +720,10 @@ button.chat-mention:hover { filter: brightness(1.25); }
 .btn.locked-build { border-style: dashed; color: var(--muted); }
 .btn.locked-build:hover { color: var(--text); border-color: var(--brass); }
 .btn.locked-build small { color: var(--brass); }
+
+/* Asteroid fields on the star card. */
+.fields { margin: 8px 0; display: grid; gap: 4px; }
+.field-row { display: grid; grid-template-columns: 16px 64px 1fr auto; align-items: center; gap: 6px; font-size: 12px; }
+.field-bar { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.field-bar i { display: block; height: 100%; border-radius: 3px; }
+.cargo { margin-top: 6px; }

@@ -11,6 +11,7 @@ import type { Job } from '../core/construction/Construction';
 import type { FleetOrders } from '../core/fleet/Presence';
 import type { Resource } from '../content/resources';
 import type { Market } from '../core/economy/Trade';
+import type { FieldReport } from '../sim/EmpireSim';
 
 export type PanelId = 'shipyard' | 'research' | 'empire' | 'war' | 'explore' | 'fleets';
 
@@ -78,6 +79,8 @@ export interface GameQueries {
   fleetInfo(fleetId: string): FleetInfo | null;
   /** Construction queued at a site (planet id), or everywhere. */
   jobs(site?: string): Job[];
+  /** A system's asteroid fields: what each holds now and when it is full again. */
+  fieldReport(star: StarSystem): FieldReport[];
   /** Worlds that buy trade goods. */
   markets(): Market[];
   marketAt(star: StarSystem): Market | null;

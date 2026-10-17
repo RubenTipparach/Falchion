@@ -1,12 +1,12 @@
 ## 1. Shared world
-- [ ] 1.1 SharedWorld state, effects and their application (pure, tested)
-- [ ] 1.2 Server: world.json, /api/world, the world lock, effects applied after each empire write, `world` broadcast
-- [ ] 1.3 Client: shared world from the server (guests local), applied to the map and panels
+- [x] 1.1 SharedWorld state, effects and their application (pure, tested)
+- [x] 1.2 Server: world.json, /api/world, the world lock, effects applied after each empire write, `world` broadcast
+- [x] 1.3 Client: shared world from the server (guests local), applied to the map and panels
 
 ## 2. Asteroid mining
-- [ ] 2.1 Asteroid fields per system (deterministic) and refill over 24 h
-- [ ] 2.2 Mining ships mine only asteroid fields, faster, drawing them down (shared)
-- [ ] 2.3 Star card: fields, what is left, refill time
+- [x] 2.1 Asteroid fields per system (deterministic) and refill over 24 h
+- [x] 2.2 Mining ships mine only asteroid fields, faster, drawing them down (shared)
+- [x] 2.3 Star card: fields, what is left, refill time
 
 ## 3. NPC empires
 - [ ] 3.1 Archetypes (content) and the catalogue: spawn NPCs and grid NPCs, regenerated from ids

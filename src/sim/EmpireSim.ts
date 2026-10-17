@@ -1,8 +1,7 @@
 import { ALIEN_TARGETS } from '../content/aliens';
 import { RESOURCES, Resource } from '../content/resources';
-import { BELT_MINERALS, BUILDINGS, slotsOf } from '../content/buildings';
+import { BUILDINGS, slotsOf } from '../content/buildings';
 import { buildYears, isSurveyClass, isWarship, specOf } from '../content/logistics';
-import { BIOME_YIELDS } from '../content/resources';
 import { SHIP_CLASSES, ShipClassDef } from '../content/shipClasses';
 import { CombatBonuses, resolveAssault, resolveBattle, Squadron } from '../core/combat/Combat';
 import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf } from '../core/economy/Economy';
@@ -16,6 +15,8 @@ import { catchUpTicks, formatDuration } from '../core/time/WorldTime';
 import { capacity, clampStores, exploreCost, firepower, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
 import { adjustShips, countOf, dockedShips, FleetOrders, hasShips, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
 import { planSurvey } from '../core/fleet/Survey';
+import { fieldLeft, fieldsOf, homeBelt, yearsToFull, type AsteroidField } from '../core/galaxy/Asteroids';
+import { applyEffects, EMPTY_WORLD, type SharedEffect, type SharedWorld } from '../core/world/SharedWorld';
 import { due, enqueue, Job } from '../core/construction/Construction';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
@@ -32,6 +33,30 @@ import { CLOCK } from '../app/WorldClock';
 import type { CombatOutcome, FleetGroup } from '../ui/GameActions';
 import type { StarDetails } from '../ui/StarInfoPanel';
 
+/** The shared world as an empire's simulation sees it: what it holds now, and where its changes go. */
+export interface SharedLink {
+  world(): SharedWorld;
+  emit(effects: readonly SharedEffect[]): void;
+}
+
+/** A shared link over a snapshot: changes apply to it at once and are collected (for the server to apply). */
+export function snapshotLink(world: SharedWorld): SharedLink & { readonly effects: SharedEffect[] } {
+  let w = world;
+  const effects: SharedEffect[] = [];
+  return { world: () => w, emit: (e) => { w = applyEffects(w, e); effects.push(...e); }, effects };
+}
+
+export interface FieldReport {
+  readonly field: AsteroidField;
+  /** Units it holds now. */
+  readonly left: number;
+  /** Years until full (0 when it is). */
+  readonly fullIn: number;
+}
+
+const poolKey = (starId: string, resource: Resource) => `${starId}|${resource}`;
+const parsePool = (key: string) => { const i = key.lastIndexOf('|'); return { starId: key.slice(0, i), resource: key.slice(i + 1) as Resource }; };
+
 /** What the rules need: state, the galaxy and the content tables. No view, no DOM, no three.js. */
 export interface SimDeps {
   readonly store: Store<GameState>;
@@ -42,6 +67,8 @@ export interface SimDeps {
   readonly economy: EconomyTables;
   /** Share notable news (founding, battles, colonies, depots, surveyed systems) with the galaxy feed and Discord. */
   readonly report?: (kind: ReportKind, text: string, place?: ActivityPlace) => void;
+  /** The galaxy's shared state (asteroid fields, NPC empires): read it, and hand it this empire's changes. */
+  readonly shared?: SharedLink;
   /** Markets beyond your own colonies and the neighbours (other players' worlds). */
   readonly markets?: () => readonly Market[];
 }
@@ -249,26 +276,69 @@ export class EmpireSim {
     return this.fleetHexes().some((h) => claim.colonies.some((c) => hexDistance(c.hex, h) <= c.radius));
   };
 
-  /** Minerals a mining ship can work in a system: the belt plus its planets. */
-  protected deposits(star: StarSystem | null): Resource[] {
-    if (!star) return [];
-    const out = new Set<Resource>(BELT_MINERALS);
-    for (const p of this.planets(star)) for (const r of Object.keys(BIOME_YIELDS[p.biome] ?? {})) out.add(r as Resource);
-    return [...out];
+  // ── The shared world: asteroid fields ──────────────────────────────
+
+  /** The galaxy's shared state as this empire sees it (local when nothing is linked). */
+  protected sharedWorld(): SharedWorld {
+    return this.deps.shared?.world() ?? this.localWorld;
   }
 
+  /** Changes this empire made to the shared world: the link takes them (the server applies them for everyone). */
+  protected emit(effects: readonly SharedEffect[]): void {
+    if (!effects.length) return;
+    if (this.deps.shared) this.deps.shared.emit(effects);
+    else this.localWorld = applyEffects(this.localWorld, effects);
+  }
+
+  private localWorld: SharedWorld = EMPTY_WORLD;
+
+  /** A system's asteroid fields; your home system also has its own belt of metals and gases. */
+  asteroidsAt = (star: StarSystem): AsteroidField[] =>
+    [...(star.id === this.state.home.id ? homeBelt(star) : []), ...fieldsOf(star, this.deps.galaxy.params.seed)];
+
+  /** Each field of a system with what it holds now and the years until it is full again. */
+  fieldReport = (star: StarSystem): FieldReport[] => {
+    const w = this.sharedWorld(), year = this.state.turn;
+    return this.asteroidsAt(star).map((field) => ({ field, left: fieldLeft(field, w.asteroids[field.id], year), fullIn: yearsToFull(field, w.asteroids[field.id], year) }));
+  };
+
+  /** Mining ships and where they are: each mines its system's fields of its resource. */
   protected presence(): Presence {
     const s = this.state;
-    const miners: Array<{ classId: string; count: number; deposits: Resource[] }> = [];
-    const homeDeposits = this.deposits(s.home);
-    for (const x of this.docked()) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, deposits: homeDeposits });
+    const miners: Array<{ classId: string; count: number; pool?: string }> = [];
+    const pools: Record<string, number> = {};
+    const at = (star: StarSystem | null, classId: string): string | undefined => {
+      const r = this.classById.get(classId)?.mines;
+      if (!star || !r) return undefined;
+      const key = poolKey(star.id, r);
+      if (!(key in pools)) pools[key] = this.fieldReport(star).filter((f) => f.field.resource === r).reduce((n, f) => n + f.left, 0);
+      return key;
+    };
+    for (const x of this.docked()) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, pool: at(s.home, x.classId) });
     for (const g of this.groups()) {
       if (g.id === 'dock') continue;
-      const deposits = g.stationed ? this.deposits(g.star) : [];
-      for (const x of g.ships) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, deposits });
+      for (const x of g.ships) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, pool: g.stationed ? at(g.star, x.classId) : undefined });
     }
     const reached = this.deps.world.claims.map((c) => c.name).filter((n) => this.reached(n));
-    return { miners, reached };
+    return { miners, pools, reached };
+  }
+
+  /** What was mined from each pool, taken from its fields (fullest first) and shared. */
+  protected drawFields(mined: Readonly<Record<string, number>>): void {
+    const effects: SharedEffect[] = [];
+    for (const [key, amount] of Object.entries(mined)) {
+      const { starId, resource } = parsePool(key);
+      const star = this.starById(starId);
+      if (!star || amount <= 0) continue;
+      let rest = amount;
+      for (const f of this.fieldReport(star).filter((x) => x.field.resource === resource && x.left > 0).sort((a, b) => b.left - a.left)) {
+        const take = Math.min(rest, f.left);
+        effects.push({ kind: 'mined', field: f.field, amount: take, year: this.state.turn });
+        rest -= take;
+        if (rest <= 0) break;
+      }
+    }
+    this.emit(effects);
   }
 
   /** The empire's map colour: territory, fleets, routes and the selection outline. */
@@ -1051,7 +1121,8 @@ export class EmpireSim {
   /** Resolve one year: economy, research, logistics. */
   protected step(quiet: boolean): { income: Partial<Record<Resource, number>>; arrivals: string[] } {
     const s = this.state;
-    const { economy, research, report } = resolveTurn({ ...s.economy, stock: s.empire.materials }, s.empire.research, s.turn, this.deps.economy, this.presence());
+    const { economy, research, report, mined } = resolveTurn({ ...s.economy, stock: s.empire.materials }, s.empire.research, s.turn, this.deps.economy, this.presence());
+    this.drawFields(mined);
     const next = s.turn + 1;
     // Logistics: fleets in friendly systems refill; elsewhere ammunition trickles back.
     const loadouts: Record<string, Loadout> = {};

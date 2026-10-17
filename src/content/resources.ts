@@ -34,6 +34,9 @@ export const LEGACY_MATERIALS: Readonly<Record<string, readonly [Mineral, number
   volatiles: ['gases', 1], ice: ['gases', 1], rareEarths: ['crystals', 1], exotics: ['crystals', 2], darkMatter: ['crystals', 4],
 };
 
+/** What the capital adds each year on top of its biome: taxes and the seat of government. */
+export const CAPITAL_YIELDS: Readonly<Partial<Record<Resource, number>>> = { credits: 20, goods: 2 };
+
 /** Per-turn yield of a colony by biome (before bonuses). Living worlds make trade goods. */
 export const BIOME_YIELDS: Readonly<Record<string, Partial<Record<Resource, number>>>> = {
   terran: { credits: 12, influence: 1, food: 4, goods: 3 },

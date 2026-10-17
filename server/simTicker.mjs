@@ -7,8 +7,9 @@
 /**
  * @param {{
  *   store: { ids(): Promise<string[]>, load(id: string): Promise<any>, save(id: string, record: any): Promise<void> },
- *   loadSim: () => Promise<{ advanceSave(save: unknown, player: { id: string, name: string }, toTurn: number): { save: object, public: object, years: number } | null } | null>,
+ *   loadSim: () => Promise<{ advanceSave(save: unknown, player: { id: string, name: string }, toTurn: number, world?: unknown): { save: object, public: object, effects?: any[], years: number } | null } | null>,
  *   withLock?: (key: string, fn: () => Promise<any>) => Promise<any>,
+ *   world?: { get(): Promise<any>, apply(effects: any[]): Promise<any> },
  *   publish?: (player: object) => void,
  *   notifyOwner?: (id: string, save: object) => void,
  *   publicView?: (p: unknown) => object,
@@ -16,7 +17,7 @@
  *   log?: (msg: string) => void,
  * }} deps
  */
-export function createSimTicker({ store, loadSim, withLock = (_key, fn) => fn(), publish = () => {}, notifyOwner = () => {}, publicView = (p) => p, now = () => Date.now(), log = () => {} }) {
+export function createSimTicker({ store, loadSim, world = null, withLock = (_key, fn) => fn(), publish = () => {}, notifyOwner = () => {}, publicView = (p) => p, now = () => Date.now(), log = () => {} }) {
   let running = null;
 
   /** Play every empire forward to `worldTick`. Returns how many were advanced. */
@@ -32,8 +33,10 @@ export function createSimTicker({ store, loadSim, withLock = (_key, fn) => fn(),
             const record = await store.load(id);
             if (!record?.save) return false;
             const player = { id, name: String(record.player?.name ?? 'Commander') };
-            const result = sim.advanceSave(record.save, player, worldTick);
+            // Each empire plays on the shared world as the ones before it left it.
+            const result = sim.advanceSave(record.save, player, worldTick, world ? await world.get() : undefined);
             if (!result) return false;
+            if (world && result.effects?.length) await world.apply(result.effects);
             const pub = publicView(result.public);
             await store.save(id, { ...record, save: result.save, public: pub, simulatedAt: now() });
             publish({ ...pub, id, name: player.name, avatar: record.player?.avatar ?? null, updatedAt: now() });

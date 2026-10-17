@@ -47,6 +47,7 @@ import { ResearchPanel } from '../ui/panels/ResearchPanel';
 import { ShipyardPanel } from '../ui/panels/ShipyardPanel';
 import type { PanelId } from '../ui/GameActions';
 import { GameController } from './GameController';
+import { SharedWorldClient } from './SharedWorldClient';
 import type { GameState } from './GameState';
 import { GUEST, probeSession } from './identity';
 import { colorFor, ownClaim, publicEmpire, ServerSaves } from './ServerSync';
@@ -94,7 +95,9 @@ async function bootstrap(): Promise<void> {
   // A saved empire carries on where it left off; the missed years are caught up below.
   const store = new Store<GameState>(saved ? { ...fresh, ...saved, home: world.home, identity: cleanIdentity(saved.identity, HERALDRY) } : fresh);
 
-  const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame,
+  // Asteroid fields and NPC empires everyone shares (the server's when signed in).
+  const shared = await SharedWorldClient.connect(!!serverSaves && probe.server);
+  const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame, shared,
     // Signed-in players' notable news goes to the galaxy feed and the Discord channel (the server rate-limits it).
     report: signedIn ? reportActivity : undefined,
   });
@@ -190,7 +193,8 @@ async function bootstrap(): Promise<void> {
     fetchPlayers: serverSaves && (() => serverSaves.players()), message: (id) => chat.openThread(id) });
   // In-game chat (global + DMs, location links, @mentions): see ChatSetup. Its stream also carries the players' live events.
   // The live stream also carries the server's state of this empire each year.
-  const live = { ...players.live, taps: { ...players.live.taps, state: (data: unknown) => authority?.onServerState((data as { save?: SavedGame }).save) } };
+  // It also announces changes to the shared world.
+  const live = { ...players.live, taps: { ...players.live.taps, state: (data: unknown) => authority?.onServerState((data as { save?: SavedGame }).save), world: (data: unknown) => shared.adopt(data) } };
   const chat = setupChat({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, panels: Object.values(panels), live });
   players.alongside([...Object.values(panels), chat]);
   topBar.addTab(players.panel.tab);

@@ -16,7 +16,11 @@ import { SaveGame, savedHome, upgradeSave, type SavedGame } from '../app/SaveGam
 import { colorFor, publicEmpire, type PublicEmpire } from '../app/ServerSync';
 import { Store } from '../app/Store';
 import { createWorld } from '../app/World';
-import { EmpireSim, type SimDeps } from './EmpireSim';
+import { EmpireSim, snapshotLink, type SimDeps } from './EmpireSim';
+import { applyEffects, EMPTY_WORLD, validWorld, type SharedEffect, type SharedWorld } from '../core/world/SharedWorld';
+
+/** The server applies empires' changes to the shared world with the same rules. */
+export { applyEffects, EMPTY_WORLD, validWorld };
 import { CommandError, decodeArgs, type Command } from './commands';
 
 /**
@@ -47,6 +51,8 @@ export type { Command };
 export interface Advanced {
   /** The save after the years were played (same format the client stores). */
   readonly save: Record<string, unknown>;
+  /** What the empire changed in the shared world (fields mined, NPCs found), for the server to apply. */
+  readonly effects: readonly SharedEffect[];
   /** What other players may see of the empire now (fleets, colonies, identity). */
   readonly public: PublicEmpire;
   /** World years played. */
@@ -58,14 +64,14 @@ export interface Advanced {
  * name: the name owns the fleets). Null when the save is invalid or already up to date. A long
  * absence is caught up as the client would (the most recent week in full).
  */
-export function advanceSave(save: unknown, player: Player, toTurn: number): Advanced | null {
+export function advanceSave(save: unknown, player: Player, toTurn: number, world: SharedWorld = EMPTY_WORLD): Advanced | null {
   if (!validSave(save) || !Number.isInteger(toTurn) || save.turn >= toTurn) return null;
-  const { deps, store } = runtime(save, player);
+  const { deps, store, link } = runtime(save, player, world);
   const from = store.state.turn;
   const sim = new EmpireSim(deps);
   sim.advanceTo(toTurn);
   sim.retimeFleets();
-  return { ...result(store.state, player), years: store.state.turn - from };
+  return { ...result(store.state, player), effects: link.effects, years: store.state.turn - from };
 }
 
 export interface Applied extends Omit<Advanced, 'years'> {
@@ -81,9 +87,9 @@ export interface Applied extends Omit<Advanced, 'years'> {
  * (fractional); `clientTime` is when the player gave the order, honoured within a few seconds
  * so a fleet sets off from where the player saw it.
  */
-export function applyCommand(save: unknown, player: Player, worldTime: number, command: unknown, clientTime?: number): Applied | null {
+export function applyCommand(save: unknown, player: Player, worldTime: number, command: unknown, clientTime?: number, world: SharedWorld = EMPTY_WORLD): Applied | null {
   if (!validSave(save) || !Number.isFinite(worldTime)) return null;
-  const { deps, store } = runtime(save, player);
+  const { deps, store, link } = runtime(save, player, world);
   const at = typeof clientTime === 'number' && Number.isFinite(clientTime) ? Math.min(worldTime, Math.max(worldTime - ORDER_SLACK_YEARS, clientTime)) : worldTime;
   const sim = new ServerSim(deps, at);
   sim.advanceTo(Math.floor(worldTime));
@@ -93,10 +99,10 @@ export function applyCommand(save: unknown, player: Player, worldTime: number, c
     // An empire is founded once; later identity changes are edits.
     if (name === 'setIdentity' && store.state.identity) args[1] = false;
     (sim[name] as (...a: unknown[]) => unknown)(...args);
-    return { ...result(store.state, player), ok: true };
+    return { ...result(store.state, player), effects: link.effects, ok: true };
   } catch (err) {
     const error = err instanceof CommandError ? err.message : `command failed: ${(err as Error)?.message ?? err}`;
-    return { ...result(store.state, player), ok: false, error };
+    return { ...result(store.state, player), effects: link.effects, ok: false, error };
   }
 }
 
@@ -116,8 +122,8 @@ class ServerSim extends EmpireSim {
   }
 }
 
-/** A save as live simulation state, with its world. */
-function runtime(saved: SavedGame, player: Player): { deps: SimDeps; store: Store<GameState> } {
+/** A save as live simulation state, with its world and the shared world it plays in. */
+function runtime(saved: SavedGame, player: Player, shared: SharedWorld): { deps: SimDeps; store: Store<GameState>; link: ReturnType<typeof snapshotLink> } {
   const save = upgradeSave(saved);
   const { galaxy, tree, encounters } = tables();
   const world = createWorld(galaxy, player.id, savedHome(save));
@@ -135,7 +141,8 @@ function runtime(saved: SavedGame, player: Player): { deps: SimDeps; store: Stor
     playerName: owner,
   };
   const store = new Store<GameState>(state);
-  return { deps: { store, galaxy, tree, encounters, world, economy }, store };
+  const link = snapshotLink(validWorld(shared) ? shared : EMPTY_WORLD);
+  return { deps: { store, galaxy, tree, encounters, world, economy, shared: link }, store, link };
 }
 
 function result(state: GameState, player: Player): { save: Record<string, unknown>; public: PublicEmpire } {

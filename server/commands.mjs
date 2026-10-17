@@ -10,15 +10,16 @@ const WINDOW_MS = 10_000;
 /**
  * @param {{
  *   store: { load(id: string): Promise<any>, save(id: string, record: any): Promise<void> },
- *   loadSim: () => Promise<{ applyCommand(save: unknown, player: object, worldTime: number, command: unknown, clientTime?: number): { ok: boolean, error?: string, save: object, public: object } | null } | null>,
+ *   loadSim: () => Promise<{ applyCommand(save: unknown, player: object, worldTime: number, command: unknown, clientTime?: number, world?: unknown): { ok: boolean, error?: string, save: object, public: object, effects?: any[] } | null } | null>,
  *   withLock: (key: string, fn: () => Promise<any>) => Promise<any>,
+ *   world?: { get(): Promise<any>, apply(effects: any[]): Promise<any> },
  *   worldTime: () => number,
  *   publish?: (player: object) => void,
  *   publicView?: (p: unknown) => object,
  *   now?: () => number,
  * }} deps
  */
-export function createCommandService({ store, loadSim, withLock, worldTime, publish = () => {}, publicView = (p) => p, now = () => Date.now() }) {
+export function createCommandService({ store, loadSim, withLock, worldTime, world = null, publish = () => {}, publicView = (p) => p, now = () => Date.now() }) {
   const recent = new Map(); // player id -> timestamps
 
   function allow(id) {
@@ -39,8 +40,9 @@ export function createCommandService({ store, loadSim, withLock, worldTime, publ
       const record = await store.load(user.id);
       if (!record?.save) return { status: 404, body: { ok: false, error: 'no empire yet' } };
       const player = { id: user.id, name: String(record.player?.name ?? user.name ?? 'Commander') };
-      const result = sim.applyCommand(record.save, player, worldTime(), body?.command, typeof body?.time === 'number' ? body.time : undefined);
+      const result = sim.applyCommand(record.save, player, worldTime(), body?.command, typeof body?.time === 'number' ? body.time : undefined, world ? await world.get() : undefined);
       if (!result) return { status: 409, body: { ok: false, error: 'this empire cannot be loaded' } };
+      if (world && result.effects?.length) await world.apply(result.effects);
       const pub = publicView(result.public);
       const updatedAt = now();
       await store.save(user.id, { ...record, player: { ...record.player, ...user }, save: result.save, public: pub, updatedAt });

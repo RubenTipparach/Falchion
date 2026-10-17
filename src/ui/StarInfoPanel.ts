@@ -70,6 +70,7 @@ export class StarInfoPanel {
           const p = this.q.surveyProgress(star);
           return [h('dt', {}, 'Surveyed'), h('dd', {}, `${Math.round((100 * p.done) / p.total)}% · ${p.done} of ${p.total} planets`)];
         })() : [])),
+      this.fieldsView(star),
       here.length ? h('div', { class: 'here' }, h('span', { class: 'eyebrow' }, 'On station'), ...here.map((g) => h('div', { class: 'here-group' }, h('b', {}, g.name), h('div', { class: 'small muted' }, shipsText(g.ships)), storesView(g)))) : '',
       friendly && !isHome ? h('p', { class: 'small green' }, 'Friendly system: fleets here resupply and rearm.') : '',
       h('div', { class: 'planet-row' }, ...d.planets.map((p) => {
@@ -88,10 +89,27 @@ export class StarInfoPanel {
     );
   }
 
+  /** Asteroid fields: what mining ships here can mine, how much is left, and when it refills. */
+  private fieldsView(star: StarSystem): HTMLElement | string {
+    const fields = this.q.fieldReport(star);
+    if (!fields.length) return h('p', { class: 'small muted' }, 'No asteroid fields: mining ships have nothing to mine here.');
+    return h('div', { class: 'fields' }, h('span', { class: 'eyebrow' }, 'Asteroid fields'),
+      ...fields.map(({ field, left, fullIn }) => {
+        const name = RESOURCES.find((r) => r.id === field.resource)?.name ?? field.resource;
+        const pct = Math.round((100 * left) / field.capacity);
+        return h('div', { class: 'field-row', title: `${name} field: ${fmt(left)} of ${fmt(field.capacity)} left` },
+          resourceIcon(field.resource, 14),
+          h('span', { class: 'field-name' }, name),
+          h('span', { class: 'field-bar' }, h('i', { style: `width:${pct}%; background:${RESOURCES.find((r) => r.id === field.resource)?.color ?? '#ccc'}` })),
+          h('small', { class: `mono ${left === 0 ? 'red' : 'muted'}` }, fullIn ? `${fmt(left)} · full in ${formatDuration(fullIn, CLOCK)}` : `${fmt(left)} · full`));
+      }));
+  }
+
   /** At a market: send free freighters (docked first) on a trade run here. */
   private tradeButton(star: StarSystem): HTMLElement | null {
     const market = this.q.marketAt(star);
-    if (!market) return null;
+    // Goods are loaded at another of your colonies: your only colony is no market for them.
+    if (!market || !this.q.markets().some((m) => m.kind === 'own' && m.starId !== star.id)) return null;
     const free = this.q.groups().find((g) => g.ships.some((x) => x.classId === FREIGHTER && x.count > 0) && !g.orders?.trade);
     if (!free) return null;
     return h('button', { class: 'btn', title: `Freighters load trade goods at your nearest colony and sell them at ${star.name}, again and again`, onclick: () => this.actions.tradeRun(free.id, star) },

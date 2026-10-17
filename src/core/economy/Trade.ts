@@ -14,6 +14,8 @@ export interface Market {
   readonly starId: string;
   readonly name: string;
   readonly kind: MarketKind;
+  /** The NPC faction whose world it is (its standing with you sets the price). */
+  readonly npc?: string;
 }
 
 /** Goods one Bulk Freighter carries (before research). */

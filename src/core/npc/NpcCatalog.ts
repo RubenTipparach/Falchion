@@ -50,7 +50,7 @@ function generate(galaxy: GalaxyModel, id: string, home: StarSystem, rng: Rng, t
     const s = galaxy.nearestStar(hexAdd(home.hex, { q: Math.round(Math.cos(a) * d), r: Math.round(Math.sin(a) * d) }), 8);
     if (s && s.id !== home.id && !colonies.some((c) => c.id === s.id)) colonies.push(s);
   }
-  return { id, archetype, name, color: archetype.color, home, colonies, tier, spawn };
+  return { id, archetype, name, color: shade(archetype.color, rng.range(-40, 40), rng.range(-0.12, 0.12)), home, colonies, tier, spawn };
 }
 
 /** The NPC of a grid cell, if it has one. */
@@ -166,4 +166,19 @@ export function initialNpcState(def: NpcDef, year: number): NpcState {
     colonies: worldsOf(def).map((w) => ({ starId: w.id, garrison: shipsFor(def, garrisonHulls(def, w.id), rng) })),
     fleets: [{ id: `${def.id}/1`, name: `${def.name} Raiders I`, ships: shipsFor(def, raiderHulls(def), rng), mission: 'home', from: def.home.hex, to: def.home.hex, depart: year }],
   };
+}
+
+/** A colour turned `dh` degrees round the hue wheel and lightened by `dl`: kin of one archetype look related but distinct. */
+function shade(hex: string, dh: number, dl: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+  const sat = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  let h = d === 0 ? 0 : max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h = (((h * 60 + dh) % 360) + 360) % 360;
+  const L = Math.max(0.25, Math.min(0.85, l + dl));
+  const c = (1 - Math.abs(2 * L - 1)) * sat, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = L - c / 2;
+  const [R, G, B] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  const to = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+  return `#${to(R)}${to(G)}${to(B)}`;
 }

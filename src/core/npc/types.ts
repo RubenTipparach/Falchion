@@ -36,6 +36,8 @@ export interface NpcState {
   readonly knownBy: readonly string[];
   readonly fleets: readonly NpcFleet[];
   readonly colonies: readonly NpcColonyState[];
+  /** Each player's standing with it, −100 to +100 (missing: its disposition). */
+  readonly standing?: Readonly<Record<string, number>>;
   /** Year it last built a raider fleet or reinforced its worlds. */
   readonly lastBuilt: number;
   /** Raider fleets built so far (their numbering). */

@@ -191,6 +191,18 @@ async function bootstrap(): Promise<void> {
   app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, dispatches.el, ...Object.values(panels).map((p) => p.el));
 
   controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system });
+  // Phones: the star, planet and fleet card is a bottom sheet; keep what you look at centred above it.
+  if (lite) {
+    const phone = window.matchMedia('(max-width: 720px)');
+    map.setBottomInset(() => {
+      if (!phone.matches || starInfo.el.classList.contains('hidden')) return 0;
+      const top = starInfo.el.getBoundingClientRect().top;
+      const box = mapEl.getBoundingClientRect();
+      const covered = Math.max(0, Math.min(box.height * 0.7, box.bottom - top));
+      // The top bar covers the map's top edge too: centre between the two.
+      return covered && Math.max(0, covered - Math.max(0, topBar.el.getBoundingClientRect().bottom - box.top));
+    });
+  }
   // The NPC empires you know: drawn now, every year, and whenever the shared world changes.
   const drawNpcs = () => controller.drawNpcs(territory);
   drawNpcs();

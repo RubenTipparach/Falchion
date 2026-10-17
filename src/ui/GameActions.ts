@@ -69,6 +69,8 @@ export interface GameQueries {
   targetStar(targetId: string): StarSystem;
   /** NPC worlds of the empires you know, to attack from the War Room. */
   warTargets(): WarTarget[];
+  /** The NPC factions you know and where you stand with each (the Relations tab). */
+  factions(): FactionView[];
   /** Empires you know: for missionaries and spies. */
   knownEmpires(): Array<{ name: string; tech: readonly string[] }>;
   /** Is one of our ships inside this empire's space? */
@@ -94,6 +96,21 @@ export interface GameQueries {
   saleValue(goods: number, from: StarSystem, market: Market): number;
   /** Storage caps for each resource. */
   caps(): Partial<Record<Resource, number>>;
+}
+
+/** A known NPC faction as the Relations tab shows it. */
+export interface FactionView {
+  readonly id: string;
+  readonly name: string;
+  readonly color: string;
+  readonly blurb: string;
+  readonly tier: number;
+  readonly home: StarSystem;
+  readonly worlds: number;
+  readonly fleets: number;
+  /** Your standing with it, −100 to +100, and where it drifts back to. */
+  readonly standing: number;
+  readonly disposition: number;
 }
 
 /** An NPC world the War Room can attack. */
@@ -177,6 +194,8 @@ export interface GameActions {
   loadGoods(fleetId: string): void;
   /** Sell a fleet's trade goods at the market it is at. */
   sellGoods(fleetId: string): void;
+  /** Pay a known NPC faction tribute for better standing. */
+  sendTribute(npcId: string): void;
   /** Start a trade run to a market with a fleet ('dock': the docked freighters), or stop one (null). */
   tradeRun(groupId: string, to: StarSystem | null): void;
   foundFaith(name: string, tenets: string[]): void;

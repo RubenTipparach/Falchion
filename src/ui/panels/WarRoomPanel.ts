@@ -3,6 +3,7 @@ import type { Store } from '../../app/Store';
 import { DOCTRINES, SHIP_CLASSES } from '../../content/shipClasses';
 import type { Squadron } from '../../core/combat/Combat';
 import { BAND_MULT } from '../../core/combat/Combat';
+import { tierOf } from '../../core/npc/Reputation';
 import { Drawer } from '../Drawer';
 import type { CombatOutcome, FleetGroup, GameActions, GameQueries, WarTarget } from '../GameActions';
 import { locateButton, storesView } from '../widgets';
@@ -77,6 +78,8 @@ export class WarRoomPanel extends Drawer {
     this.targetId = target.id;
     const star = target.star;
     const targets = this.q.warTargets();
+    const factions = this.q.factions();
+    const standing = (npc: string) => { const f = factions.find((x) => x.id === npc); return f ? `${tierOf(f.standing).name} ${f.standing > 0 ? '+' : ''}${f.standing}` : ''; };
     const group = this.group();
     const here = this.groupsHere();
     const roster: Record<string, number> = Object.fromEntries((group?.ships ?? []).map((x) => [x.classId, x.count]));
@@ -92,7 +95,7 @@ export class WarRoomPanel extends Drawer {
     this.left.append(
       h('h4', {}, 'Target'),
       h('div', { class: 'target-list' }, ...targets.map((t) => h('button', { class: `option ${t.id === this.targetId ? 'active' : ''}`, onclick: () => { this.targetId = t.id; this.outcome = null; this.groupId = null; this.resetCommit(); this.render(); } },
-        h('b', {}, h('span', { class: 'doc-dot', style: `--doc:${t.color}` }), t.name), h('span', {}, `${t.owner} · strength ${t.tier} · ${this.q.groupsAt(t.star).length ? 'your ships are there' : 'planetary assault'}`), h('small', { class: 'muted' }, t.blurb)))),
+        h('b', {}, h('span', { class: 'doc-dot', style: `--doc:${t.color}` }), t.name), h('span', {}, `${t.owner} · strength ${t.tier} · ${standing(t.npc)} · ${this.q.groupsAt(t.star).length ? 'your ships are there' : 'planetary assault'}`), h('small', { class: 'muted' }, t.blurb)))),
       h('div', { class: 'row-between' }, h('span', { class: 'small' }, `Target location: `, h('b', {}, star.name)),
         locateButton(`Locate ${star.name}`, (closeUp) => { this.actions.select(star); this.actions.flyTo(star, closeUp); })),
       h('h4', {}, 'Enemy order of battle'),

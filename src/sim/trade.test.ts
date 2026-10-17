@@ -8,6 +8,7 @@ import { GOVERNMENTS, POLICIES, TENETS } from '../content/society';
 import { ALIEN_TECH, TECH_NODES } from '../content/techTree';
 import { EncounterResolver } from '../core/encounters/Encounters';
 import { goodsPrice, MAX_TRADE_DISTANCE, saleValue } from '../core/economy/Trade';
+import { marketFactor } from '../core/npc/Reputation';
 import { GalaxyModel } from '../core/galaxy/GalaxyModel';
 import { hexDistance } from '../core/hex/Hex';
 import { TechTree } from '../core/research/TechTree';
@@ -61,13 +62,17 @@ describe('trade goods', () => {
     expect(loaded.cargo).toBe(50);
     expect(s.state.empire.materials.goods).toBe(goods - 50);
     const trip = hexDistance(s.state.home.hex, to.hex);
+    const expected = s.saleValue(50, s.state.home, market);
+    const standing = s.standingWith(market.npc!);
     s.advanceTo(T + trip + 2);
     const l = s.state.loadouts[fleet.id];
     const sold = s.state.dispatches.find((d) => d.text.includes('sold 50 trade goods'));
     expect(sold?.text).toContain(to.name);
     expect(l.cargo ?? 0).toBe(0);
-    expect(sold!.text).toContain(`for ${s.saleValue(50, s.state.home, market)} credits`);
-    expect(s.saleValue(50, s.state.home, market)).toBeGreaterThanOrEqual(saleValue(50, trip, market.kind));
+    expect(sold!.text).toContain(`for ${expected} credits`);
+    expect(expected).toBe(Math.round(saleValue(50, trip, market.kind) * marketFactor(standing)));
+    // Trading with a faction warms it to you.
+    expect(s.standingWith(market.npc!)).toBeGreaterThan(standing);
     // Heading home for the next load.
     expect(fleet.id in s.state.loadouts && s.state.fleets.find((f) => f.id === fleet.id)!.movement.route.at(-1)).toEqual(s.state.home.hex);
   });

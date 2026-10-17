@@ -19,6 +19,7 @@ import { applyEffects, EMPTY_WORLD, type SharedEffect, type SharedWorld } from '
 import { DISCOVERY_RANGE, gridNpcsNear, HOME_TERRITORY, initialNpcState, nearNpc, npcById, spawnNpcs, territoryOf, worldDefense, type NpcDef } from '../core/npc/NpcCatalog';
 import { stepNpcs, type RaidTargets } from '../core/npc/NpcSim';
 import type { NpcRaid, NpcState } from '../core/npc/types';
+import { marketFactor, STANDING, standingOf, tierOf } from '../core/npc/Reputation';
 import { due, enqueue, Job } from '../core/construction/Construction';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
@@ -32,7 +33,7 @@ import type { GameState } from '../app/GameState';
 import type { Store } from '../app/Store';
 import type { World } from '../app/World';
 import { CLOCK } from '../app/WorldClock';
-import type { CombatOutcome, FleetGroup, WarTarget } from '../ui/GameActions';
+import type { CombatOutcome, FactionView, FleetGroup, WarTarget } from '../ui/GameActions';
 import type { StarDetails } from '../ui/StarInfoPanel';
 
 /** The shared world as an empire's simulation sees it: what it holds now, and where its changes go. */
@@ -66,6 +67,10 @@ function mergeShips(ships: readonly Squadron[]): Squadron[] {
   for (const x of ships) m.set(x.classId, (m.get(x.classId) ?? 0) + x.count);
   return [...m].filter(([, n]) => n > 0).map(([classId, count]) => ({ classId, count }));
 }
+
+/** The reputation chart samples standing every RELATIONS_EVERY years and keeps RELATIONS_KEEP samples. */
+const RELATIONS_EVERY = 5;
+const RELATIONS_KEEP = 120;
 
 const poolKey = (starId: string, resource: Resource) => `${starId}|${resource}`;
 const parsePool = (key: string) => { const i = key.lastIndexOf('|'); return { starId: key.slice(0, i), resource: key.slice(i + 1) as Resource }; };
@@ -907,7 +912,7 @@ export class EmpireSim {
     for (const { def, state } of this.knownNpcs()) {
       for (const c of state.colonies) {
         const star = this.starById(c.starId);
-        if (star && !c.capturedBy && !out.has(c.starId)) out.set(c.starId, { starId: c.starId, name: `${star.name} (${def.name})`, kind: 'npc' });
+        if (star && !c.capturedBy && !out.has(c.starId)) out.set(c.starId, { starId: c.starId, name: `${star.name} (${def.name})`, kind: 'npc', npc: def.id });
       }
     }
     for (const m of this.deps.markets?.() ?? []) if (!out.has(m.starId)) out.set(m.starId, m);
@@ -924,7 +929,9 @@ export class EmpireSim {
     const s = this.state;
     const at = this.starById(market.starId);
     const tradePct = tradePctOf({ ...s.economy, stock: s.empire.materials }, this.deps.economy, s.empire.research);
-    return at ? saleValue(goods, hexDistance(from.hex, at.hex), market.kind, tradePct) : 0;
+    // An NPC faction pays more the better you stand with it.
+    const factor = market.npc ? marketFactor(this.standingWith(market.npc)) : 1;
+    return at ? Math.round(saleValue(goods, hexDistance(from.hex, at.hex), market.kind, tradePct) * factor) : 0;
   };
 
   /** Where a fleet is on station, if it is. */
@@ -963,6 +970,7 @@ export class EmpireSim {
       empire: { ...s.empire, materials: { ...s.empire.materials, credits: s.empire.materials.credits + credits } },
       loadouts: { ...s.loadouts, [fleetId]: { ...l, cargo: 0, cargoFrom: undefined } },
     });
+    if (market.npc) this.changeStanding(market.npc, Math.min(STANDING.tradeMax, Math.max(1, Math.floor(l.cargo * STANDING.perGoods))));
     if (!quiet) this.dispatch(`${this.fleetName(fleetId)} sold ${l.cargo} trade goods at ${star.name} for ${credits} credits`, 'good');
     return credits;
   }
@@ -1078,6 +1086,8 @@ export class EmpireSim {
     const garrison = result.space ? result.space.survivors[1] : target.planet.garrison.ships;
     effects.push({ kind: 'npcColony', npc: target.npc, star: at.id, garrison, ...(result.captured ? { capturedBy: this.me } : {}) });
     if (result.space) for (const f of target.docked) effects.push({ kind: 'npcFleet', npc: target.npc, fleet: f, ships: [] });
+    const disposition = npcById(this.deps.galaxy, target.npc)?.archetype.disposition ?? 0;
+    effects.push({ kind: 'standing', npc: target.npc, player: this.me, delta: STANDING.assault + (result.captured ? STANDING.capture : 0), base: disposition });
     if (result.captured) {
       const planet = [...this.planets(at)].sort((a, b) => b.size - a.size || (a.id < b.id ? -1 : 1))[0];
       colonies = [...colonies, { name: planet?.name ?? at.name, biome: planet?.biome ?? 'barren', planetId: planet?.id, starId: at.id, size: planet?.size ?? 3, buildings: [] }];
@@ -1118,6 +1128,53 @@ export class EmpireSim {
 
   /** Known empires to send missionaries and spies to, with the technology spies can steal. */
   knownEmpires = (): Array<{ name: string; tech: readonly string[] }> => this.knownNpcs().map((n) => ({ name: n.def.name, tech: n.def.archetype.tech }));
+
+  factions = (): FactionView[] => this.knownNpcs().map(({ def, state }) => ({
+    id: def.id, name: def.name, color: def.color, blurb: def.archetype.blurb, tier: def.tier, home: def.home,
+    worlds: state.colonies.filter((c) => !c.capturedBy).length, fleets: state.fleets.length,
+    standing: this.standingWith(def.id), disposition: def.archetype.disposition,
+  }));
+
+  /** Your standing with an NPC faction (its disposition before anything happened). */
+  standingWith = (npcId: string): number => {
+    const npc = this.sharedWorld().npcs[npcId];
+    const def = npcById(this.deps.galaxy, npcId);
+    return npc && def ? standingOf(npc, this.me, def.archetype.disposition) : def?.archetype.disposition ?? 0;
+  };
+
+  protected changeStanding(npcId: string, delta: number): void {
+    const def = npcById(this.deps.galaxy, npcId);
+    if (def && delta) this.emit([{ kind: 'standing', npc: npcId, player: this.me, delta, base: def.archetype.disposition }]);
+  }
+
+  /** Pay a known faction tribute: credits and influence for better standing. */
+  sendTribute(npcId: string): void {
+    const s = this.state;
+    const known = this.knownNpcs().find((n) => n.def.id === npcId);
+    if (!known) return;
+    if (!canAfford(s.empire.materials, STANDING.tributeCost)) return this.dispatch(`Tribute to the ${known.def.name} needs ${STANDING.tributeCost.credits} credits and ${STANDING.tributeCost.influence} influence`, 'bad');
+    this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, STANDING.tributeCost) } });
+    this.changeStanding(npcId, STANDING.tribute);
+    this.dispatch(`Tribute sent to the ${known.def.name}: standing now ${this.standingWith(npcId)} (${tierOf(this.standingWith(npcId)).name})`, 'good');
+  }
+
+  /** Every few years, note where you stand with each known faction (the reputation chart). */
+  protected sampleRelations(year: number): void {
+    if (year % RELATIONS_EVERY !== 0) return;
+    const known = this.knownNpcs();
+    if (!known.length) return;
+    const prev = this.state.relations ?? { years: [], series: {} };
+    const keep = Math.max(0, prev.years.length + 1 - RELATIONS_KEEP);
+    const years = [...prev.years, year].slice(keep);
+    const series: Record<string, Array<number | null>> = {};
+    const ids = new Set([...Object.keys(prev.series), ...known.map((n) => n.def.id)]);
+    for (const id of ids) {
+      const old = prev.series[id] ?? prev.years.map(() => null);
+      const now = known.some((n) => n.def.id === id) ? this.standingWith(id) : null;
+      series[id] = [...old, now].slice(keep);
+    }
+    this.deps.store.update({ relations: { years, series } });
+  }
 
   /** NPC worlds you can attack from the War Room: their garrison, with any raiders at home. */
   warTargets = (): WarTarget[] => {
@@ -1168,7 +1225,10 @@ export class EmpireSim {
       if (d && spots.some((h) => nearNpc(d, h, DISCOVERY_RANGE))) found.set(d.id, d);
     }
     if (!found.size) return [];
-    this.emit([...found.values()].map((d) => ({ kind: 'discover' as const, npc: w.npcs[d.id] ?? initialNpcState(d, s.turn), by: this.me })));
+    this.emit([...found.values()].flatMap((d) => [
+      { kind: 'discover' as const, npc: w.npcs[d.id] ?? initialNpcState(d, s.turn), by: this.me },
+      { kind: 'standing' as const, npc: d.id, player: this.me, delta: 0, base: d.archetype.disposition },
+    ]));
     return [...found.values()].map((d) => `First contact: the ${d.name} at ${d.home.name}. ${d.archetype.blurb}`);
   }
 
@@ -1205,6 +1265,7 @@ export class EmpireSim {
         for (const c of result.captured[1]) delta.push({ classId: c.classId, count: c.count });
         this.adjustGroup(defender.id, delta, { ammo: defender.stores.ammo - fire.spent });
         this.emit([{ kind: 'npcFleet', npc: def.id, fleet: raid.fleet, ships: result.survivors[0] }]);
+        this.changeStanding(def.id, STANDING.repel);
         const mine = -delta.filter((d) => d.count < 0).reduce((n, d) => n + d.count, 0);
         const theirs = shipTotal(raid.ships) - shipTotal(result.survivors[0]);
         const text = result.winner === 1 ? `${defender.name} beat off ${raiders} at ${place}: ${theirs} of theirs destroyed, ${mine} of ours lost`
@@ -1304,6 +1365,7 @@ export class EmpireSim {
       engaged: [],
       dispatches: news.length ? [...news, ...s.dispatches].slice(0, 40) : s.dispatches,
     });
+    this.sampleRelations(next);
     // A guest's browser runs the NPCs itself (the server does for everyone else).
     if (this.deps.npcs === 'local') {
       const r = stepNpcs(this.sharedWorld(), next, this.deps.galaxy, [this.raidTargets()]);

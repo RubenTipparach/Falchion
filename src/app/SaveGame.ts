@@ -5,7 +5,7 @@ import { LEGACY_MATERIALS, RESOURCES } from '../content/resources';
 /** Fields that persist between sessions; the rest is view state or derived from the world. */
 export const SAVED = [
   'turn', 'empire', 'economy', 'designs', 'shipyardClass', 'hiddenTraits', 'explored', 'openedCrates', 'collectedCaches',
-  'fleets', 'loadouts', 'dockSpent', 'depots', 'construction', 'lastReport', 'dispatches', 'engaged', 'identity', 'home',
+  'fleets', 'loadouts', 'dockSpent', 'depots', 'construction', 'lastReport', 'dispatches', 'engaged', 'identity', 'home', 'relations',
 ] as const satisfies ReadonlyArray<keyof GameState>;
 
 /** The persistent fields of a save, as a patch for the game state (view state untouched). */

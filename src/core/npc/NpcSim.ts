@@ -4,6 +4,7 @@ import { Rng, hashSeed } from '../rng/Rng';
 import type { SharedWorld } from '../world/SharedWorld';
 import { buildEvery, garrisonHulls, npcById, RAID_RANGE, raiderHulls, shipsFor, type NpcDef } from './NpcCatalog';
 import type { NpcFleet, NpcRaid, NpcState } from './types';
+import { FRIENDLY, HOSTILE, STANDING, standingOf } from './Reputation';
 
 /**
  * The NPC empires' year: pure and deterministic (seeded by NPC id and year), so the server and a
@@ -62,10 +63,23 @@ function stepOne(state: NpcState, def: NpcDef, year: number, players: readonly R
     });
     s = { ...s, fleets, colonies, built, lastBuilt: year };
   }
+  // Standing drifts back toward the faction's disposition.
+  const disposition = def.archetype.disposition;
+  if (s.knownBy.length && year % STANDING.driftEvery === 0) {
+    const standing: Record<string, number> = {};
+    for (const p of s.knownBy) {
+      const now = standingOf(s, p, disposition);
+      standing[p] = now + Math.sign(disposition - now) * Math.min(STANDING.drift, Math.abs(disposition - now));
+    }
+    s = { ...s, standing };
+  }
+  // Friends are left alone; the hostile make it come sooner.
+  const enemies = s.knownBy.filter((p) => standingOf(s, p, disposition) < FRIENDLY);
+  const fury = enemies.some((p) => standingOf(s, p, disposition) <= HOSTILE) ? 1.5 : 1;
   const fleets = s.fleets.filter((f) => totalShips(f) > 0).map((f): NpcFleet => {
     if (f.mission === 'home') {
-      if (!holdsHome || !rng.chance(def.archetype.aggression)) return f;
-      const target = pickTarget(def, s.knownBy, players, rng);
+      if (!holdsHome || !enemies.length || !rng.chance(def.archetype.aggression * fury)) return f;
+      const target = pickTarget(def, enemies, players, rng);
       return target ? { ...f, mission: 'raid', from: def.home.hex, to: target.hex, depart: year, target: target.player } : f;
     }
     if (npcArrival(f) > year) return f;

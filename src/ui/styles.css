@@ -654,7 +654,8 @@ button.chat-mention:hover { filter: brightness(1.25); }
   .star-card::before { content: ''; position: sticky; top: 0; display: block; width: 36px; height: 4px; margin: -2px auto 8px; border: 0; border-radius: 2px; background: var(--line-strong); }
   .star-card::after { display: none; }
   .star-card h3 { font-size: 18px; }
-  .planet-portrait { width: 110px; height: 110px; margin-top: 6px; }
+  /* The planet itself is in view above the sheet: no second picture of it. */
+  .planet-portrait { display: none; }
   .star-card .actions .btn, .star-card .actions button { min-height: 40px; }
   .hud { top: calc(var(--bar) + env(safe-area-inset-top, 0px) + 6px); bottom: auto; left: 8px; max-width: 60vw; }
   .hud-panel { padding: 5px 8px; gap: 3px; font-size: 11px; }
@@ -727,3 +728,17 @@ button.chat-mention:hover { filter: brightness(1.25); }
 .field-bar { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
 .field-bar i { display: block; height: 100%; border-radius: 3px; }
 .cargo { margin-top: 6px; }
+
+/* Relations: the reputation chart and faction cards. */
+.rep-chart svg { width: 100%; height: auto; display: block; }
+.rep-chart .grid { stroke: rgba(255, 255, 255, 0.07); }
+.rep-chart .zero { stroke: rgba(255, 255, 255, 0.22); stroke-dasharray: 3 3; }
+.rep-chart .tick { fill: var(--muted); font: 10px var(--font-mono); }
+.rep-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; font-size: 12px; }
+.rep-legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.tier-badge { font: 600 11px var(--font-mono); padding: 2px 8px; border-radius: 10px; color: var(--tier); border: 1px solid var(--tier); white-space: nowrap; }
+.standing-bar { position: relative; height: 8px; margin: 8px 0 4px; border-radius: 4px; background: linear-gradient(90deg, #ff5d5d55, #ffb34744 25%, #c9d1dc33 50%, #9be29b44 75%, #7cff9b55); }
+.standing-bar i { position: absolute; top: -3px; bottom: -3px; width: 2px; }
+.standing-bar .zero { left: 50%; background: rgba(255, 255, 255, 0.3); }
+.standing-bar .mark { width: 10px; height: 10px; top: -1px; border-radius: 50%; transform: translateX(-50%); box-shadow: 0 0 6px rgba(0, 0, 0, 0.6); }
+.standing-bar .home { width: 0; border-left: 2px dotted rgba(255, 255, 255, 0.55); }

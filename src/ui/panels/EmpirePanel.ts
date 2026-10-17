@@ -9,16 +9,18 @@ import {
 import { FREIGHTER } from '../../core/economy/Trade';
 import { hexDistance } from '../../core/hex/Hex';
 import type { StarSystem } from '../../core/galaxy/GalaxyModel';
+import { STANDING, TIERS, tierOf } from '../../core/npc/Reputation';
+import type { Relations } from '../../app/GameState';
 import { Drawer } from '../Drawer';
-import type { GameActions, GameQueries } from '../GameActions';
+import type { FactionView, GameActions, GameQueries } from '../GameActions';
 import { icon, resourceIcon } from '../icons';
 import { BIOMES } from '../../content/biomes';
 import { slotsOf } from '../../content/buildings';
 import type { Planet } from '../../core/galaxy/Planets';
 import { clear, fmt, h } from '../dom';
 
-type Tab = 'overview' | 'colonies' | 'trade' | 'politics' | 'religion' | 'intel';
-const TABS: Array<[Tab, string]> = [['overview', 'Overview'], ['colonies', 'Colonies'], ['trade', 'Trade'], ['politics', 'Politics'], ['religion', 'Religion'], ['intel', 'Espionage']];
+type Tab = 'overview' | 'colonies' | 'trade' | 'relations' | 'politics' | 'religion' | 'intel';
+const TABS: Array<[Tab, string]> = [['overview', 'Overview'], ['colonies', 'Colonies'], ['trade', 'Trade'], ['relations', 'Relations'], ['politics', 'Politics'], ['religion', 'Religion'], ['intel', 'Espionage']];
 
 /** Exploitation: stockpile, trade goods, government and factions, faith, spy networks. */
 export class EmpirePanel extends Drawer {
@@ -47,7 +49,7 @@ export class EmpirePanel extends Drawer {
     this.tabsEl.replaceChildren(...TABS.map(([id, label]) => h('button', { class: `seg-btn ${this.tab === id ? 'active' : ''}`, onclick: () => { this.tab = id; this.render(); } }, label)));
     clear(this.content);
     const views: Record<Tab, () => HTMLElement[]> = {
-      overview: () => this.overview(), colonies: () => this.colonies(), trade: () => this.trade(), politics: () => this.politics(), religion: () => this.religion(), intel: () => this.intel(),
+      overview: () => this.overview(), colonies: () => this.colonies(), trade: () => this.trade(), relations: () => this.relations(), politics: () => this.politics(), religion: () => this.religion(), intel: () => this.intel(),
     };
     this.content.append(...views[this.tab]());
   }
@@ -156,6 +158,33 @@ export class EmpirePanel extends Drawer {
     ];
   }
 
+  /** Reputation: a chart of your standing with every known NPC faction over time, then each faction. */
+  private relations(): HTMLElement[] {
+    const s = this.store.state;
+    const factions = this.q.factions();
+    if (!factions.length) return [h('p', { class: 'muted' }, 'You have not met any NPC factions yet. Your home\'s neighbours make contact within a year; others when your fleets come near their space.')];
+    const cost = STANDING.tributeCost;
+    const canPay = s.empire.materials.credits >= cost.credits && s.empire.materials.influence >= cost.influence;
+    return [
+      h('p', { class: 'muted' }, `Where you stand with each faction, from −100 to +100. Selling them trade goods and paying tribute raise it; fighting their raiders lowers it a little and attacking their worlds a lot. It drifts back toward each faction's nature over time. Cordial and Allied factions do not raid you, Hostile ones raid more, and their markets pay more the better you stand.`),
+      h('section', { class: 'card' }, h('h4', {}, 'Reputation'), reputationChart(s.relations, factions, s.turn)),
+      ...factions.map((f) => {
+        const tier = tierOf(f.standing);
+        const pct = (f.standing + 100) / 2;
+        return h('section', { class: 'card npc-faction' },
+          h('div', { class: 'row-between' },
+            h('div', {}, h('span', { class: 'doc-dot', style: `--doc:${f.color}` }), h('b', {}, f.name), h('span', { class: 'muted small' }, ` · strength ${f.tier} · ${f.worlds} world${f.worlds === 1 ? '' : 's'} · ${f.fleets} raider fleet${f.fleets === 1 ? '' : 's'}`)),
+            h('span', { class: 'tier-badge', style: `--tier:${tier.color}` }, `${tier.name} ${f.standing > 0 ? '+' : ''}${f.standing}`)),
+          h('div', { class: 'standing-bar', title: `Standing ${f.standing} (drifts toward ${f.disposition})` },
+            h('i', { class: 'zero' }), h('i', { class: 'mark', style: `left:${pct}%; background:${tier.color}` }), h('i', { class: 'home', style: `left:${(f.disposition + 100) / 2}%` })),
+          h('p', { class: 'small muted' }, `${tier.blurb} ${f.blurb}`),
+          h('div', { class: 'row' },
+            h('button', { class: 'chip', disabled: !canPay, title: `Costs ${cost.credits} credits and ${cost.influence} influence`, onclick: () => this.actions.sendTribute(f.id) }, `Send tribute (+${STANDING.tribute}) · ${cost.credits} CR, ${cost.influence} INF`),
+            h('button', { class: 'chip', onclick: () => { this.actions.select(f.home); this.actions.flyTo(f.home); } }, `Locate ${f.home.name}`)));
+      }),
+    ];
+  }
+
   private politics(): HTMLElement[] {
     const s = this.store.state;
     const research = s.empire.research;
@@ -237,4 +266,38 @@ export class EmpirePanel extends Drawer {
       })),
     ];
   }
+}
+
+/** Standing over time, one line per faction, on bands for the tiers. The last point is now. */
+function reputationChart(rel: Relations | undefined, factions: readonly FactionView[], turn: number): HTMLElement {
+  const W = 600, H = 200, L = 34, R = 8, T = 8, B = 22;
+  const years = [...(rel?.years ?? [])];
+  const series = (id: string): Array<number | null> => [...(rel?.series[id] ?? years.map(() => null))];
+  if (years.at(-1) !== turn) years.push(turn);
+  const lines = factions.map((f) => {
+    const v = series(f.id);
+    while (v.length < years.length - 1) v.unshift(null);
+    return { f, v: [...v.slice(0, years.length - 1), f.standing] };
+  });
+  const x0 = years[0], x1 = Math.max(years[0] + 1, years.at(-1)!);
+  const X = (y: number) => L + ((y - x0) / (x1 - x0)) * (W - L - R);
+  const Y = (v: number) => T + ((100 - v) / 200) * (H - T - B);
+  const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+  const bands = TIERS.map((t, i) => {
+    const top = i === 0 ? 100 : TIERS[i - 1].min, bottom = Math.max(-100, t.min);
+    return `<rect x="${L}" y="${Y(top)}" width="${W - L - R}" height="${Y(bottom) - Y(top)}" fill="${t.color}" opacity="0.06"/><text x="${L - 4}" y="${(Y(top) + Y(bottom)) / 2 + 3}" text-anchor="end" class="tick">${t.name.slice(0, 4)}</text>`;
+  }).join('');
+  const grid = [50, 10, -10, -50].map((v) => `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" class="grid"/>`).join('') + `<line x1="${L}" x2="${W - R}" y1="${Y(0)}" y2="${Y(0)}" class="zero"/>`;
+  const paths = lines.map(({ f, v }) => {
+    let d = '', pen = false;
+    v.forEach((p, i) => { if (p === null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${X(years[i]).toFixed(1)},${Y(p).toFixed(1)}`; pen = true; });
+    const last = v.at(-1)!;
+    return `<path d="${d}" fill="none" stroke="${f.color}" stroke-width="2" stroke-linejoin="round"/><circle cx="${X(years.at(-1)!)}" cy="${Y(last)}" r="3.5" fill="${f.color}"><title>${esc(f.name)}: ${last}</title></circle>`;
+  }).join('');
+  const axis = `<text x="${L}" y="${H - 6}" class="tick">Y${x0}</text><text x="${W - R}" y="${H - 6}" text-anchor="end" class="tick">Y${turn}</text>`;
+  const chart = h('div', { class: 'rep-chart' });
+  chart.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Standing with each faction over time">${bands}${grid}${paths}${axis}</svg>`;
+  return h('div', {}, chart,
+    h('div', { class: 'rep-legend' }, ...factions.map((f) => h('span', {}, h('i', { style: `background:${f.color}` }), f.name))),
+    years.length < 3 ? h('p', { class: 'small muted' }, 'The chart fills in as the years pass: a point every five years.') : '');
 }

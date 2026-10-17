@@ -51,6 +51,15 @@ export interface GameState {
   readonly dispatches: ReadonlyArray<{ readonly turn: number; readonly text: string; readonly tone?: 'good' | 'bad' }>;
   /** War Room targets already engaged this turn. */
   readonly engaged: readonly string[];
+  /** Reputation history for the chart: standing with each known NPC faction, sampled every few years. */
+  readonly relations?: Relations;
+}
+
+export interface Relations {
+  /** Years of the samples (shared by every faction's series). */
+  readonly years: readonly number[];
+  /** Faction id -> standing at each sampled year (null before it was met). */
+  readonly series: Readonly<Record<string, ReadonlyArray<number | null>>>;
 }
 
 export function formatTurn(turn: number): string {

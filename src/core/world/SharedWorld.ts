@@ -1,6 +1,7 @@
 import type { Squadron } from '../combat/Combat';
 import { fieldLeft, type AsteroidField, type FieldState } from '../galaxy/Asteroids';
 import type { NpcState } from '../npc/types';
+import { clampStanding } from '../npc/Reputation';
 
 /**
  * The state the whole galaxy shares: the NPC empires that have been discovered and the asteroid
@@ -33,6 +34,8 @@ export type SharedEffect =
   | { readonly kind: 'npcFleet'; readonly npc: string; readonly fleet: string; readonly ships: readonly Squadron[] }
   /** An NPC world after an assault: its garrison now, and who took it if it fell. */
   | { readonly kind: 'npcColony'; readonly npc: string; readonly star: string; readonly garrison: readonly Squadron[]; readonly capturedBy?: string }
+  /** A player's standing with an NPC changed by `delta` (clamped to ±100). `base`: where it starts if unrecorded. */
+  | { readonly kind: 'standing'; readonly npc: string; readonly player: string; readonly delta: number; readonly base: number }
   /** The NPC empires after a year of their own (stepped by whoever runs them: the server, or a guest's browser). */
   | { readonly kind: 'npcStep'; readonly npcs: Readonly<Record<string, NpcState>>; readonly tick: number };
 
@@ -61,6 +64,13 @@ export function applyEffects(world: SharedWorld, effects: readonly SharedEffect[
         const ships = e.ships.filter((s) => s.count > 0);
         const fleets = ships.length ? n.fleets.map((f) => (f.id === e.fleet ? { ...f, ships } : f)) : n.fleets.filter((f) => f.id !== e.fleet);
         npcs = { ...npcs, [e.npc]: { ...n, fleets } };
+        break;
+      }
+      case 'standing': {
+        const n = npcs[e.npc];
+        if (!n) break;
+        const now = clampStanding((n.standing?.[e.player] ?? e.base) + e.delta);
+        npcs = { ...npcs, [e.npc]: { ...n, standing: { ...n.standing, [e.player]: now } } };
         break;
       }
       case 'npcStep': {

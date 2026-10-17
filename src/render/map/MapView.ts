@@ -75,8 +75,36 @@ export class MapView {
     this.renderer.setAnimationLoop(this.frame);
   }
 
+  /** Pixels of the view's bottom edge covered by a panel (a phone's bottom sheet), read each frame. */
+  private bottomInset: (() => number) | null = null;
+  private insetShown = 0;
+
+  /**
+   * Keep what the camera looks at centred in the part of the screen a panel leaves open: the
+   * projection's centre moves up by half the covered height (an off-axis view, so nothing is
+   * scaled and picking still lines up).
+   */
+  setBottomInset(fn: (() => number) | null): void {
+    this.bottomInset = fn;
+  }
+
+  private applyInset(dt: number): void {
+    const want = this.bottomInset?.() ?? 0;
+    if (Math.abs(want - this.insetShown) < 0.5 && (want !== 0 || this.insetShown === 0)) return;
+    this.insetShown += (want - this.insetShown) * Math.min(1, dt * 10);
+    if (Math.abs(want - this.insetShown) < 0.5) this.insetShown = want;
+    this.offsetCamera();
+  }
+
+  private offsetCamera(): void {
+    const { clientWidth: w, clientHeight: h } = this.opts.container;
+    if (this.insetShown < 0.5) this.camera.clearViewOffset();
+    else this.camera.setViewOffset(w, h, 0, this.insetShown / 2, w, h);
+  }
+
   private readonly frame = (): void => {
     const dt = Math.min(0.1, this.clock.getDelta());
+    this.applyInset(dt);
     this.controller.update(dt);
     const view: ViewState = {
       camera: this.camera,
@@ -100,6 +128,7 @@ export class MapView {
   private readonly resize = (): void => {
     const { clientWidth: w, clientHeight: h } = this.opts.container;
     this.camera.aspect = w / Math.max(1, h);
+    this.offsetCamera();
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.labelRenderer.setSize(w, h);

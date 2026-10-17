@@ -30,6 +30,21 @@ function empire(id: string, shared: SharedLink, local = false) {
 }
 
 describe('NPC empires in an empire’s game', () => {
+  it('tribute buys standing; the chart samples it every five years', () => {
+    const sim = empire('888888888888888888', snapshotLink(EMPTY_WORLD));
+    sim.skipYear();
+    const f = sim.factions()[0];
+    const credits = sim.state.empire.materials.credits;
+    sim.sendTribute(f.id);
+    expect(sim.standingWith(f.id)).toBe(f.standing + 8);
+    expect(sim.state.empire.materials.credits).toBe(credits - 200);
+    for (let i = 0; i < 12; i++) sim.skipYear();
+    const rel = sim.state.relations!;
+    expect(rel.years.length).toBeGreaterThanOrEqual(2);
+    expect(rel.years.every((y) => y % 5 === 0)).toBe(true);
+    expect(rel.series[f.id].at(-1)).toBe(sim.standingWith(f.id));
+  });
+
   const ID = '777777777777777777';
 
   it('the neighbours of your home are met in the first year, and wake for everyone', () => {
@@ -101,6 +116,8 @@ describe('NPC empires in an empire’s game', () => {
     const held = link.world().npcs[target.npc].colonies.find((c) => c.starId === target.star.id)!;
     expect(held.capturedBy).toBe(ID);
     expect(sim.warTargets().some((t) => t.id === target.id)).toBe(false);
+    // They will not forget it.
+    expect(sim.standingWith(target.npc)).toBeLessThanOrEqual(-40);
     // Engaged once a year.
     expect(sim.engage(target.id, ships, id)).toBeNull();
   });

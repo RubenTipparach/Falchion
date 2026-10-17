@@ -19,18 +19,8 @@ The server SHALL record events as rows of the database's event table, in the ord
 - **WHEN** a command is refused with the error "no colony ship"
 - **THEN** its event records `ok` as false and the error text, and it is read back with the other events
 
-### Requirement: Player actions recorded
-The server SHALL record the following player actions:
-- every command its rules applied or refused, with the world time and client time the rules ran with;
-- foundings;
-- catch-ups of the yearly tick by more than one year;
-- battles and pursuits between players;
-- first contacts;
-- diplomatic actions that took effect;
-- NPC empires discovered;
-- NPC worlds captured.
-
-It SHALL NOT record orders the rules never ran (rate-limited, no empire). A failure to record SHALL NOT fail the order or the yearly tick.
+### Requirement: Orders recorded
+The server SHALL record every command its rules applied or refused, with the world time and client time the rules ran with. It SHALL NOT record orders the rules never ran (rate-limited, no empire). A failure to record SHALL NOT fail the order or the yearly tick.
 
 #### Scenario: Order applied
 - **WHEN** a player's order is applied
@@ -39,6 +29,20 @@ It SHALL NOT record orders the rules never ran (rate-limited, no empire). A fail
 #### Scenario: Log unavailable
 - **WHEN** recording fails while an order is applied
 - **THEN** the order still succeeds and the failure is reported in the server log
+
+### Requirement: Player milestones recorded
+The server SHALL record the following player milestones:
+- foundings;
+- catch-ups of the yearly tick by more than one year;
+- battles and pursuits between players;
+- first contacts;
+- diplomatic actions that took effect;
+- NPC empires discovered;
+- NPC worlds captured.
+
+#### Scenario: Battle at sea
+- **WHEN** two players' fleets fight in a world year
+- **THEN** a `battle` event with one player as actor and the other as subject is recorded
 
 ### Requirement: NPC decisions recorded
 The server SHALL record each decision of an NPC empire, with a line of text explaining it and the player it is aimed at, if any. Decisions are:

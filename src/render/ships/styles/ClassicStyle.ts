@@ -1,11 +1,13 @@
 import type { ShipKit } from '../ShipKit';
 import type { ShipStyleGenerator } from '../ShipStyleGenerator';
+import { classicAccent } from './accents';
 
 /** Aesthetic/classic silhouettes: saucer cruisers, finned rockets and sleek yachts. */
 export const ClassicStyle: ShipStyleGenerator = {
   id: 'classic',
   name: 'Aesthetic / Classic',
   description: 'Saucer cruisers, retro rockets and elegant yachts.',
+  accent: classicAccent,
   build(kit: ShipKit) {
     const variant = kit.rng.pick(['saucer', 'rocket', 'yacht'] as const);
     if (variant === 'saucer') buildSaucer(kit);

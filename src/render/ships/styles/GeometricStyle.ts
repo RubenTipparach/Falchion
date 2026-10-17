@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { ShipKit } from '../ShipKit';
 import type { ShipStyleGenerator } from '../ShipStyleGenerator';
+import { geometricAccent } from './accents';
 
 const SOLIDS = [
   (r: number) => new THREE.OctahedronGeometry(r),
@@ -15,6 +16,7 @@ export const GeometricStyle: ShipStyleGenerator = {
   id: 'geometric',
   name: 'Simple Geometry',
   description: 'Polyhedra, rings and satellites in strict symmetry.',
+  accent: geometricAccent,
   flatShading: true,
   build(kit: ShipKit) {
     const { L, B, rng, mat } = kit;

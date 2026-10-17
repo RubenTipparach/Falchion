@@ -17,6 +17,8 @@ export interface EmpireIdentity {
   /** Map colour for territory, fleets and labels, as #rrggbb. */
   readonly color: string;
   readonly flag: Flag;
+  /** The ship style the empire was founded with (always available to it). */
+  readonly shipStyle?: string;
 }
 
 /** What the founding screen chooses from (src/content/heraldry.ts). */
@@ -28,6 +30,8 @@ export interface HeraldryTables {
   readonly titles: readonly string[];
   readonly adjectives: readonly string[];
   readonly nouns: readonly string[];
+  /** Ship styles an empire can be founded with. */
+  readonly shipStyles?: readonly string[];
 }
 
 export const NAME_MAX = 40;
@@ -52,7 +56,8 @@ export function randomEmpireName(rng: Rng, t: HeraldryTables): string {
 export function suggestIdentity(seed: number, player: string, capital: string, t: HeraldryTables): EmpireIdentity {
   const rng = new Rng(hashSeed(seed, 'identity', player));
   const color = rng.pick(t.colors);
-  return { name: randomEmpireName(rng, t), ruler: player, title: rng.pick(t.titles), capital, color, flag: randomFlag(rng, t, color) };
+  const id = { name: randomEmpireName(rng, t), ruler: player, title: rng.pick(t.titles), capital, color, flag: randomFlag(rng, t, color) };
+  return t.shipStyles?.length ? { ...id, shipStyle: rng.pick(t.shipStyles) } : id;
 }
 
 /** Single-line text: no control characters or angle brackets, collapsed spaces, bounded. */
@@ -77,6 +82,7 @@ export function cleanIdentity(raw: unknown, t: HeraldryTables): EmpireIdentity |
     capital: cleanText(r.capital) || 'Capital',
     color,
     flag: cleanFlag(r.flag, t, color),
+    ...(typeof r.shipStyle === 'string' && t.shipStyles?.includes(r.shipStyle) ? { shipStyle: r.shipStyle } : {}),
   };
 }
 

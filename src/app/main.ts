@@ -176,6 +176,8 @@ async function bootstrap(): Promise<void> {
       designFor: controller.designFor,
       effectiveDesign: controller.effectiveDesign,
       unlockedTraits: controller.unlockedTraits,
+      unlockedStyles: controller.unlockedStyles,
+      foundingStyle: controller.foundingStyle,
       buildDiscount: () => Math.min(40, controller.bonus('build')),
     }),
     research: new ResearchPanel(store, controller, tree, BRANCHES, DOMAINS, economyTables),

@@ -42,4 +42,15 @@ describe('ship generators', () => {
     styles.register(custom);
     expect(factory.create({ ...DEFAULT_DESIGN, style: 'test-blob' }).parts).toEqual([{ type: 'hull', x: 0, y: 0, z: 0 }]);
   });
+
+  it('every style can be mixed into every other: its pieces are added, deterministically', () => {
+    for (const s of styles.list().filter((x) => x.accent)) {
+      for (const o of styles.list().filter((x) => x.accent && x.id !== s.id)) {
+        const base = factory.create({ ...DEFAULT_DESIGN, style: s.id }).parts;
+        const mixed = factory.create({ ...DEFAULT_DESIGN, style: s.id, blend: [o.id] }).parts;
+        expect(mixed.length, `${s.id}+${o.id}`).toBeGreaterThan(base.length);
+        expect(factory.create({ ...DEFAULT_DESIGN, style: s.id, blend: [o.id] }).parts).toEqual(mixed);
+      }
+    }
+  });
 });

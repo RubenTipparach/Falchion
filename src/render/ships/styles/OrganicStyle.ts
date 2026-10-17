@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import type { ShipKit } from '../ShipKit';
 import type { ShipStyleGenerator } from '../ShipStyleGenerator';
+import { organicAccent } from './accents';
 
 /** Grown, asymmetric-feeling bodies: bulbous lathe hulls, trailing tendrils, fins and sacs. */
 export const OrganicStyle: ShipStyleGenerator = {
   id: 'organic',
   name: 'Organic',
   description: 'Living hulls with tendrils, fins and glowing sacs.',
+  accent: organicAccent,
   build(kit: ShipKit) {
     const { L, B, rng, mat } = kit;
     const freq = rng.range(2, 5), phase = rng.range(0, 6), bulge = rng.range(0.15, 0.35);

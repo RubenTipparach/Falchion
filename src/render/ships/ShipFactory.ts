@@ -36,6 +36,8 @@ export class ShipFactory {
     const kit = new ShipKit(design, { flat: style.flatShading });
     style.build(kit);
     kit.freezeHull();
+    // Styles mixed in from research add their signature pieces to this hull.
+    for (const id of design.blend ?? []) if (id !== style.id) this.styles.get(id)?.accent?.(kit);
     for (const id of design.traits) this.traits.get(id)?.apply(kit);
     const model = kit.finish();
     // Safety net for any style or trait: every solid part faces outward, normals included.

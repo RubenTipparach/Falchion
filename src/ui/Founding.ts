@@ -1,3 +1,4 @@
+import { SHIP_STYLES } from '../content/shipStyles';
 import { EmpireIdentity, Flag, HeraldryTables, NAME_MAX, cleanIdentity, randomEmpireName, randomFlag } from '../core/empire/Identity';
 import { Rng } from '../core/rng/Rng';
 import { FLAG_EMBLEMS, FLAG_FIELDS } from '../content/heraldry';
@@ -37,6 +38,7 @@ export function showFounding(start: EmpireIdentity, t: HeraldryTables, mode: 'fo
     const fieldRow = h('div', { class: 'flag-tiles' });
     const emblemRow = h('div', { class: 'flag-tiles' });
     const flagColorRows = [h('div', { class: 'swatches small' }), h('div', { class: 'swatches small' }), h('div', { class: 'swatches small' })];
+    const styleRow = h('div', { class: 'style-picks' });
     const error = h('p', { class: 'small red', hidden: true });
 
     const swatch = (c: string, active: boolean, pick: () => void, label: string) =>
@@ -65,6 +67,8 @@ export function showFounding(start: EmpireIdentity, t: HeraldryTables, mode: 'fo
         flagEl({ ...id.flag, field: f.id, emblem: 'none' }, 42))));
       emblemRow.replaceChildren(...FLAG_EMBLEMS.map((e) => h('button', { class: `flag-tile ${e.id === id.flag.emblem ? 'active' : ''}`, title: e.name, 'aria-label': `Emblem: ${e.name}`, onclick: () => setFlag({ emblem: e.id }) },
         flagEl({ ...id.flag, field: 'solid', emblem: e.id }, 42))));
+      styleRow.replaceChildren(...SHIP_STYLES.map((s) => h('button', { class: `style-pick ${s.id === id.shipStyle ? 'active' : ''}`, 'aria-pressed': s.id === id.shipStyle ? 'true' : 'false', onclick: () => set({ shipStyle: s.id }) },
+        h('b', {}, s.name), h('small', {}, s.blurb))));
       flagColorRows.forEach((row, i) => row.replaceChildren(...t.flagColors.map((c) =>
         swatch(c, c === id.flag.colors[i], () => setFlagColor(i as 0 | 1 | 2, c), `${['Field', 'Second', 'Emblem'][i]} colour ${c}`))));
     };
@@ -100,7 +104,9 @@ export function showFounding(start: EmpireIdentity, t: HeraldryTables, mode: 'fo
               h('small', { class: 'muted' }, 'Field'), flagColorRows[0],
               h('small', { class: 'muted' }, 'Second'), flagColorRows[1],
               h('small', { class: 'muted' }, 'Emblem'), flagColorRows[2])),
-            h('button', { class: 'btn ghost', onclick: (e: Event) => { e.preventDefault(); setFlag(randomFlag(rng, t, id.color)); } }, icon('dice'), ' Random flag'))),
+            h('button', { class: 'btn ghost', onclick: (e: Event) => { e.preventDefault(); setFlag(randomFlag(rng, t, id.color)); } }, icon('dice'), ' Random flag'),
+            // Your race's own way of building ships: research unlocks the others to mix in later.
+            mode === 'found' ? field('Ship style', h('small', { class: 'muted' }, 'Your race builds ships this way from the start. Research unlocks the other styles, which you can mix in to make your ships your own.'), styleRow) : '')),
         error,
         h('footer', {},
           mode === 'edit' ? h('button', { class: 'btn ghost', onclick: () => done(null) }, 'Cancel') : '',

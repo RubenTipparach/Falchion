@@ -1,3 +1,4 @@
+import { SHIP_STYLES } from '../../content/shipStyles';
 import type { GameState } from '../../app/GameState';
 import type { Store } from '../../app/Store';
 import { sciencePerTurn, EconomyTables } from '../../core/economy/Economy';
@@ -220,6 +221,7 @@ export class ResearchPanel extends Drawer {
 function grantText(g: Grant): string {
   switch (g.kind) {
     case 'trait': return `ship trait “${g.id}”`;
+    case 'style': return `ship style “${SHIP_STYLES.find((x) => x.id === g.id)?.name ?? g.id}”`;
     case 'chassis': return `ship class ${SHIP_CLASSES.find((c) => c.id === g.id)?.name ?? g.id}`;
     case 'part': return g.id.startsWith('gov:') ? `government option` : g.id === 'faith' ? 'founding a faith' : `part ${g.id}`;
     case 'biome': return `colonise ${g.id} worlds`;

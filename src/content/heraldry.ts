@@ -1,3 +1,4 @@
+import { SHIP_STYLES } from './shipStyles';
 import type { HeraldryTables } from '../core/empire/Identity';
 
 /* Choices for an empire's identity: colours, flag parts, ruler titles and name parts. */
@@ -73,4 +74,5 @@ export const EMPIRE_NAME_NOUNS: readonly string[] = [
 export const HERALDRY: HeraldryTables = {
   colors: EMPIRE_COLORS, flagColors: FLAG_COLORS, fields: FLAG_FIELDS, emblems: FLAG_EMBLEMS,
   titles: RULER_TITLES, adjectives: EMPIRE_NAME_ADJECTIVES, nouns: EMPIRE_NAME_NOUNS,
+  shipStyles: SHIP_STYLES.map((s) => s.id),
 };

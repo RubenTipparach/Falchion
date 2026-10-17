@@ -1,11 +1,13 @@
 import type { ShipKit } from '../ShipKit';
 import type { ShipStyleGenerator } from '../ShipStyleGenerator';
+import { utilitarianAccent } from './accents';
 
 /** Function over form: a truss spine with containers, radiators and a big engine block. */
 export const UtilitarianStyle: ShipStyleGenerator = {
   id: 'utilitarian',
   name: 'Utilitarian',
   description: 'Truss spines, cargo containers, radiators and cranes.',
+  accent: utilitarianAccent,
   build(kit: ShipKit) {
     const { L, B, rng, mat } = kit;
     kit.add(kit.box(B * 0.12, B * 0.12, L * 0.9, mat.detail), 'hull');

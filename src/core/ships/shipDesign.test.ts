@@ -17,4 +17,13 @@ describe('ShipDesign', () => {
   it('rejects garbage codes', () => {
     expect(() => decodeDesign('bm90LWEtZGVzaWdu')).toThrow();
   });
+
+  it('mixes in at most two other styles, never its own, and keeps them in the share code', () => {
+    const d = normalizeDesign({ ...DEFAULT_DESIGN, style: 'organic', blend: ['organic', 'classic', 'geometric', 'utilitarian'] });
+    expect(d.blend).toEqual(['classic', 'geometric']);
+    expect(decodeDesign(encodeDesign(d))).toEqual(d);
+    // Codes from before mixing still load.
+    const old = btoa(JSON.stringify(['Old', 'organic', 1, 1, 1, '#ffffff', '#000000', '#ff0000', 2, 2, []])).replace(/=+$/, '');
+    expect(decodeDesign(old).blend).toEqual([]);
+  });
 });

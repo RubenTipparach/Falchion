@@ -18,7 +18,12 @@ export interface ShipDesign {
   readonly weapons: number;
   /** Trait tags from research (e.g. 'hive-mind'), applied on top of any style. */
   readonly traits: readonly string[];
+  /** Other researched styles mixed in: their signature pieces on this style's hull. */
+  readonly blend?: readonly string[];
 }
+
+/** How many other styles one design can mix in. */
+export const MAX_BLEND = 2;
 
 export const DESIGN_LIMITS = {
   length: [0.5, 2],
@@ -51,15 +56,17 @@ export function normalizeDesign(d: ShipDesign): ShipDesign {
     engines: Math.round(clamp(d.engines, DESIGN_LIMITS.engines)),
     weapons: Math.round(clamp(d.weapons, DESIGN_LIMITS.weapons)),
     traits: [...new Set(d.traits)].sort(),
+    blend: [...new Set(d.blend ?? [])].filter((b) => b !== d.style).slice(0, MAX_BLEND),
   };
 }
 
-type Packed = [string, string, number, number, number, string, string, string, number, number, string[]];
+type Packed = [string, string, number, number, number, string, string, string, number, number, string[], string[]?];
 
 /** Compact, URL-safe share code. */
 export function encodeDesign(d: ShipDesign): string {
   const n = normalizeDesign(d);
   const packed: Packed = [n.name, n.style, n.seed, n.length, n.bulk, n.colors.primary, n.colors.secondary, n.colors.accent, n.engines, n.weapons, [...n.traits]];
+  if (n.blend?.length) packed.push([...n.blend]);
   const bytes = new TextEncoder().encode(JSON.stringify(packed));
   let bin = '';
   bytes.forEach((b) => (bin += String.fromCharCode(b)));
@@ -71,9 +78,10 @@ export function decodeDesign(code: string): ShipDesign {
   const bin = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
   const json = new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
   const p = JSON.parse(json) as Packed;
-  if (!Array.isArray(p) || p.length !== 11) throw new Error('Invalid ship design code');
+  if (!Array.isArray(p) || (p.length !== 11 && p.length !== 12)) throw new Error('Invalid ship design code');
   return normalizeDesign({
     name: p[0], style: p[1], seed: p[2], length: p[3], bulk: p[4],
     colors: { primary: p[5], secondary: p[6], accent: p[7] }, engines: p[8], weapons: p[9], traits: p[10],
+    blend: Array.isArray(p[11]) ? p[11].map(String) : [],
   });
 }

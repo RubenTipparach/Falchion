@@ -207,8 +207,8 @@ ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .slider { display: grid; grid-template-columns: 70px 1fr 36px; align-items: center; gap: 8px; font-size: 12px; margin: 3px 0; }
 .slider output { font: 11px var(--font-mono); text-align: right; }
 input[type='range'] { accent-color: var(--brass); width: 100%; min-width: 0; }
-.swatch { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-.swatch input { width: 30px; height: 24px; border: 0; background: none; padding: 0; }
+.color-pick { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.color-pick input { width: 30px; height: 24px; border: 0; background: none; padding: 0; }
 .palettes { display: flex; gap: 6px; flex-wrap: wrap; }
 .palette { width: 44px; height: 16px; border-radius: 3px; border: 1px solid var(--line); }
 .code, .field input { background: #050a14; border: 1px solid var(--line); color: var(--text); padding: 6px 8px; border-radius: 4px; font: 12px var(--font-mono); }
@@ -595,3 +595,16 @@ button.chat-mention:hover { filter: brightness(1.25); }
 .haul-chips { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }
 .haul-chip { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); }
 @media (prefers-reduced-motion: reduce) { .loot-gain, .loot-plus { animation-duration: 0.01s; } }
+
+/* Ship styles: your race's own, researched ones, and locked ones. */
+.style-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.style-btn.locked { opacity: 0.45; cursor: not-allowed; }
+.style-btn .ico { width: 12px; height: 12px; }
+.style-btn .own { font: 600 8px var(--font-display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--brass); }
+.ctl-group h4.sub { margin-top: 10px; }
+.trait .ico { width: 11px; height: 11px; margin-right: 3px; vertical-align: -1px; }
+.style-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.style-pick { display: grid; gap: 2px; text-align: left; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--raise); }
+.style-pick small { color: var(--muted); font-size: 11px; line-height: 1.3; }
+.style-pick.active { border-color: var(--brass); background: rgba(230, 180, 80, 0.1); }
+.style-pick.active b { color: var(--brass); }

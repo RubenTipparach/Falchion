@@ -6,7 +6,7 @@ import { RESOURCES, Resource } from '../../content/resources';
 import { DOCTRINES, SHIP_CLASSES, ShipClassDef, ShipRole } from '../../content/shipClasses';
 import { canAfford } from '../../core/economy/Economy';
 import type { TechTree } from '../../core/research/TechTree';
-import { DESIGN_LIMITS, ShipDesign, decodeDesign, encodeDesign } from '../../core/ships/ShipDesign';
+import { DESIGN_LIMITS, MAX_BLEND, ShipDesign, decodeDesign, encodeDesign } from '../../core/ships/ShipDesign';
 import type { ShipFactory, ShipGeneratorRegistry, ShipTraitRegistry } from '../../render/ships/ShipFactory';
 import type { ShipModel } from '../../render/ships/ShipKit';
 import { Drawer } from '../Drawer';
@@ -30,6 +30,9 @@ export interface ShipyardQueries {
   designFor(classId: string): ShipDesign;
   effectiveDesign(classId?: string): ShipDesign;
   unlockedTraits(): string[];
+  /** Styles the empire can build in (its own and researched ones), and its own. */
+  unlockedStyles(): string[];
+  foundingStyle(): string;
   buildDiscount(): number;
 }
 
@@ -210,8 +213,27 @@ export class ShipyardPanel extends Drawer {
   private renderControls(): void {
     const d = this.q.designFor(this.store.state.shipyardClass);
     clear(this.controlsEl);
-    const styleBtns = this.styles.list().map((s) =>
-      h('button', { class: `style-btn ${s.id === d.style ? 'active' : ''}`, title: s.description, onclick: () => this.set({ style: s.id }) }, s.name));
+    // Your race's style is always yours; research unlocks the others to build in or mix in.
+    const styles = this.q.unlockedStyles();
+    const own = this.q.foundingStyle();
+    const shown = styles.includes(d.style) ? d.style : own;
+    const blend = (d.blend ?? []).filter((b) => styles.includes(b) && b !== shown);
+    const needs = (id: string) => this.tree.styleNode(id)?.name ?? 'research';
+    const styleBtns = this.styles.list().map((s) => {
+      const has = styles.includes(s.id);
+      return h('button', { class: `style-btn ${s.id === shown ? 'active' : ''} ${has ? '' : 'locked'}`, disabled: !has,
+        title: has ? `${s.description}${s.id === own ? ' Your race\'s own style.' : ''}` : `Locked: research ${needs(s.id)} to build in this style`,
+        onclick: () => this.set({ style: s.id, blend: blend.filter((b) => b !== s.id) }) },
+      has ? '' : icon('lock'), s.name, s.id === own ? h('small', { class: 'own' }, 'Origin') : '');
+    });
+    const mixChips = this.styles.list().filter((s) => s.id !== shown && s.accent).map((s) => {
+      const has = styles.includes(s.id);
+      const on = blend.includes(s.id);
+      const full = !on && blend.length >= MAX_BLEND;
+      return h('button', { class: `trait ${has ? (on ? 'on' : 'off') : 'locked'}`, disabled: !has || full,
+        title: !has ? `Locked: research ${needs(s.id)}` : full ? `Mix up to ${MAX_BLEND} styles` : on ? 'Remove this style\'s pieces' : `Add ${s.name} pieces to this hull`,
+        onclick: () => this.set({ blend: on ? blend.filter((b) => b !== s.id) : [...blend, s.id] }) }, has ? '' : icon('lock'), s.name);
+    });
     const slider = (label: string, key: 'length' | 'bulk' | 'engines' | 'weapons', step: number) => {
       const [min, max] = DESIGN_LIMITS[key];
       const input = h('input', { type: 'range', min, max, step, value: d[key], id: `ship-${key}` }) as HTMLInputElement;
@@ -225,7 +247,7 @@ export class ShipyardPanel extends Drawer {
     const color = (label: string, key: 'primary' | 'secondary' | 'accent') => {
       const input = h('input', { type: 'color', value: d.colors[key], id: `ship-color-${key}` }) as HTMLInputElement;
       input.addEventListener('input', () => this.set({ colors: { ...this.q.designFor(this.store.state.shipyardClass).colors, [key]: input.value } }));
-      return h('label', { class: 'swatch' }, input, h('span', {}, label));
+      return h('label', { class: 'color-pick' }, input, h('span', {}, label));
     };
     const unlocked = this.q.unlockedTraits();
     const traitChips = this.traits.list().filter((t) => !t.id.startsWith('role-')).map((t) => {
@@ -235,7 +257,8 @@ export class ShipyardPanel extends Drawer {
     });
     const code = h('input', { class: 'code', value: encodeDesign(d), spellcheck: false, id: 'ship-code', 'aria-label': 'Design code' }) as HTMLInputElement;
     this.controlsEl.append(
-      h('div', { class: 'ctl-group' }, h('h4', {}, 'Style'), h('div', { class: 'style-grid' }, ...styleBtns)),
+      h('div', { class: 'ctl-group' }, h('h4', {}, 'Style'), h('div', { class: 'style-grid' }, ...styleBtns),
+        h('h4', { class: 'sub' }, `Mix in · ${blend.length}/${MAX_BLEND}`), h('div', { class: 'traits' }, ...mixChips)),
       h('div', { class: 'ctl-group' }, h('h4', {}, 'Shape'),
         h('div', { class: 'row' }, h('span', { class: 'muted small mono' }, `seed ${d.seed}`), h('button', { class: 'btn', onclick: () => this.set({ seed: (Math.random() * 2 ** 31) >>> 0 }) }, icon('dice'), ' Randomise')),
         slider('Length', 'length', 0.05), slider('Bulk', 'bulk', 0.05), slider('Engines', 'engines', 1), slider('Weapons', 'weapons', 1)),

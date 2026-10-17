@@ -8,6 +8,8 @@ export interface ShipStyleGenerator {
   /** Use flat shading for this style's materials. */
   readonly flatShading?: boolean;
   build(kit: ShipKit): void;
+  /** This style's signature pieces on another style's hull, when a design mixes it in. */
+  accent?(kit: ShipKit): void;
 }
 
 /** Extension point: research traits that decorate any style. */

@@ -1,11 +1,13 @@
 import type { ShipKit } from '../ShipKit';
 import type { ShipStyleGenerator } from '../ShipStyleGenerator';
+import { technologicalAccent } from './accents';
 
 /** Hard-edged, engineered hulls with nacelles, panels and light strips. */
 export const TechnologicalStyle: ShipStyleGenerator = {
   id: 'technological',
   name: 'Technological',
   description: 'Angular engineered hulls, nacelles, greebles and light strips.',
+  accent: technologicalAccent,
   build(kit: ShipKit) {
     const { L, B, rng, mat } = kit;
     const hull = kit.cyl(B * 0.28, B * 0.55, L * 0.8, mat.hull, 6);

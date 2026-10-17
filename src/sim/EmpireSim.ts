@@ -102,13 +102,24 @@ export class EmpireSim {
   };
 
   /** Design with research traits and the class's role decorations applied. */
+  /** The ship style the empire was founded with: always available to it. */
+  foundingStyle = (): string => this.state.identity?.shipStyle ?? this.state.designs[this.state.shipyardClass]?.style ?? 'technological';
+
+  /** Styles the empire can build in: its own, plus those research has unlocked. */
+  unlockedStyles = (): string[] => [...new Set([this.foundingStyle(), ...this.deps.tree.stylesOf(this.state.empire.research)])];
+
   effectiveDesign = (classId = this.state.shipyardClass): ShipDesign => {
     const c = this.classById.get(classId);
+    // Only styles the empire has may show: locked ones fall back to its own style.
+    const styles = this.unlockedStyles();
+    const d = this.designFor(classId);
+    const style = styles.includes(d.style) ? d.style : this.foundingStyle();
+    const blend = (d.blend ?? []).filter((b) => styles.includes(b));
     const traits = this.unlockedTraits().filter((t) => !this.state.hiddenTraits.includes(t));
     const role = c ? (c.mines ? 'role-mining' : ROLE_TRAIT[c.doctrine]) : undefined;
     if (role) traits.push(role);
     if (c?.role === 'capital') traits.push('role-capital');
-    return normalizeDesign({ ...this.designFor(classId), traits });
+    return normalizeDesign({ ...d, style, blend, traits });
   };
 
   planets = (star: StarSystem): Planet[] => planetsOf(star, this.deps.galaxy.params.seed);
@@ -260,7 +271,9 @@ export class EmpireSim {
    */
   setIdentity(id: EmpireIdentity, founding: boolean): void {
     const s = this.state;
-    const livery = (d: ShipDesign): ShipDesign => ({ ...d, colors: { ...d.colors, accent: id.color } });
+    // Founding sets the race's ship style on every design and the ships it starts with.
+    const style = founding && id.shipStyle ? id.shipStyle : null;
+    const livery = (d: ShipDesign): ShipDesign => ({ ...d, ...(style ? { style, blend: [] } : {}), colors: { ...d.colors, accent: id.color } });
     const fleets = s.fleets.map((f) => (s.loadouts[f.id] ? { ...f, color: id.color, design: livery(f.design) } : f));
     const designs = Object.fromEntries(Object.entries(s.designs).map(([k, d]) => [k, livery(d)]));
     const colonies = s.economy.colonies.map((c) => (c.capital ? { ...c, name: id.capital } : c));
@@ -544,7 +557,11 @@ export class EmpireSim {
 
   setDesign(design: ShipDesign): void {
     const id = this.state.shipyardClass;
-    this.deps.store.update((s) => ({ designs: { ...s.designs, [id]: normalizeDesign(design) } }));
+    // Styles are earned: a locked style (say from a pasted design code) falls back to the empire's own.
+    const styles = this.unlockedStyles();
+    const style = styles.includes(design.style) ? design.style : this.foundingStyle();
+    const allowed = { ...design, style, blend: (design.blend ?? []).filter((b) => styles.includes(b)) };
+    this.deps.store.update((s) => ({ designs: { ...s.designs, [id]: normalizeDesign(allowed) } }));
   }
 
   buildShip(classId: string, yardPlanetId?: string): void {

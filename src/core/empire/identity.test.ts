@@ -41,4 +41,11 @@ describe('empire identity', () => {
     expect(cleanIdentity(null, HERALDRY)).toBeNull();
     expect(cleanIdentity('Solar', HERALDRY)).toBeNull();
   });
+
+  it('keeps a known founding ship style and drops an unknown one', () => {
+    const id = suggestIdentity(7, 'Ruben', 'Zarsen III', HERALDRY);
+    expect(HERALDRY.shipStyles).toContain(id.shipStyle);
+    expect(cleanIdentity({ ...id, shipStyle: 'organic' }, HERALDRY)?.shipStyle).toBe('organic');
+    expect(cleanIdentity({ ...id, shipStyle: 'laser-cats' }, HERALDRY)?.shipStyle).toBeUndefined();
+  });
 });

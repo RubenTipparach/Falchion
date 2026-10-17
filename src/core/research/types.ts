@@ -3,6 +3,8 @@ export type DomainId = 'hulls' | 'weapons' | 'defense' | 'industry' | 'society' 
 
 export type Grant =
   | { readonly kind: 'trait'; readonly id: string }
+  /** A ship style the empire may build in and mix into its designs. */
+  | { readonly kind: 'style'; readonly id: string }
   | { readonly kind: 'chassis'; readonly id: string }
   | { readonly kind: 'part'; readonly id: string }
   | { readonly kind: 'biome'; readonly id: string }

@@ -91,6 +91,18 @@ export class TechTree {
     return [...out].sort();
   }
 
+  /** Ship styles unlocked by research. */
+  stylesOf(state: ResearchState): string[] {
+    const out = new Set<string>();
+    for (const g of this.grantsOf(state)) if (g.kind === 'style') out.add(g.id);
+    return [...out].sort();
+  }
+
+  /** The node that unlocks a ship style, if any. */
+  styleNode(style: string): TechNode | undefined {
+    return this.nodes.find((n) => n.grants.some((g) => g.kind === 'style' && g.id === style));
+  }
+
   /** Branches the empire has a foothold in (researched any node, or crossed into). */
   branchesReached(state: ResearchState): BranchId[] {
     const out = new Set<BranchId>();

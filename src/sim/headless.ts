@@ -16,7 +16,8 @@ import { SaveGame, savedHome, upgradeSave, type SavedGame } from '../app/SaveGam
 import { colorFor, isFleetMovement, publicEmpire, type PublicEmpire } from '../app/ServerSync';
 import { Store } from '../app/Store';
 import { createWorld } from '../app/World';
-import { EmpireSim, snapshotLink, type ContactForce, type SimDeps } from './EmpireSim';
+import { EmpireSim, snapshotLink, type ContactForce, type OtherEmpire, type SimDeps } from './EmpireSim';
+import { atWar } from '../core/diplomacy/Diplomacy';
 import { applyEffects, EMPTY_WORLD, validWorld, type SharedEffect, type SharedWorld } from '../core/world/SharedWorld';
 
 /** The server applies empires' changes to the shared world with the same rules. */
@@ -167,7 +168,8 @@ export function stepWorld(world: unknown, tick: number, players: ReadonlyArray<{
  * The fleets of different players that meet at sea in `tick`, from the stored public views: both
  * on station on the same hex, and at least one aggressive and armed. A fleet is in one contact at most.
  */
-export function findContacts(players: ReadonlyArray<{ readonly id: string; readonly public?: PublicRecord | null }>, tick: number): Contact[] {
+export function findContacts(players: ReadonlyArray<{ readonly id: string; readonly public?: PublicRecord | null }>, tick: number, world?: SharedWorld | null): Contact[] {
+  const relations = validWorld(world) ? world.relations : undefined;
   const fleets = stationedFleets(players, tick);
   const used = new Set<string>();
   const out: Contact[] = [];
@@ -176,7 +178,7 @@ export function findContacts(players: ReadonlyArray<{ readonly id: string; reado
     if (used.has(a.key)) continue;
     for (let j = i + 1; j < fleets.length; j++) {
       const b = fleets[j];
-      if (used.has(b.key) || b.player === a.player || !hexEquals(a.at, b.at) || !startsFight(a, b)) continue;
+      if (used.has(b.key) || b.player === a.player || !hexEquals(a.at, b.at) || !startsFight(a, b) || !atWar(relations, a.player, b.player, tick)) continue;
       used.add(a.key);
       used.add(b.key);
       out.push({ a: { player: a.player, fleet: a.fleet }, b: { player: b.player, fleet: b.fleet }, hex: a.at });
@@ -196,7 +198,8 @@ export interface Pursuit extends Contact {
  * (its `chase` order) is on the same hex as it, whether either is under way or on station. `a` is
  * the chaser, `b` the quarry. Fleets already in a contact this year are left out.
  */
-export function findPursuits(players: ReadonlyArray<{ readonly id: string; readonly public?: PublicRecord | null }>, tick: number, busy: readonly Contact[] = []): Pursuit[] {
+export function findPursuits(players: ReadonlyArray<{ readonly id: string; readonly public?: PublicRecord | null }>, tick: number, busy: readonly Contact[] = [], world?: SharedWorld | null): Pursuit[] {
+  const relations = validWorld(world) ? world.relations : undefined;
   const fleets = new Map<string, { player: string; fleet: string; movement: FleetMovement; armed: boolean; chase?: string }>();
   for (const p of players) {
     for (const f of (p.public?.fleets ?? []).slice(0, 50)) {
@@ -209,7 +212,7 @@ export function findPursuits(players: ReadonlyArray<{ readonly id: string; reado
   for (const key of [...fleets.keys()].sort()) {
     const p = fleets.get(key)!;
     const q = p.chase ? fleets.get(p.chase) : undefined;
-    if (!q || !p.armed || q.player === p.player || used.has(key) || used.has(p.chase!)) continue;
+    if (!q || !p.armed || q.player === p.player || used.has(key) || used.has(p.chase!) || !atWar(relations, p.player, q.player, tick)) continue;
     const at = hexAt(p.movement, tick);
     if (!hexEquals(at, hexAt(q.movement, tick))) continue;
     used.add(key);
@@ -244,8 +247,9 @@ function stationedFleets(players: ReadonlyArray<{ readonly id: string; readonly 
  * its own side. Null when either empire has not played exactly to `tick` (the battle belongs to
  * that year), the fleets are not both on station on one hex, or neither attacks.
  */
-export function resolveContact(saveA: unknown, playerA: Player, fleetIdA: string, saveB: unknown, playerB: Player, fleetIdB: string, tick: number): ContactResult | null {
+export function resolveContact(saveA: unknown, playerA: Player, fleetIdA: string, saveB: unknown, playerB: Player, fleetIdB: string, tick: number, world?: SharedWorld | null): ContactResult | null {
   if (!validSave(saveA) || !validSave(saveB) || playerA.id === playerB.id || !Number.isInteger(tick)) return null;
+  if (!atWar(validWorld(world) ? world.relations : undefined, playerA.id, playerB.id, tick)) return null;
   if (saveA.turn !== tick || saveB.turn !== tick) return null;
   const a = runtime(saveA, playerA, EMPTY_WORLD, []);
   const b = runtime(saveB, playerB, EMPTY_WORLD, []);
@@ -275,8 +279,9 @@ export function resolveContact(saveA: unknown, playerA: Player, fleetIdA: string
  * where they meet, under way or not. Null when either empire is not at `tick`, either fleet is
  * gone, A is not chasing B or cannot attack, or they are not on the same hex.
  */
-export function resolvePursuit(saveA: unknown, playerA: Player, fleetIdA: string, saveB: unknown, playerB: Player, fleetIdB: string, tick: number): ContactResult | null {
+export function resolvePursuit(saveA: unknown, playerA: Player, fleetIdA: string, saveB: unknown, playerB: Player, fleetIdB: string, tick: number, world?: SharedWorld | null): ContactResult | null {
   if (!validSave(saveA) || !validSave(saveB) || playerA.id === playerB.id || !Number.isInteger(tick)) return null;
+  if (!atWar(validWorld(world) ? world.relations : undefined, playerA.id, playerB.id, tick)) return null;
   if (saveA.turn !== tick || saveB.turn !== tick) return null;
   const a = runtime(saveA, playerA, EMPTY_WORLD, []);
   const b = runtime(saveB, playerB, EMPTY_WORLD, []);
@@ -324,6 +329,17 @@ function marketsOf(others: readonly TradingEmpire[], playerId: string): Market[]
 }
 
 /** A save as live simulation state, with its world, the shared world it plays in and the other players' markets. */
+/** Other players' empires (names and worlds) from their public views: diplomacy and allied systems. */
+function otherEmpiresOf(others: readonly TradingEmpire[], playerId: string): OtherEmpire[] {
+  const isHex = (h: unknown): h is Hex => !!h && Number.isInteger((h as Hex).q) && Number.isInteger((h as Hex).r);
+  return (Array.isArray(others) ? others : []).filter((o) => o && o.id !== playerId).map((o) => ({
+    id: o.id,
+    name: typeof o.empire?.name === 'string' ? o.empire.name : typeof o.name === 'string' ? o.name : 'Unknown',
+    home: isHex(o.home) ? o.home : null,
+    colonies: (Array.isArray(o.colonies) ? o.colonies : []).filter(isHex).slice(0, 200),
+  }));
+}
+
 /** Other players' fleets by `${ownerId}:${fleetId}`, from their public views (for chases). */
 function foreignFleets(others: readonly TradingEmpire[], playerId: string): Map<string, ForeignFleet> {
   const out = new Map<string, ForeignFleet>();
@@ -359,7 +375,8 @@ function runtime(saved: SavedGame, player: Player, shared: SharedWorld, others: 
   const link = snapshotLink(validWorld(shared) ? shared : EMPTY_WORLD);
   const markets = marketsOf(others, player.id);
   const fleets = foreignFleets(others, player.id);
-  return { deps: { store, galaxy, tree, encounters, world, economy, shared: link, playerId: player.id, markets: () => markets, foreignFleet: (key) => fleets.get(key) ?? null }, store, link };
+  const empires = otherEmpiresOf(others, player.id);
+  return { deps: { store, galaxy, tree, encounters, world, economy, shared: link, playerId: player.id, markets: () => markets, foreignFleet: (key) => fleets.get(key) ?? null, otherEmpires: () => empires }, store, link };
 }
 
 function result(state: GameState, player: Player): { save: Record<string, unknown>; public: PublicEmpire } {

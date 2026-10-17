@@ -2,6 +2,7 @@ import type { Squadron } from '../combat/Combat';
 import { fieldLeft, type AsteroidField, type FieldState } from '../galaxy/Asteroids';
 import type { NpcState } from '../npc/types';
 import { clampStanding } from '../npc/Reputation';
+import { applyDiplomacy, NEUTRAL, pairKey, type DiplomaticAction, type Relation } from '../diplomacy/Diplomacy';
 
 /**
  * The state the whole galaxy shares: the NPC empires that have been discovered and the asteroid
@@ -15,6 +16,8 @@ export interface SharedWorld {
   readonly tick: number;
   readonly npcs: Readonly<Record<string, NpcState>>;
   readonly asteroids: Readonly<Record<string, FieldState>>;
+  /** Relations between players (pairKey), when not neutral or with a proposal open. */
+  readonly relations?: Readonly<Record<string, Relation>>;
 }
 
 export const EMPTY_WORLD: SharedWorld = { tick: 0, npcs: {}, asteroids: {} };
@@ -36,6 +39,8 @@ export type SharedEffect =
   | { readonly kind: 'npcColony'; readonly npc: string; readonly star: string; readonly garrison: readonly Squadron[]; readonly capturedBy?: string }
   /** A player's standing with an NPC changed by `delta` (clamped to ±100). `base`: where it starts if unrecorded. */
   | { readonly kind: 'standing'; readonly npc: string; readonly player: string; readonly delta: number; readonly base: number }
+  /** A player's diplomatic action toward another (ignored when not open to them). */
+  | { readonly kind: 'diplomacy'; readonly by: string; readonly other: string; readonly action: DiplomaticAction; readonly at: number }
   /** The NPC empires after a year of their own (stepped by whoever runs them: the server, or a guest's browser). */
   | { readonly kind: 'npcStep'; readonly npcs: Readonly<Record<string, NpcState>>; readonly tick: number };
 
@@ -44,6 +49,7 @@ export function applyEffects(world: SharedWorld, effects: readonly SharedEffect[
   let npcs = world.npcs;
   let asteroids = world.asteroids;
   let tick = world.tick;
+  let relations = world.relations;
   for (const e of effects) {
     switch (e.kind) {
       case 'mined': {
@@ -73,6 +79,13 @@ export function applyEffects(world: SharedWorld, effects: readonly SharedEffect[
         npcs = { ...npcs, [e.npc]: { ...n, standing: { ...n.standing, [e.player]: now } } };
         break;
       }
+      case 'diplomacy': {
+        if (e.by === e.other) break;
+        const key = pairKey(e.by, e.other);
+        const next = applyDiplomacy(relations?.[key] ?? NEUTRAL, e.by, e.action, e.at);
+        if (next) relations = { ...relations, [key]: next };
+        break;
+      }
       case 'npcStep': {
         npcs = e.npcs;
         tick = e.tick;
@@ -87,5 +100,6 @@ export function applyEffects(world: SharedWorld, effects: readonly SharedEffect[
       }
     }
   }
-  return npcs === world.npcs && asteroids === world.asteroids && tick === world.tick ? world : { ...world, tick, npcs, asteroids };
+  if (npcs === world.npcs && asteroids === world.asteroids && tick === world.tick && relations === world.relations) return world;
+  return { ...world, tick, npcs, asteroids, ...(relations ? { relations } : {}) };
 }

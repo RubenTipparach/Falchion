@@ -13,6 +13,8 @@ import { STANDING, TIERS, tierOf } from '../../core/npc/Reputation';
 import type { Relations } from '../../app/GameState';
 import { Drawer } from '../Drawer';
 import type { FactionView, GameActions, GameQueries } from '../GameActions';
+import type { DiplomacyView } from '../../sim/EmpireSim';
+import type { DiplomaticAction } from '../../core/diplomacy/Diplomacy';
 import { icon, resourceIcon } from '../icons';
 import { BIOMES } from '../../content/biomes';
 import { slotsOf } from '../../content/buildings';
@@ -160,6 +162,34 @@ export class EmpirePanel extends Drawer {
 
   /** Reputation: a chart of your standing with every known NPC faction over time, then each faction. */
   private relations(): HTMLElement[] {
+    return [...this.playerRelations(), ...this.factionRelations()];
+  }
+
+  /** Diplomacy with other players: war, peace and alliances, with any proposal waiting. */
+  private playerRelations(): HTMLElement[] {
+    const rows = this.q.diplomacyView();
+    if (!rows.length) return [];
+    const label: Record<DiplomaticAction, string> = {
+      'declare-war': 'Declare war', 'propose-peace': 'Propose peace', 'propose-alliance': 'Propose alliance',
+      accept: 'Accept', decline: 'Decline', withdraw: 'Withdraw proposal', 'break-alliance': 'Break alliance',
+    };
+    const status = (v: DiplomacyView) => v.relation.status === 'war' ? (v.atWar ? 'At war' : 'War declared: fighting starts within a year') : v.relation.status === 'alliance' ? 'Allied' : 'Neutral';
+    return [h('section', { class: 'card' }, h('h4', {}, 'Players'),
+      h('p', { class: 'small muted' }, 'Fleets fight only empires at war with each other. War starts a year after it is declared; peace and alliances need both sides to agree. An ally\'s systems are friendly to your fleets.'),
+      ...rows.map((v) => {
+        const p = v.relation.proposal;
+        const pending = p ? (p.from === v.empire.id ? `They propose ${p.kind === 'peace' ? 'peace' : 'an alliance'}` : `You proposed ${p.kind === 'peace' ? 'peace' : 'an alliance'}`) : '';
+        return h('div', { class: `diplo-row ${v.relation.status}` },
+          h('div', {}, h('span', { class: 'doc-dot', style: `--doc:${v.empire.color ?? '#7fd3e6'}` }), h('b', {}, v.empire.name),
+            h('div', { class: 'small muted' }, status(v), pending ? h('span', { class: 'pending' }, ` · ${pending}`) : '')),
+          h('div', { class: 'row' }, ...v.actions.map((a) => h('button', {
+            class: `chip ${a === 'declare-war' || a === 'break-alliance' ? 'danger' : a === 'accept' ? 'active' : ''}`,
+            onclick: () => { if (a !== 'declare-war' || confirm(`Declare war on ${v.empire.name}? Their fleets and yours will fight wherever they meet, from a year from now.`)) this.actions.diplomacy(v.empire.id, a); },
+          }, label[a]))));
+      }))];
+  }
+
+  private factionRelations(): HTMLElement[] {
     const s = this.store.state;
     const factions = this.q.factions();
     if (!factions.length) return [h('p', { class: 'muted' }, 'You have not met any NPC factions yet. Your home\'s neighbours make contact within a year; others when your fleets come near their space.')];

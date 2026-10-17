@@ -121,8 +121,10 @@ export function createSimTicker({ store, loadSim, world = null, withLock = (_key
       }
     }
     // Fleets side by side on station fight; then faster fleets run down the ones that broke off.
-    const contacts = sim.findContacts(players, worldTick);
-    const pursuits = typeof sim.findPursuits === 'function' && typeof sim.resolvePursuit === 'function' ? sim.findPursuits(players, worldTick, contacts) : [];
+    // Only empires at war fight: relations live in the shared world.
+    const shared = world ? await world.get() : null;
+    const contacts = sim.findContacts(players, worldTick, shared);
+    const pursuits = typeof sim.findPursuits === 'function' && typeof sim.resolvePursuit === 'function' ? sim.findPursuits(players, worldTick, contacts, shared) : [];
     for (const c of [...contacts, ...pursuits]) {
       const [first, second] = [c.a.player, c.b.player].sort();
       try {
@@ -131,7 +133,7 @@ export function createSimTicker({ store, loadSim, world = null, withLock = (_key
           const rb = await store.load(c.b.player);
           if (!ra?.save || !rb?.save) return;
           const resolve = c.pursuit ? sim.resolvePursuit : sim.resolveContact;
-          const battle = resolve(ra.save, playerOf(c.a.player, ra), c.a.fleet, rb.save, playerOf(c.b.player, rb), c.b.fleet, worldTick);
+          const battle = resolve(ra.save, playerOf(c.a.player, ra), c.a.fleet, rb.save, playerOf(c.b.player, rb), c.b.fleet, worldTick, shared);
           if (!battle) return;
           const sides = [[c.a.player, ra, battle.saveA, battle.publicA], [c.b.player, rb, battle.saveB, battle.publicB]];
           // Both empires keep the battle or neither does: if the second save fails, the first is put back.

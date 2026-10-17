@@ -15,6 +15,7 @@ export const ACTIVITY_KINDS = {
   depot: { reportable: true },
   battle: { reportable: true },
   survey: { reportable: true },
+  diplomacy: { reportable: true },
   online: { reportable: false },
   offline: { reportable: false },
 };

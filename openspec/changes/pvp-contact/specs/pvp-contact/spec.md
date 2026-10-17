@@ -12,7 +12,7 @@ A fleet with warships SHALL be settable to aggressive from its fleet card. The s
 - **THEN** the fleet stays passive
 
 ### Requirement: Fleets of two players fight at sea when one attacks
-Two fleets of different empires on the same hex, both on station, SHALL fight when at least one is aggressive and armed. Two passive fleets SHALL NOT fight, and an unarmed fleet SHALL NOT start a fight.
+Two fleets of different empires on the same hex, both on station, SHALL fight when their empires are at war (see player-diplomacy) and at least one is aggressive and armed. Two passive fleets SHALL NOT fight, and an unarmed fleet SHALL NOT start a fight.
 
 #### Scenario: Passive fleets pass
 - **WHEN** two passive fleets of different players stop on the same hex

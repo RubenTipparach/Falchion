@@ -1,3 +1,4 @@
+import type { OtherEmpire } from '../sim/EmpireSim';
 import { cleanIdentity, type EmpireIdentity } from '../core/empire/Identity';
 import type { FleetMovement } from '../core/fleet/Fleet';
 import type { Hex } from '../core/hex/Hex';
@@ -109,6 +110,14 @@ export function othersOnMap(players: readonly OtherPlayer[]): { fleets: FleetVie
     for (const f of p.fleets ?? []) if (isFleetMovement(f.movement)) fleets.push({ ...f, id: `${p.id}:${f.id}`, name: `${f.name} · ${name}`, owner: name, color, status: fleetStance(f) });
   }
   return { fleets, claims };
+}
+
+/** Other players as diplomacy sees them: id, empire name, colour and worlds (untrusted input, checked). */
+export function empiresOf(players: readonly OtherPlayer[]): OtherEmpire[] {
+  return players.map((p) => {
+    const id = p.empire ? cleanIdentity({ ...p.empire, color: p.color }, HERALDRY) : null;
+    return { id: p.id, name: id?.name ?? p.name, color: id?.color ?? colorFor(p.id), home: isHex(p.home) ? p.home : null, colonies: (p.colonies ?? []).filter(isHex) };
+  });
 }
 
 /** Routine saves reach the server at most every 10 s; news other players should see, every 2.5 s. */

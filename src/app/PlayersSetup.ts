@@ -18,7 +18,7 @@ import { GalaxyPlayers } from './GalaxyPlayers';
 import type { GameController } from './GameController';
 import type { GameState } from './GameState';
 import type { PlayerIdentity } from './identity';
-import { colorFor, isFleetMovement, othersOnMap, ownClaim, publicEmpire, type OtherPlayer } from './ServerSync';
+import { colorFor, isFleetMovement, othersOnMap, ownClaim, publicEmpire, type OtherPlayer, empiresOf } from './ServerSync';
 import type { Store } from './Store';
 import { CLOCK } from './WorldClock';
 
@@ -96,6 +96,7 @@ export function setupPlayers({ identity, canSignIn, galaxy, controller, store, t
         distance: 0, homeName: s.home.name,
       });
     }
+    const relations = new Map(controller.diplomacyView().map((v) => [v.empire.id, v.relation.status === 'war' ? (v.atWar ? 'At war' : 'War declared') : v.relation.status === 'alliance' ? 'Ally' : v.relation.proposal ? 'Proposal' : '']));
     for (const p of model.others) {
       const id = identityOf(p);
       const home = p.home && Number.isInteger(p.home.q) && Number.isInteger(p.home.r) ? p.home : null;
@@ -105,6 +106,7 @@ export function setupPlayers({ identity, canSignIn, galaxy, controller, store, t
         ruler: id?.ruler ?? '', title: id?.title ?? '', colonies: new Set((p.colonies ?? []).map((c) => `${c.q},${c.r}`)).size,
         fleets: (p.fleets ?? []).filter((f) => isFleetMovement(f.movement)).map((f) => ({ id: `${p.id}:${f.id}`, name: f.name, where: where(f.movement) })),
         distance: home ? hexDistance(myHome, home) : null, homeName: placeOf(home)?.name ?? null,
+        relation: relations.get(p.id) || undefined,
       });
     }
     return sortRoster(out);
@@ -145,6 +147,7 @@ export function setupPlayers({ identity, canSignIn, galaxy, controller, store, t
       for (const p of model.others) others.set(p.id, p);
       const { fleets, claims } = othersOnMap(model.others);
       controller.setOtherFleets(fleets);
+      controller.setOtherEmpires(empiresOf(model.others));
       // Territory changes rarely (a new colony or a new empire): rebuild it only then.
       const key = JSON.stringify(claims);
       if (key !== drawnClaims) { drawnClaims = key; territory.setDynamic(claims); }

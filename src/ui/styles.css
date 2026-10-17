@@ -764,3 +764,13 @@ button.chat-mention:hover { filter: brightness(1.25); }
 .battle-banner { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--bad, #ff5d5d); border-radius: 8px; background: rgba(255, 93, 93, 0.1); }
 .battle-banner b { color: var(--bad, #ff5d5d); }
 .btn.danger { border-color: var(--bad, #ff5d5d); color: var(--bad, #ff5d5d); }
+
+/* Diplomacy with other players (Empire › Relations). */
+.diplo-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+.diplo-row.war b { color: var(--bad, #ff5d5d); }
+.diplo-row.alliance b { color: var(--good, #7cff9b); }
+.diplo-row .pending { color: var(--brass, #e6b450); }
+.chip.danger { border-color: var(--bad, #ff5d5d); color: var(--bad, #ff5d5d); }
+.tag.relation.war { color: var(--bad, #ff5d5d); border-color: var(--bad, #ff5d5d); }
+.tag.relation.ally { color: var(--good, #7cff9b); border-color: var(--good, #7cff9b); }
+.tag.relation.proposal { color: var(--brass, #e6b450); border-color: var(--brass, #e6b450); }

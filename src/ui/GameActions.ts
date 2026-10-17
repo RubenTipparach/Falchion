@@ -11,7 +11,8 @@ import type { Job } from '../core/construction/Construction';
 import type { FleetBattle, FleetOrders } from '../core/fleet/Presence';
 import type { Resource } from '../content/resources';
 import type { Market } from '../core/economy/Trade';
-import type { FieldReport } from '../sim/EmpireSim';
+import type { DiplomacyView, FieldReport } from '../sim/EmpireSim';
+import type { DiplomaticAction } from '../core/diplomacy/Diplomacy';
 
 export type PanelId = 'shipyard' | 'research' | 'empire' | 'war' | 'explore' | 'fleets';
 
@@ -71,6 +72,8 @@ export interface GameQueries {
   targetStar(targetId: string): StarSystem;
   /** NPC worlds of the empires you know, to attack from the War Room. */
   warTargets(): WarTarget[];
+  /** Every other player with your relation, any proposal and what you can do. */
+  diplomacyView(): DiplomacyView[];
   /** The NPC factions you know and where you stand with each (the Relations tab). */
   factions(): FactionView[];
   /** Empires you know: for missionaries and spies. */
@@ -160,6 +163,8 @@ export interface GameActions {
   editEmpire(): void;
   /** Select a fleet and follow its ship with the camera; null clears. */
   selectFleet(fleetId: string | null): void;
+  /** A diplomatic step toward another player: declare war, propose or answer peace and alliances. */
+  diplomacy(playerId: string, action: DiplomaticAction): void;
   /** Chase another player's fleet (`${ownerId}:${fleetId}`) with one of yours; null stops. */
   chase(fleetId: string, target: string | null): void;
   /** Break off a battle: the fleet heads at once for the nearest friendly system. */

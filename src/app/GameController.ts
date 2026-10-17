@@ -28,7 +28,7 @@ import type { GameState } from './GameState';
 import { routePath, systemRoute } from './Routes';
 import { touchFirst } from '../ui/dom';
 
-import { EmpireSim, SimDeps } from '../sim/EmpireSim';
+import { EmpireSim, SimDeps, type OtherEmpire } from '../sim/EmpireSim';
 
 export interface ControllerDeps extends SimDeps {
   readonly clock: WorldClock;
@@ -97,6 +97,17 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
       }
       return star ? star.position : null;
     };
+  }
+
+  private empires: readonly OtherEmpire[] = [];
+
+  /** Other players' empires from the live feed: diplomacy and allied systems. */
+  setOtherEmpires(list: readonly OtherEmpire[]): void {
+    this.empires = list;
+  }
+
+  protected override otherEmpires(): readonly OtherEmpire[] {
+    return this.empires.length ? this.empires : super.otherEmpires();
   }
 
   /** Another player's fleet from the live feed (for chasing it): `${ownerId}:${fleetId}`. */

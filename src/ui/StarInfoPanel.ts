@@ -242,6 +242,9 @@ export class StarInfoPanel {
   /** Another player's fleet: send one of your warship fleets after it. */
   private chaseView(fleet: FleetView): HTMLElement | string {
     if (fleet.owner.startsWith('alien:') || !fleet.id.includes(':')) return '';
+    const owner = fleet.id.slice(0, fleet.id.indexOf(':'));
+    const relation = this.q.diplomacyView().find((v) => v.empire.id === owner);
+    if (relation && !relation.atWar) return h('p', { class: 'small muted' }, relation.relation.status === 'war' ? 'War declared: you can chase their fleets once the fighting starts.' : `Not at war with ${relation.empire.name}: declare war in Empire › Relations to chase their fleets.`);
     const hunters = this.q.groups().filter((g) => g.id !== 'dock' && hasWarships(g.ships));
     if (!hunters.length) return h('p', { class: 'small muted' }, 'Form a fleet with warships to chase it.');
     return h('div', {}, h('span', { class: 'eyebrow' }, 'Chase with'),
@@ -256,7 +259,7 @@ export class StarInfoPanel {
   private stanceChip(g: FleetGroup): HTMLElement | null {
     if (!hasWarships(g.ships)) return null;
     const on = g.orders?.stance === 'aggressive';
-    return h('button', { class: `chip ${on ? 'active' : ''}`, title: 'Aggressive: attack other empires\' fleets that meet this one at sea', 'aria-pressed': String(on), onclick: () => this.actions.setOrders(g.id, { ...g.orders, stance: on ? undefined : 'aggressive' }) }, on ? '✓ Aggressive' : 'Aggressive');
+    return h('button', { class: `chip ${on ? 'active' : ''}`, title: 'Aggressive: attack the fleets of empires you are at war with when they meet this one', 'aria-pressed': String(on), onclick: () => this.actions.setOrders(g.id, { ...g.orders, stance: on ? undefined : 'aggressive' }) }, on ? '✓ Aggressive' : 'Aggressive');
   }
 
   private orderChip(g: FleetGroup, key: 'autoExplore' | 'autoReturn' | 'autoMine', label: string): HTMLElement {

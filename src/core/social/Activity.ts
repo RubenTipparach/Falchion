@@ -2,11 +2,11 @@
 // (it is other players' input), and merging live and loaded events. Pure: no DOM, no network.
 
 /** Kinds a player reports about their own empire. */
-export type ReportKind = 'found' | 'colony' | 'depot' | 'battle' | 'survey';
+export type ReportKind = 'found' | 'colony' | 'depot' | 'battle' | 'survey' | 'diplomacy';
 /** Every kind in the feed: reports, plus comings and goings the server logs itself. */
 export type ActivityKind = ReportKind | 'online' | 'offline';
 
-const KINDS: ReadonlySet<string> = new Set<ActivityKind>(['found', 'colony', 'depot', 'battle', 'survey', 'online', 'offline']);
+const KINDS: ReadonlySet<string> = new Set<ActivityKind>(['found', 'colony', 'depot', 'battle', 'survey', 'diplomacy', 'online', 'offline']);
 
 /** A star (by its hex) an event links to. */
 export interface ActivityPlace {

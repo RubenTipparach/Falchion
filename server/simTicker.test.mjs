@@ -165,6 +165,12 @@ describe('the other empires are read once a world year for orders', () => {
 });
 
 describe('fleets of two players that meet at sea fight in the year', () => {
+  /** The shared world with A and B long at war (only empires at war fight). */
+  const atWar = () => {
+    const war = sim.applyEffects(sim.EMPTY_WORLD, [{ kind: 'diplomacy', by: A, other: B, action: 'declare-war', at: 0 }]);
+    return { get: async () => war, apply: async () => war };
+  };
+
   const NOW = 10_000_000;
   const A = '111111111111111111', B = '222222222222222222';
   const HERE = { q: 0, r: 0 };
@@ -187,7 +193,7 @@ describe('fleets of two players that meet at sea fight in the year', () => {
       [B]: { player: { id: B, name: 'B' }, save: warSave(B, 500, 6, 'aggressive'), public: {}, updatedAt: NOW },
     });
     const owners = [];
-    const ticker = createSimTicker({ store, loadSim: async () => sim, publish: () => {}, notifyOwner: (id) => owners.push(id), now: () => NOW });
+    const ticker = createSimTicker({ store, loadSim: async () => sim, world: atWar(), publish: () => {}, notifyOwner: (id) => owners.push(id), now: () => NOW });
     await ticker.tick(520);
     expect(fought(store.map.get(A).save)).toBe(true);
     expect(fought(store.map.get(B).save)).toBe(true);
@@ -261,7 +267,18 @@ describe('fleets of two players that meet at sea fight in the year', () => {
       [B]: { player: { id: B, name: 'B' }, save: warSave(B, 500, 6, 'aggressive'), public: {}, updatedAt: NOW },
     });
     const keys = [];
-    await createSimTicker({ store, loadSim: async () => sim, withLock: (key, fn) => { keys.push(key); return fn(); }, now: () => NOW }).tick(520);
+    await createSimTicker({ store, loadSim: async () => sim, world: atWar(), withLock: (key, fn) => { keys.push(key); return fn(); }, now: () => NOW }).tick(520);
     expect(keys.slice(-2)).toEqual([A, B]);
+  });
+
+  it('empires not at war pass each other, aggressive or not', async () => {
+    const store = memoryStore({
+      [A]: { player: { id: A, name: 'A' }, save: warSave(A, 500, 6, undefined), public: {}, updatedAt: NOW },
+      [B]: { player: { id: B, name: 'B' }, save: warSave(B, 500, 6, 'aggressive'), public: {}, updatedAt: NOW },
+    });
+    const neutral = { get: async () => sim.EMPTY_WORLD, apply: async () => sim.EMPTY_WORLD };
+    await createSimTicker({ store, loadSim: async () => sim, world: neutral, now: () => NOW }).tick(520);
+    expect(fought(store.map.get(A).save)).toBe(false);
+    expect(shipsOf(store.map.get(A).save, A)).toBe(6);
   });
 });

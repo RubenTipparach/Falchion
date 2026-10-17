@@ -17,6 +17,7 @@ import { planSurvey } from '../core/fleet/Survey';
 import { minedBy, nearestMine, stockFor } from '../core/fleet/AutoMine';
 import { fieldLeft, fieldsOf, homeBelt, yearsToFull, type AsteroidField } from '../core/galaxy/Asteroids';
 import { applyEffects, EMPTY_WORLD, type SharedEffect, type SharedWorld } from '../core/world/SharedWorld';
+import { actionsFor, allied, applyDiplomacy, atWar, newsOf, relationOf, type DiplomaticAction, type Relation } from '../core/diplomacy/Diplomacy';
 import { DISCOVERY_RANGE, gridNpcsNear, HOME_TERRITORY, initialNpcState, nearNpc, npcById, spawnNpcs, territoryOf, worldDefense, type NpcDef } from '../core/npc/NpcCatalog';
 import { stepNpcs, type RaidTargets } from '../core/npc/NpcSim';
 import type { NpcRaid, NpcState } from '../core/npc/types';
@@ -36,6 +37,23 @@ import type { World } from '../app/World';
 import { CLOCK } from '../app/WorldClock';
 import type { CombatOutcome, FactionView, FleetGroup, WarTarget } from '../ui/GameActions';
 import type { StarDetails } from '../ui/StarInfoPanel';
+
+/** Another player's empire as diplomacy sees it. */
+export interface OtherEmpire {
+  readonly id: string;
+  readonly name: string;
+  readonly color?: string;
+  readonly home?: Hex | null;
+  readonly colonies: readonly Hex[];
+}
+
+/** One other player in the Relations tab: the relation, any proposal, and what you can do. */
+export interface DiplomacyView {
+  readonly empire: OtherEmpire;
+  readonly relation: Relation;
+  readonly atWar: boolean;
+  readonly actions: readonly DiplomaticAction[];
+}
 
 /** The shared world as an empire's simulation sees it: what it holds now, and where its changes go. */
 export interface SharedLink {
@@ -122,6 +140,8 @@ export interface SimDeps {
   readonly npcs?: 'local';
   /** The galaxy's shared state (asteroid fields, NPC empires): read it, and hand it this empire's changes. */
   readonly shared?: SharedLink;
+  /** Other players' empires: who they are and where their worlds are (diplomacy, allied systems). */
+  readonly otherEmpires?: () => readonly OtherEmpire[];
   /** Other players' fleets by `${ownerId}:${fleetId}`, for chasing them. */
   readonly foreignFleet?: (key: string) => ForeignFleet | null;
   /** Markets beyond your own colonies and the neighbours (other players' worlds). */
@@ -264,7 +284,9 @@ export class EmpireSim {
   isFriendlyHex = (h: Hex): boolean => {
     if (this.playerClaim().colonies.some((c) => hexDistance(c.hex, h) <= c.radius)) return true;
     const star = this.deps.galaxy.starAt(h);
-    return !!star && (this.colonyStars().has(star.id) || this.state.depots.includes(star.id));
+    if (star && (this.colonyStars().has(star.id) || this.state.depots.includes(star.id))) return true;
+    // An ally's colony systems are friendly too.
+    return this.allies().some((e) => [e.home, ...e.colonies].some((c) => !!c && hexEquals(c, h)));
   };
 
   isFriendly = (star: StarSystem): boolean => this.isFriendlyHex(star.hex);
@@ -874,7 +896,7 @@ export class EmpireSim {
       if (l && isAggressive(l.orders) && hasWarships(l.ships) && l.battle && l.battle.tick >= s.turn - 1 && isStationed(f.movement, s.turn)) {
         const foe = this.foreignFleet(l.battle.foe);
         const here = hexAt(f.movement, s.turn);
-        if (foe && !(isStationed(foe.movement, s.turn) && hexEquals(hexAt(foe.movement, s.turn), here))) {
+        if (foe && this.atWarWith(l.battle.foe.slice(0, l.battle.foe.indexOf(':'))) && !(isStationed(foe.movement, s.turn) && hexEquals(hexAt(foe.movement, s.turn), here))) {
           this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [f.id]: { ...l, orders: { ...l.orders, chase: l.battle!.foe } } } }));
           news.push(`${f.name} gives chase to ${foe.name.slice(0, 64)} of ${foe.empire.slice(0, 100)}`);
           this.steerChase(f.id);
@@ -1278,6 +1300,7 @@ export class EmpireSim {
     }
     const foe = this.foreignFleet(target);
     if (!foe || !hasWarships(l.ships) || target.startsWith(`${this.me}:`)) return this.dispatch(`${f.name} cannot chase that fleet`, 'bad');
+    if (!this.atWarWith(target.slice(0, target.indexOf(':')))) return this.dispatch(`${f.name} can only chase the fleets of an empire you are at war with`, 'bad');
     this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { ...(l.orders ?? {}), chase: target } } } }));
     this.dispatch(`${f.name} gives chase to ${foe.name.slice(0, 64)} of ${foe.empire.slice(0, 100)}`);
     this.steerChase(fleetId);
@@ -1323,6 +1346,63 @@ export class EmpireSim {
     if (l.orders?.stance) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { ...l.orders, stance: undefined } } } }));
     this.moveFleet(fleetId, away, true);
     this.dispatch(`${f.name} breaks off and retreats to ${away.name}. An enemy with faster ships can still pursue it.`, 'bad');
+  }
+
+  // ── Diplomacy between players ─────────────────────────────────────
+
+  protected otherEmpires(): readonly OtherEmpire[] {
+    return this.deps.otherEmpires?.() ?? [];
+  }
+
+  protected relationWith(other: string): Relation {
+    return relationOf(this.sharedWorld().relations, this.me, other);
+  }
+
+  /** At war with another player now (the declaration's notice has run out). */
+  atWarWith = (other: string): boolean => atWar(this.sharedWorld().relations, this.me, other, Math.max(this.state.turn, this.now()));
+
+  protected allies(): OtherEmpire[] {
+    const rel = this.sharedWorld().relations;
+    return this.otherEmpires().filter((e) => allied(rel, this.me, e.id));
+  }
+
+  /** Every other player with the relation, any proposal and what you can do (the Relations tab). */
+  diplomacyView = (): DiplomacyView[] => this.otherEmpires().filter((e) => e.id !== this.me).map((empire) => {
+    const relation = this.relationWith(empire.id);
+    return { empire, relation, atWar: this.atWarWith(empire.id), actions: actionsFor(relation, this.me) };
+  });
+
+  /** Take a diplomatic step toward another player: declare war, propose or answer peace and alliances. */
+  diplomacy(other: string, action: DiplomaticAction): void {
+    const empire = this.otherEmpires().find((e) => e.id === other);
+    const time = Math.max(this.state.turn, this.now());
+    if (!empire || other === this.me || !applyDiplomacy(this.relationWith(other), this.me, action, time)) return this.dispatch('That is not possible with them now', 'bad');
+    this.emit([{ kind: 'diplomacy', by: this.me, other, action, at: time }]);
+    const them = empire.name.slice(0, 100);
+    const text = action === 'declare-war' ? `War declared on ${them}: hostilities begin within a year`
+      : action === 'propose-peace' ? `Peace proposed to ${them}`
+      : action === 'propose-alliance' ? `Alliance proposed to ${them}`
+      : action === 'accept' ? (this.relationWith(other).status === 'alliance' ? `Alliance with ${them}: their systems are friendly to our fleets` : `Peace with ${them}`)
+      : action === 'decline' ? `Declined ${them}'s proposal`
+      : action === 'withdraw' ? `Proposal to ${them} withdrawn`
+      : `Alliance with ${them} broken`;
+    this.dispatch(text, action === 'declare-war' || action === 'break-alliance' ? 'bad' : 'good');
+    if (action !== 'decline' && action !== 'withdraw') this.deps.report?.('diplomacy', text);
+  }
+
+  /** What other players did toward this empire during the year now ending. */
+  protected diplomaticNews(): string[] {
+    const s = this.state;
+    const rel = this.sharedWorld().relations;
+    const out: string[] = [];
+    for (const e of this.otherEmpires()) {
+      const r = relationOf(rel, this.me, e.id);
+      if (r.by === e.id && r.at !== undefined && Math.floor(r.at) === s.turn) {
+        const line = newsOf(r, e.name.slice(0, 100));
+        if (line) out.push(line);
+      }
+    }
+    return out;
   }
 
   // ── NPC empires ────────────────────────────────────────────────────
@@ -1545,8 +1625,9 @@ export class EmpireSim {
 
   /** Resolve one year: economy, research, logistics. */
   protected step(quiet: boolean): { income: Partial<Record<Resource, number>>; arrivals: string[] } {
-    // First contact with any NPC in range (reported even in a quiet catch-up year).
-    const met = this.discover();
+    // First contact with any NPC in range (reported even in a quiet catch-up year), and what other
+    // players did toward this empire since last year.
+    const met = [...this.discover(), ...this.diplomaticNews()];
     const s = this.state;
     const { economy, research, report, mined } = resolveTurn({ ...s.economy, stock: s.empire.materials }, s.empire.research, s.turn, this.deps.economy, this.presence());
     this.drawFields(mined);

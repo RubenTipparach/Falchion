@@ -8,6 +8,7 @@ import type { Planet } from '../core/galaxy/Planets';
 import type { Hex } from '../core/hex/Hex';
 import { normalizeDesign, type ShipDesign } from '../core/ships/ShipDesign';
 import type { EmpireSim } from './EmpireSim';
+import { DIPLOMATIC_ACTIONS, type DiplomaticAction } from '../core/diplomacy/Diplomacy';
 
 /**
  * Every order a player can give, as a command the server applies to its copy of the empire.
@@ -62,6 +63,8 @@ const hex: ArgCodec<Hex> = {
 };
 /** Another player's fleet, as `${ownerId}:${fleetId}`. */
 const fleetKey: ArgCodec<string> = { encode: (v) => v, decode: (raw) => (typeof raw === 'string' && /^[\w-]{1,40}:[\w:,./+-]{1,80}$/.test(raw) ? raw : fail('bad fleet')) };
+const playerId: ArgCodec<string> = { encode: (v) => v, decode: (raw) => (typeof raw === 'string' && /^[\w-]{1,40}$/.test(raw) ? raw : fail('bad player')) };
+const diplomaticAction: ArgCodec<DiplomaticAction> = { encode: (v) => v, decode: (raw) => ((DIPLOMATIC_ACTIONS as readonly unknown[]).includes(raw) ? (raw as DiplomaticAction) : fail('bad action')) };
 const CLASS_IDS = new Set(SHIP_CLASSES.map((c) => c.id));
 const squadrons: ArgCodec<Squadron[]> = {
   encode: (ships) => ships.map((s) => ({ classId: s.classId, count: s.count })),
@@ -137,6 +140,7 @@ export const COMMANDS = {
   sendTribute: [id],
   retreat: [id],
   chase: [id, nullable(fleetKey)],
+  diplomacy: [playerId, diplomaticAction],
   foundFaith: [string(40), tenets],
   toggleMission: [string(60)],
   toggleSpy: [string(60)],

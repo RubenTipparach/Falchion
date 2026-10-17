@@ -13,6 +13,7 @@ import type { GameState } from '../app/GameState';
 import { SaveGame } from '../app/SaveGame';
 import { advanceSave, applyCommand, findContacts, findPursuits, resolveContact, resolvePursuit } from './headless';
 import { decodeArgs, encodeCommand } from './commands';
+import { applyEffects, EMPTY_WORLD } from '../core/world/SharedWorld';
 import { newEmpireState } from './newEmpireState';
 import type { EmpireSim } from './EmpireSim';
 
@@ -57,8 +58,11 @@ function renameFleet(save: Record<string, any>, from: string, to: string): Recor
 }
 
 /** Resolve a contact between the two empires' fleets at `HERE` in year `tick`. */
+/** A and B have been at war for a long time (fleets fight only at war). */
+const WAR = applyEffects(EMPTY_WORLD, [{ kind: 'diplomacy', by: A, other: B, action: 'declare-war', at: 0 }]);
+
 function meet(a: Record<string, any>, b: Record<string, any>, tick = T) {
-  return resolveContact(a, player(A), fid(A), b, player(B), fid(B), tick);
+  return resolveContact(a, player(A), fid(A), b, player(B), fid(B), tick, WAR);
 }
 
 describe('a battle at sea is a round a year until one side is gone or breaks off', () => {
@@ -119,7 +123,7 @@ describe('chases: a faster fleet catches up, a slower one only when its quarry s
     const head = planMovement(HERE, FAR, T - 6, (moved.save.fleets as Array<{ id: string; movement: { speed: number } }>).find((f) => f.id === fid(B))!.movement.speed);
     const withHead = <F extends { id: string }>(fs: F[]) => fs.map((f) => (f.id === fid(B) ? { ...f, movement: head } : f));
     b = { save: { ...moved.save, fleets: withHead(moved.save.fleets as never) }, public: { ...(moved.public as object), fleets: withHead((moved.public as unknown as { fleets: never }).fleets) } };
-    const ordered = applyCommand(a0, player(A), T, encodeCommand('chase', [fid(A), `${B}:${fid(B)}`]), undefined, undefined, asOther(B, b))!;
+    const ordered = applyCommand(a0, player(A), T, encodeCommand('chase', [fid(A), `${B}:${fid(B)}`]), undefined, WAR, asOther(B, b))!;
     expect(ordered.ok).toBe(true);
     expect(loadoutOf(ordered.save, A).orders.chase).toBe(`${B}:${fid(B)}`);
     return { a: { save: ordered.save, public: ordered.public } as Side, b };
@@ -128,12 +132,12 @@ describe('chases: a faster fleet catches up, a slower one only when its quarry s
   /** Play both empires year by year until the chaser catches the quarry (or `years` pass). */
   function run(a: Side, b: Side, years: number, onYear: (tick: number, b: Side) => Side = (_, x) => x) {
     for (let tick = T + 1; tick <= T + years; tick++) {
-      const na = advanceSave(a.save, player(A), tick, undefined, [], asOther(B, b))!;
-      const nb = advanceSave(b.save, player(B), tick, undefined, [], asOther(A, a))!;
+      const na = advanceSave(a.save, player(A), tick, WAR, [], asOther(B, b))!;
+      const nb = advanceSave(b.save, player(B), tick, WAR, [], asOther(A, a))!;
       a = { save: na.save, public: na.public };
       b = onYear(tick, { save: nb.save, public: nb.public });
       const players = [{ id: A, public: a.public as never }, { id: B, public: b.public as never }];
-      const caught = findPursuits(players, tick, findContacts(players, tick));
+      const caught = findPursuits(players, tick, findContacts(players, tick, WAR), WAR);
       if (caught.length) return { tick, caught: caught[0], a, b };
     }
     return null;
@@ -145,7 +149,7 @@ describe('chases: a faster fleet catches up, a slower one only when its quarry s
     expect(hit).not.toBeNull();
     expect(hit.tick).toBeGreaterThan(T + 1); // it had to close the gap first
     expect(hit.caught.a).toEqual({ player: A, fleet: fid(A) });
-    const r = resolvePursuit(hit.a.save, player(A), fid(A), hit.b.save, player(B), fid(B), hit.tick)!;
+    const r = resolvePursuit(hit.a.save, player(A), fid(A), hit.b.save, player(B), fid(B), hit.tick, WAR)!;
     expect(r).not.toBeNull();
     expect(news(r.saveB)).toContain('Overtaken while breaking off');
     expect(news(r.saveA)).toMatch(/round 1|destroyed/);
@@ -167,7 +171,7 @@ describe('chases: a faster fleet catches up, a slower one only when its quarry s
   it('an aggressive fleet gives chase on its own when its foe breaks off', () => {
     const r = meet(empireWith(A, interceptors(8), HERE, { stance: 'aggressive' }), empireWith(B, interceptors(8), HERE))!;
     const fled = applyCommand(r.saveB, player(B), T + 0.5, encodeCommand('retreat', [fid(B)]))!;
-    const a = advanceSave(r.saveA, player(A), T + 1, undefined, [], asOther(B, { save: fled.save, public: fled.public }))!;
+    const a = advanceSave(r.saveA, player(A), T + 1, WAR, [], asOther(B, { save: fled.save, public: fled.public }))!;
     expect(loadoutOf(a.save, A).orders.chase).toBe(`${B}:${fid(B)}`);
     expect(news(a.save)).toContain('gives chase');
   });
@@ -268,8 +272,8 @@ describe('the same contact always resolves the same way', () => {
   it('fleets with the same id in two empires still fight the same battle whichever asks', () => {
     const a = () => { const s = empireWith(A, interceptors(6), HERE, { stance: 'aggressive' }); return renameFleet(s, fid(A), 'strike'); };
     const b = () => { const s = empireWith(B, interceptors(6), HERE, { stance: 'aggressive' }); return renameFleet(s, fid(B), 'strike'); };
-    const ab = resolveContact(a(), player(A), 'strike', b(), player(B), 'strike', T)!;
-    const ba = resolveContact(b(), player(B), 'strike', a(), player(A), 'strike', T)!;
+    const ab = resolveContact(a(), player(A), 'strike', b(), player(B), 'strike', T, WAR)!;
+    const ba = resolveContact(b(), player(B), 'strike', a(), player(A), 'strike', T, WAR)!;
     expect(ab).not.toBeNull();
     expect(ab.saveA).toEqual(ba.saveB);
     expect(ab.saveB).toEqual(ba.saveA);
@@ -278,8 +282,8 @@ describe('the same contact always resolves the same way', () => {
   it('the seed does not depend on which empire asks first', () => {
     const a = () => empireWith(A, interceptors(6), HERE, { stance: 'aggressive' });
     const b = () => empireWith(B, interceptors(6), HERE);
-    const ab = resolveContact(a(), player(A), fid(A), b(), player(B), fid(B), T)!;
-    const ba = resolveContact(b(), player(B), fid(B), a(), player(A), fid(A), T)!;
+    const ab = resolveContact(a(), player(A), fid(A), b(), player(B), fid(B), T, WAR)!;
+    const ba = resolveContact(b(), player(B), fid(B), a(), player(A), fid(A), T, WAR)!;
     // In the swapped call the first save is B's: compare each empire with its own save.
     expect(total(fleetOf(ab.saveA, A))).toBe(total(fleetOf(ba.saveB, A)));
     expect(total(fleetOf(ab.saveB, B))).toBe(total(fleetOf(ba.saveA, B)));
@@ -329,15 +333,15 @@ describe('finding contacts in the stored public views', () => {
       { id: A, public: { fleets: [fleet('x', HERE, true, 'aggressive')] } },
       { id: B, public: { fleets: [fleet('y', HERE, true), fleet('z', HERE, true)] } },
     ];
-    const contacts = findContacts(players, T);
+    const contacts = findContacts(players, T, WAR);
     expect(contacts).toHaveLength(1);
     expect(contacts[0].a).toEqual({ player: A, fleet: 'x' });
     expect(contacts[0].b.player).toBe(B);
   });
 
   it('ignores passive pairs, fleets of one player, and fleets not on station', () => {
-    expect(findContacts([{ id: A, public: { fleets: [fleet('x', HERE, true)] } }, { id: B, public: { fleets: [fleet('y', HERE, true)] } }], T)).toEqual([]);
-    expect(findContacts([{ id: A, public: { fleets: [fleet('x', HERE, true, 'aggressive'), fleet('w', HERE, true)] } }], T)).toEqual([]);
-    expect(findContacts([{ id: A, public: { fleets: [fleet('x', HERE, true, 'aggressive')] } }, { id: B, public: { fleets: [fleet('y', HERE, true, undefined, T + 2)] } }], T)).toEqual([]);
+    expect(findContacts([{ id: A, public: { fleets: [fleet('x', HERE, true)] } }, { id: B, public: { fleets: [fleet('y', HERE, true)] } }], T, WAR)).toEqual([]);
+    expect(findContacts([{ id: A, public: { fleets: [fleet('x', HERE, true, 'aggressive'), fleet('w', HERE, true)] } }], T, WAR)).toEqual([]);
+    expect(findContacts([{ id: A, public: { fleets: [fleet('x', HERE, true, 'aggressive')] } }, { id: B, public: { fleets: [fleet('y', HERE, true, undefined, T + 2)] } }], T, WAR)).toEqual([]);
   });
 });

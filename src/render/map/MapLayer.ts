@@ -18,6 +18,8 @@ export interface ViewState {
 export interface MapLayer {
   readonly object3d: THREE.Object3D;
   update(view: ViewState): void;
+  /** Optional offscreen work before the frame is drawn (e.g. a low-resolution pass). */
+  prerender?(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void;
   dispose(): void;
 }
 
@@ -34,6 +36,10 @@ export class LayerStack {
 
   update(view: ViewState): void {
     for (const l of this.layers) l.update(view);
+  }
+
+  prerender(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    for (const l of this.layers) l.prerender?.(renderer, camera);
   }
 
   dispose(): void {

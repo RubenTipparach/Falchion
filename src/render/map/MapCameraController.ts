@@ -8,13 +8,18 @@ const REBASE_DISTANCE = 256;
 const TOUCH_SLOP = 10;
 /** Hold a finger this long (ms) for the touch equivalent of a right-click: a move order. */
 const LONG_PRESS_MS = 450;
+/**
+ * Pinch zoom goes further than the fingers spread (altitude scales by the spread to this
+ * power): the map spans planets to the whole galaxy, and a 1:1 pinch made that a long trip.
+ */
+const PINCH_POWER = 1.8;
 
 /**
  * Turns pointer/wheel input into camera focus, exponential zoom, yaw and tilt.
  *
  * Mouse: drag pans, right-drag (or shift-drag) turns and tilts, wheel zooms, right-click
- * orders. Touch, like a maps app: one finger pans, two fingers pinch to zoom, twist to turn
- * and slide up or down together to tilt; a long press is the right-click.
+ * orders. Touch: one finger pans, two fingers pinch to zoom (and pan); a long press is the
+ * right-click. Touch never turns or tilts the view: on a phone it only got in the way.
  *
  * Floating origin: the galaxy spans 70,000 ly but a planet is ~0.005 ly, far
  * below float32 resolution at that range. The camera therefore lives near (0,0,0)
@@ -273,23 +278,13 @@ export class MapCameraController {
     });
   }
 
-  /** Two fingers moved from a0, b0 to a1, b1: zoom, turn and pan about their midpoint, or tilt when they slide together. */
+  /** Two fingers moved from a0, b0 to a1, b1: zoom and pan about their midpoint, keeping the ground under them. */
   private pinchStep(a0: { x: number; y: number }, b0: { x: number; y: number }, a1: { x: number; y: number }, b1: { x: number; y: number }): void {
-    const da = { x: a1.x - a0.x, y: a1.y - a0.y }, db = { x: b1.x - b0.x, y: b1.y - b0.y };
     const d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y), d1 = Math.hypot(b1.x - a1.x, b1.y - a1.y);
     if (d0 < 1 || d1 < 1) return;
-    // Both fingers sliding up or down together, without spreading: tilt.
-    const together = da.y * db.y > 0 && Math.abs(da.y + db.y) > 1.5 * Math.abs(da.x + db.x) && Math.abs(d1 - d0) < 0.5 * Math.abs(da.y + db.y);
-    if (together) {
-      this.tilt = THREE.MathUtils.clamp(this.tilt - ((da.y + db.y) / 2) * 0.006, 0, 1.4);
-      this.place();
-      return;
-    }
     const m0 = { x: (a0.x + b0.x) / 2, y: (a0.y + b0.y) / 2 }, m1 = { x: (a1.x + b1.x) / 2, y: (a1.y + b1.y) / 2 };
     const before = this.groundAt(m0.x, m0.y);
-    this.zoom.setAltitude(this.zoom.altitude * (d0 / d1));
-    const turn = Math.atan2(b1.y - a1.y, b1.x - a1.x) - Math.atan2(b0.y - a0.y, b0.x - a0.x);
-    this.yaw += Math.atan2(Math.sin(turn), Math.cos(turn));
+    this.zoom.setAltitude(this.zoom.altitude * (d0 / d1) ** PINCH_POWER);
     this.place();
     // Keep the ground that was under the fingers under them (unless following a ship: then just zoom).
     const after = this.groundAt(m1.x, m1.y);

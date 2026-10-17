@@ -5,12 +5,20 @@ import type { MapLayer, ViewState } from './MapLayer';
 import { createStarPointsMaterial, pointScale } from './StarPointsMaterial';
 import { fadeIn } from './ZoomModel';
 
+/** Full count; fewer points (phones) are drawn larger and brighter so the galaxy reads the same. */
+const FULL_COUNT = 200_000;
+
 /** Resolved stars across the whole galaxy (~200k sampled points) for the far view. */
 export class GalaxyCloudLayer implements MapLayer {
   readonly object3d = new THREE.Group();
   private readonly material = createStarPointsMaterial({ worldSize: 70, minPx: 1, maxPx: 7 });
+  private readonly gain: number;
 
-  constructor(galaxy: GalaxyModel, count = 200_000) {
+  constructor(galaxy: GalaxyModel, count = FULL_COUNT) {
+    // Light per point and size scale with how many fewer points there are.
+    const fewer = Math.max(1, FULL_COUNT / count);
+    this.gain = Math.min(1.8, Math.sqrt(fewer));
+    const grow = Math.min(1.35, fewer ** 0.25);
     const rng = new Rng(hashSeed(galaxy.params.seed, 'cloud'));
     const samples = galaxy.sampleDensity(count, rng);
     const pos = new Float32Array(samples.length * 3);
@@ -30,7 +38,7 @@ export class GalaxyCloudLayer implements MapLayer {
       const crowd = 0.3 + 0.7 * smoothstep(B * 0.5, B * 2.2, r);
       c.multiplyScalar(crowd);
       col.set([c.r, c.g, c.b], i * 3);
-      size[i] = (0.5 + rng.next() * (0.6 + s.d)) * (0.55 + 0.45 * crowd);
+      size[i] = (0.5 + rng.next() * (0.6 + s.d)) * (0.55 + 0.45 * crowd) * grow;
     });
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -46,7 +54,7 @@ export class GalaxyCloudLayer implements MapLayer {
   update(view: ViewState): void {
     const opacity = fadeIn(view.visibleWidth, 5_000, 22_000);
     this.object3d.visible = opacity > 0.01;
-    this.material.uniforms.uOpacity.value = opacity * 0.7;
+    this.material.uniforms.uOpacity.value = opacity * 0.7 * this.gain;
     this.material.uniforms.uScale.value = pointScale(view.camera, view.viewportHeight);
   }
 

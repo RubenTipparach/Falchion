@@ -12,6 +12,8 @@ export interface MapViewOptions {
   /** Right-click without dragging (RTS move order). */
   readonly onRightClick?: (world: THREE.Vector3, ray: THREE.Raycaster) => void;
   readonly onFrame?: (view: ViewState, dt: number) => void;
+  /** Phones and tablets: lighter rendering (see the constructor). */
+  readonly lite?: boolean;
 }
 
 /** Owns the renderer, scene, camera and layer stack; runs the frame loop. */
@@ -29,8 +31,10 @@ export class MapView {
 
   constructor(private readonly opts: MapViewOptions) {
     // stencil: the selected ship masks itself so its outline is drawn only around its silhouette.
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, stencil: true });
-    this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+    // Phones (lite): no kept drawing buffer, and at most 1.5 device pixels per CSS pixel.
+    const lite = opts.lite ?? false;
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: !lite, stencil: true, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(lite ? 1.5 : 2, window.devicePixelRatio));
     this.renderer.setClearColor('#03060d');
     opts.container.appendChild(this.renderer.domElement);
     this.labelRenderer.domElement.className = 'label-layer';
@@ -88,6 +92,7 @@ export class MapView {
     this.layers.update(view);
     this.controller.refollow();
     this.opts.onFrame?.(view, dt);
+    this.layers.prerender(this.renderer, this.camera);
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
   };

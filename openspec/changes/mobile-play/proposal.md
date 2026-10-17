@@ -8,7 +8,7 @@ Players open Falchion from Discord on their phones. On a phone the game was hard
 ## What Changes
 - Touch controls on the map, like a maps app:
   - one finger pans;
-  - two fingers pinch to zoom, twist to turn and slide up or down together to tilt;
+  - two fingers pinch to zoom (a pinch goes further than the fingers spread); touch never turns or tilts the view;
   - a long press is the right-click (a move order for the selected fleet);
   - a tap selects; a double tap dives in.
 - Phone layout (720px wide and below):
@@ -19,6 +19,8 @@ Players open Falchion from Discord on their phones. On a phone the game was hard
   - news shows briefly as a toast.
 - The page cannot be zoomed or bounced by the browser, respects the notch (safe areas) and can run
   full screen from the home screen.
+- Phones render lighter: the nebula and galaxy-disc shaders draw into a buffer a third the size and are
+  stretched over the screen, and the map renders at most 1.5 device pixels per CSS pixel.
 - Touch screens get touch hints (press and hold, twist, slide) instead of mouse ones.
 
 ## Impact

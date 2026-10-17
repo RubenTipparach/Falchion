@@ -146,7 +146,7 @@ export class StarInfoPanel {
               h('small', { class: 'muted' }, `${Math.round((100 * p.done) / Math.max(1, p.total))}% surveyed · ${p.total} planets`));
           })) : '',
         h('p', { class: 'notice' }, touchFirst()
-          ? 'Press and hold a star, or anywhere in empty space, to send this fleet there. Twist two fingers to turn the view; slide them up or down together to tilt it.'
+          ? 'Press and hold a star, or anywhere in empty space, to send this fleet there. Pinch to zoom.'
           : 'Right-click a star, or anywhere in empty space, to send this fleet there. Right-drag to orbit the camera.'))
         : h('p', { class: 'small muted' }, fleet.owner.startsWith('alien:') ? 'Hostile alien fleet.' : 'Another empire\'s fleet.'),
       h('div', { class: 'actions' },

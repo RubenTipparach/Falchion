@@ -24,6 +24,8 @@ import { specOf, upkeepOf } from '../content/logistics';
 import { planetsOf, Planet } from '../core/galaxy/Planets';
 import { PlanetThumbnails } from '../render/planets/PlanetThumbnails';
 import { NebulaLayer } from '../render/map/NebulaLayer';
+import { LowResBackground } from '../render/map/LowResBackground';
+import { touchFirst } from '../ui/dom';
 import { NebulaSkyboxLayer } from '../render/map/NebulaSkyboxLayer';
 import { GalaxyDiscLayer } from '../render/map/GalaxyDiscLayer';
 import { StarfieldLayer } from '../render/map/StarfieldLayer';
@@ -142,17 +144,22 @@ async function bootstrap(): Promise<void> {
   const mapEl = document.createElement('div');
   mapEl.className = 'map';
   app.append(mapEl);
-  const map = new MapView({ container: mapEl, galaxyRadius: galaxy.params.radius, onClick: controller.handleClick, onRightClick: controller.handleRightClick, onHover: controller.handleHover, onFrame: controller.onFrame });
+  // Phones and tablets get lighter rendering: the heavy nebula and galaxy shaders at a third of the resolution.
+  const lite = touchFirst();
+  const map = new MapView({ container: mapEl, galaxyRadius: galaxy.params.radius, onClick: controller.handleClick, onRightClick: controller.handleRightClick, onHover: controller.handleHover, onFrame: controller.onFrame, lite });
 
   map.layers.add(new StarfieldLayer(galaxy.params.seed));
-  map.layers.add(new NebulaLayer(galaxy.params.seed));
+  const nebula = new NebulaLayer(galaxy.params.seed);
+  const disc = new GalaxyDiscLayer(galaxy.params);
+  if (lite) map.layers.add(new LowResBackground([nebula, disc], 0.35));
+  else map.layers.add(nebula);
   // System view: the star (or a followed ship in deep space) sits inside the map's nebula.
   map.layers.add(new NebulaSkyboxLayer(galaxy.params.seed, (x, z) => {
     const star = galaxy.nearestStar(worldToHex(x, z), 1);
     return star && { id: star.id, x: star.position.x, z: star.position.z };
   }));
-  map.layers.add(new GalaxyDiscLayer(galaxy.params));
-  map.layers.add(new GalaxyCloudLayer(galaxy));
+  if (!lite) map.layers.add(disc);
+  map.layers.add(new GalaxyCloudLayer(galaxy, lite ? 70_000 : undefined));
   map.layers.add(new MidStarLayer(galaxy));
   const sectors = map.layers.add(new SectorOverlayLayer(galaxy.params.radius, DEFAULT_ADDRESS_SCHEME));
   // Neighbours are fixed; your own territory follows your colonies and identity.

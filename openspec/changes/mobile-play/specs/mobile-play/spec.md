@@ -1,13 +1,18 @@
 ## ADDED Requirements
 
 ### Requirement: The map responds to touch like a maps app
-On a touch screen the map SHALL pan with one finger, zoom with a two-finger pinch about the
-fingers, turn with a two-finger twist and tilt when two fingers slide up or down together. A long
-press SHALL act as a right-click, so it gives the selected fleet a move order.
+On a touch screen the map SHALL pan with one finger and zoom with a two-finger pinch about the
+fingers, a pinch covering more zoom than the fingers spread so the whole range (planet to galaxy)
+takes a few gestures. Touch SHALL NOT turn or tilt the view. A long press SHALL act as a
+right-click, so it gives the selected fleet a move order.
 
 #### Scenario: Pinch to zoom
 - **WHEN** the player spreads two fingers apart on the map
 - **THEN** the view zooms in, keeping the ground under the fingers under them
+
+#### Scenario: Twisting does not turn the view
+- **WHEN** the player twists two fingers on the map
+- **THEN** the view's heading and tilt stay as they were
 
 #### Scenario: Long press to move a fleet
 - **WHEN** a fleet of the player's is selected and the player presses and holds a point on the map
@@ -25,3 +30,12 @@ cards. Nothing SHALL be cut off above the top bar.
 #### Scenario: Selecting a star on a phone
 - **WHEN** the player taps a star on a phone
 - **THEN** its card opens as a bottom sheet above the tab bar, with its header visible and its contents scrollable
+
+### Requirement: The map stays smooth on phones
+On touch screens the heavy nebula and galaxy-disc shaders SHALL render at reduced resolution
+(about a third per axis) and be stretched over the screen, and the map SHALL render at no more
+than 1.5 device pixels per CSS pixel.
+
+#### Scenario: Galaxy view on a phone
+- **WHEN** the player zooms out to the nebula and galaxy views on a phone
+- **THEN** the nebula and disc are drawn from a low-resolution buffer and look the same, soft clouds

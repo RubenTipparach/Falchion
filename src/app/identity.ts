@@ -4,6 +4,8 @@ export interface PlayerIdentity {
   readonly displayName: string;
   readonly provider: 'discord' | 'guest';
   readonly avatar?: string | null;
+  /** On the server's ADMIN_DISCORD_ID allowlist: sees the Admin link. */
+  readonly admin?: boolean;
 }
 
 export interface IdentityProvider {
@@ -31,7 +33,7 @@ export async function probeSession(): Promise<SessionProbe> {
     clearTimeout(timer);
     if (!res.headers.get('content-type')?.includes('json')) return { server: false, authEnabled: false, user: null };
     const body = await res.json();
-    if (res.ok) return { server: true, authEnabled: true, user: { id: String(body.id), displayName: body.name, provider: 'discord', avatar: body.avatar ?? null } };
+    if (res.ok) return { server: true, authEnabled: true, user: { id: String(body.id), displayName: body.name, provider: 'discord', avatar: body.avatar ?? null, admin: !!body.admin } };
     return { server: true, authEnabled: !!body.authEnabled, user: null };
   } catch {
     return { server: false, authEnabled: false, user: null };

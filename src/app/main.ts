@@ -130,7 +130,10 @@ async function bootstrap(): Promise<void> {
   // A saved empire carries on where it left off; the missed years are caught up below.
   const store = new Store<GameState>(saved ? { ...fresh, ...saved } : fresh);
 
-  const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame });
+  const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame,
+    // Signed-in players' notable news goes to the Discord channel (the server rate-limits it).
+    report: signedIn ? (kind, text) => { void fetch('./api/events', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, text }) }).catch(() => {}); } : undefined,
+  });
 
   // ── Views ──
   const app = document.getElementById('app')!;
@@ -213,7 +216,22 @@ async function bootstrap(): Promise<void> {
   store.subscribe(() => { clearTimeout(saveTimer); saveTimer = window.setTimeout(persist, 1500); });
   window.addEventListener('pagehide', () => saveGame.save(store.state));
   // One tab plays the empire: if another tab saves it, this one stops writing and offers to take over.
+  // Server announcements (set in the admin portal) show as a banner for everyone.
+  let tabWarning = false;
+  const showAnnouncement = async () => {
+    if (!probe.server || tabWarning) return;
+    try {
+      const res = await fetch('./api/announcement', { cache: 'no-store' });
+      const a = res.ok ? ((await res.json()) as { text?: string; by?: string }) : {};
+      hud.setContact(a.text ? `📣 ${a.text}${a.by ? ` (${a.by})` : ''}` : null);
+    } catch {
+      // Offline: keep whatever is showing.
+    }
+  };
+  void showAnnouncement();
+  clock.onTick(() => void showAnnouncement());
   saveGame.onOtherTab(() => {
+    tabWarning = true;
     saveGame.stop();
     hud.setContact('This empire is open in another tab, so this tab stopped saving. Reload here to play in this tab instead.');
   });

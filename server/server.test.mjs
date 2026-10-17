@@ -88,3 +88,99 @@ describe('player store', () => {
     await expect(store.save('../../x', { save: {} })).rejects.toThrow();
   });
 });
+
+describe('admin portal', async () => {
+  const { adminIds, createAdmin } = await import('./admin.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'falchion-admin-'));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const auth = make();
+  const store = createStore(dir);
+  const admin = createAdmin({ auth, store, admins: adminIds({ ADMIN_DISCORD_ID: '123456789012345678, 999999999999999999 ,junk' }), info: () => ({ version: 't' }) });
+  const as = (id) => ({ headers: { cookie: `fal_session=${encodeURIComponent(auth.issue({ id, name: 'X' }))}` }, method: 'GET' });
+  const call = async (req, path) => { const res = fakeRes(); await admin(req, res, path); return res; };
+
+  it('reads the allowlist like High Frontier: a comma-separated ADMIN_DISCORD_ID (or ADMIN_DISCORD_IDS)', () => {
+    expect([...adminIds({ ADMIN_DISCORD_ID: '123456789012345678, 999999999999999999 ,junk' })]).toEqual(['123456789012345678', '999999999999999999']);
+    expect([...adminIds({ ADMIN_DISCORD_IDS: '111111111111111111' })]).toEqual(['111111111111111111']);
+  });
+
+  it('sends signed-out visitors to Discord and refuses non-admins', async () => {
+    expect((await call({ headers: {}, method: 'GET' }, '/admin')).headers.Location).toBe('/auth/discord?next=/admin');
+    const res = await call(as('555555555555555555'), '/admin');
+    expect(res.status).toBe(403);
+    expect(res.body).toContain('555555555555555555');
+    expect((await call(as('555555555555555555'), '/api/admin/players')).status).toBe(403);
+  });
+
+  it('lists players, resets an empire, and needs the admin header to write', async () => {
+    await store.save('222222222222222222', { player: { id: '222222222222222222', name: 'Friend' }, save: { turn: 9, economy: { colonies: [{}, {}] } }, public: { fleets: [] }, updatedAt: 1 });
+    const list = JSON.parse((await call(as('123456789012345678'), '/api/admin/players')).body);
+    expect(list[0]).toMatchObject({ id: '222222222222222222', year: 9, colonies: 2 });
+    const noHeader = await call({ ...as('123456789012345678'), method: 'DELETE' }, '/api/admin/players/222222222222222222');
+    expect(noHeader.status).toBe(403);
+    const ok = await call({ headers: { ...as('123456789012345678').headers, 'x-falchion-admin': '1' }, method: 'DELETE' }, '/api/admin/players/222222222222222222');
+    expect(ok.status).toBe(200);
+    expect(await store.load('222222222222222222')).toBeNull();
+  });
+
+  it('publishes an announcement everyone can read', async () => {
+    const req = { headers: { ...as('999999999999999999').headers, 'x-falchion-admin': '1' }, method: 'PUT', async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ text: 'Maintenance at 20:00' })); } };
+    expect((await call(req, '/api/admin/announcement')).status).toBe(200);
+    const pub = await call({ headers: {}, method: 'GET' }, '/api/announcement');
+    expect(JSON.parse(pub.body).text).toBe('Maintenance at 20:00');
+  });
+});
+
+describe('sign-in redirect', async () => {
+  const { safeNext } = await import('./auth.mjs');
+  it('only returns to paths on this site', () => {
+    expect(safeNext('/admin')).toBe('/admin');
+    expect(safeNext('//evil.example')).toBe('/');
+    expect(safeNext('https://evil.example')).toBe('/');
+  });
+});
+
+describe('discord channel notifications', async () => {
+  const { createNotifier } = await import('./notifier.mjs');
+  const sent = [];
+  const fakeFetch = async (url, init) => { sent.push({ url, ...JSON.parse(init.body), auth: init.headers.Authorization }); return { ok: true, status: 200 }; };
+  const make2 = (extra = {}) => createNotifier({ token: 'bot-token', channelId: '123456789012345678', fetchImpl: fakeFetch, ...extra });
+
+  it('is off without a token and a channel id', () => {
+    expect(createNotifier({ token: 'x' }).enabled).toBe(false);
+    expect(make2().enabled).toBe(true);
+  });
+
+  it('posts as the bot to the channel and never pings anyone', async () => {
+    sent.length = 0;
+    await make2().joined('Ruben');
+    expect(sent[0].url).toBe('https://discord.com/api/v10/channels/123456789012345678/messages');
+    expect(sent[0].auth).toBe('Bot bot-token');
+    expect(sent[0].content).toContain('**Ruben** founded an empire');
+    expect(sent[0].allowed_mentions).toEqual({ parse: [] });
+  });
+
+  it('accepts only known player news, cleaned and rate-limited per player', async () => {
+    sent.length = 0;
+    const n = make2({ perHour: 2 });
+    const p = { id: '1', name: 'Ruben' };
+    expect(await n.report(p, 'spam', 'hello')).toBe(false);
+    expect(await n.report(p, 'battle', 'Victory\nover ```the``` raiders')).toBe(true);
+    expect(sent[0].content).toBe('⚔️ **Ruben**: Victory over the raiders');
+    expect(await n.report(p, 'colony', 'settled X')).toBe(true);
+    expect(await n.report(p, 'depot', 'built a depot')).toBe(false); // third in an hour
+    expect(await n.report({ id: '2', name: 'Friend' }, 'depot', 'built a depot')).toBe(true);
+  });
+
+  it('admin test explains a missing channel permission', async () => {
+    const { adminIds, createAdmin } = await import('./admin.mjs');
+    const auth = make();
+    const store = createStore(mkdtempSync(join(tmpdir(), 'falchion-n-')));
+    const notifier = createNotifier({ token: 't', channelId: '123456789012345678', fetchImpl: async () => ({ ok: false, status: 403 }) });
+    const admin = createAdmin({ auth, store, admins: adminIds({ ADMIN_DISCORD_ID: '123456789012345678' }), notifier, info: () => ({}) });
+    const res = fakeRes();
+    await admin({ method: 'POST', headers: { cookie: `fal_session=${encodeURIComponent(auth.issue({ id: '123456789012345678', name: 'R' }))}`, 'x-falchion-admin': '1' } }, res, '/api/admin/notify-test');
+    expect(res.status).toBe(502);
+    expect(JSON.parse(res.body).error).toContain('Send Messages');
+  });
+});

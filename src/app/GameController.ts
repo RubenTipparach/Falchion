@@ -49,6 +49,8 @@ export interface ControllerDeps {
   readonly economy: EconomyTables;
   readonly clock: WorldClock;
   readonly save: SaveGame;
+  /** Share notable news (battles, colonies, depots) with the server's Discord channel. */
+  readonly report?: (kind: 'battle' | 'colony' | 'depot', text: string) => void;
 }
 
 export interface ViewDeps {
@@ -675,6 +677,7 @@ export class GameController implements GameActions, GameQueries {
     const colony: Colony = { name: planet.name, biome: planet.biome, planetId: planet.id, starId: star.id, size: planet.size, buildings: [] };
     this.deps.store.update((st) => ({ economy: { ...st.economy, colonies: [...st.economy.colonies, colony] } }));
     this.dispatch(`${planet.name} settled: a new colony with ${slotsOf(planet.size)} building slots`, 'good');
+    this.deps.report?.('colony', `settled ${planet.name} in ${star.name}`);
   }
 
   buildDepot(star: StarSystem): void {
@@ -687,6 +690,7 @@ export class GameController implements GameActions, GameQueries {
     this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, cost) }, depots: [...s.depots, star.id] });
     this.adjustGroup(g.id, [{ classId: 'construction-tender', count: -1 }]);
     this.dispatch(`Supply depot built at ${star.name}: fleets there resupply and rearm`, 'good');
+    this.deps.report?.('depot', `built a supply depot at ${star.name}`);
   }
 
   build(planetId: string, buildingId: string): void {
@@ -860,6 +864,7 @@ export class GameController implements GameActions, GameQueries {
     this.deps.store.update({ empire: { ...s.empire, research }, engaged: [...s.engaged, targetId], economy: { ...s.economy, colonies } });
     this.adjustGroup(groupId, delta, { ammo: group.stores.ammo - fire.spent });
     this.dispatch(outcome.summary, /Victory|captured/.test(outcome.summary) ? 'good' : 'bad');
+    this.deps.report?.('battle', `${outcome.summary} at ${at.name}`);
     return outcome;
   }
 

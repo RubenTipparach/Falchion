@@ -53,6 +53,7 @@ secret**. Add:
 | `DISCORD_CLIENT_ID` | the Client ID from step 1 |
 | `DISCORD_CLIENT_SECRET` | the Client Secret from step 1 |
 | `SESSION_SECRET` | the random string from step 2 |
+| `ADMIN_DISCORD_ID` | optional: your Discord user id(s), comma-separated (see Admin portal) |
 
 ## 4. Deploy
 
@@ -78,6 +79,46 @@ Send them **https://falchion.fly.dev**. They click **Sign in with Discord**, app
 land in their new empire. Each new player's home is placed 60–260 ly from the original
 starting system, so friends start within an hour or two of each other at base speed.
 **Sign out** is under your name in the top-right corner.
+
+## Admin portal
+
+**https://falchion.fly.dev/admin**: server overview, every player (year, colonies,
+fleets, last save) with a **Reset empire** button, and an **announcement** banner shown
+to all players.
+
+Access uses the same secret as High Frontier: add a GitHub secret **`ADMIN_DISCORD_ID`**
+holding your Discord user id. For several admins, separate ids with commas
+(`123456789012345678,234567890123456789`); `ADMIN_DISCORD_IDS` also works. Redeploy
+after changing it.
+
+To find your id, sign in and open `/admin`: the "Not an admin" page shows it. Or, in
+Discord, turn on **Settings → Advanced → Developer Mode**, then right-click your name →
+**Copy User ID**.
+
+## Channel notifications (the bot)
+
+The Falchion bot posts game news to one channel in your Discord server: new players
+founding an empire, admin announcements, battle results, new colonies and supply depots.
+It never pings anyone, and each player's reports are limited to 12 an hour.
+
+1. **Add the bot to your server** (once): in the Developer Portal open your app →
+   **OAuth2 → URL Generator**, tick the **bot** scope and the **View Channels**,
+   **Send Messages** and **Embed Links** permissions, open the generated URL, pick the
+   server and authorize (you need *Manage Server* there).
+2. **Bot token**: app → **Bot** → **Reset Token**, copy it. Keep it secret.
+3. **Channel id**: in Discord turn on **Settings → Advanced → Developer Mode**, then
+   right-click the channel → **Copy Channel ID**.
+4. Make sure the bot can see and post in that channel (channel → Edit Channel →
+   Permissions: add the bot or its role with *View Channel* and *Send Messages*).
+5. Add two GitHub secrets and redeploy:
+
+   | Name | Value |
+   |---|---|
+   | `DISCORD_BOT_TOKEN` | the token from step 2 |
+   | `DISCORD_CHANNEL_ID` | the channel id from step 3 |
+
+6. Open `/admin` and click **Send test message**. If it fails, the page says why
+   (missing permission, wrong channel id, or a rejected token).
 
 ## Running it locally
 
@@ -109,6 +150,6 @@ from `/api/players`. Stockpiles, research and orders are never sent to other pla
 ## Not built yet
 
 - Launching Falchion as a **Discord Activity** inside a voice channel.
-- **Notifications** (fleet arrivals, battles) by DM or channel, which needs a bot token.
+- Direct messages to individual players (the bot posts in one channel only).
 
 Both are in the `mmo-core-systems` OpenSpec change.

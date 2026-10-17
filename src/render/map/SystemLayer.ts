@@ -50,18 +50,11 @@ export class SystemLayer implements MapLayer {
   readonly object3d = new THREE.Group();
   private current: BuiltSystem | null = null;
   private readonly coronaTexture = radialTexture();
-  private readonly marker: THREE.Mesh;
   private selectedId: string | null = null;
   private hoverId: string | null = null;
   private origin = { x: 0, z: 0 };
 
   constructor(private readonly galaxy: GalaxyModel, private readonly events: SystemEvents) {
-    this.marker = new THREE.Mesh(
-      new THREE.RingGeometry(1.5, 1.54, 96),
-      new THREE.MeshBasicMaterial({ color: '#e6b450', transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }),
-    );
-    this.marker.visible = false;
-    this.marker.renderOrder = 8;
   }
 
   get system(): StarSystem | null {
@@ -123,7 +116,6 @@ export class SystemLayer implements MapLayer {
     const labelFade = String(fade(view.visibleWidth, LABELS_BELOW * 0.6, LABELS_BELOW));
     sys.starLabel.visible = showLabels;
     sys.starLabel.element.style.opacity = labelFade;
-    let selected: OrbitingPlanet | null = null;
     for (const p of sys.planets) {
       p.pivot.rotation.y = p.phase + t * p.speed;
       p.mesh.rotation.y = t * 0.15;
@@ -133,17 +125,6 @@ export class SystemLayer implements MapLayer {
       p.label.element.style.opacity = labelFade;
       p.label.element.classList.toggle('active', p.planet.id === this.selectedId);
       p.label.element.classList.toggle('hover', p.planet.id === this.hoverId);
-      if (p.planet.id === this.selectedId) selected = p;
-    }
-    this.marker.visible = !!selected;
-    if (selected) {
-      selected.mesh.parent!.add(this.marker);
-      this.marker.scale.setScalar(selected.radius);
-      this.marker.quaternion.copy(view.camera.quaternion);
-      this.marker.parent!.updateMatrixWorld();
-      // Face the camera regardless of parent rotation.
-      const parentQ = this.marker.parent!.getWorldQuaternion(new THREE.Quaternion()).invert();
-      this.marker.quaternion.premultiply(parentQ);
     }
   }
 
@@ -201,7 +182,6 @@ export class SystemLayer implements MapLayer {
 
   private clear(): void {
     if (!this.current) return;
-    if (this.marker.parent) this.marker.parent.remove(this.marker);
     this.object3d.remove(this.current.root);
     this.current.root.traverse((o) => {
       if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
@@ -216,8 +196,6 @@ export class SystemLayer implements MapLayer {
   dispose(): void {
     this.clear();
     this.coronaTexture.dispose();
-    this.marker.geometry.dispose();
-    (this.marker.material as THREE.Material).dispose();
   }
 }
 

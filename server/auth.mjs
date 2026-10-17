@@ -5,6 +5,10 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const SESSION_COOKIE = 'fal_session';
 const STATE_COOKIE = 'fal_oauth_state';
+const NEXT_COOKIE = 'fal_next';
+
+/** Where to land after sign-in: a same-site path only (never another origin). */
+export const safeNext = (next) => (typeof next === 'string' && /^\/(?![/\\])[\w\-./?=&]*$/.test(next) ? next : '/');
 const SESSION_DAYS = 30;
 
 const b64url = (buf) => Buffer.from(buf).toString('base64url');
@@ -63,11 +67,11 @@ export function createAuth(opts) {
   }
 
   /** GET /auth/discord: send the player to Discord, with a CSRF state cookie. */
-  function login(res) {
+  function login(res, next = '/') {
     const state = b64url(randomBytes(18));
     const url = new URL(discordAuthorize);
     url.search = new URLSearchParams({ client_id: clientId, response_type: 'code', scope: 'identify', redirect_uri: redirectUri, state, prompt: 'none' }).toString();
-    res.writeHead(302, { Location: url.toString(), 'Set-Cookie': cookie(STATE_COOKIE, state, { maxAge: 600, secure }), 'Cache-Control': 'no-store' });
+    res.writeHead(302, { Location: url.toString(), 'Set-Cookie': [cookie(STATE_COOKIE, state, { maxAge: 600, secure }), cookie(NEXT_COOKIE, safeNext(next), { maxAge: 600, secure })], 'Cache-Control': 'no-store' });
     res.end();
   }
 
@@ -94,7 +98,8 @@ export function createAuth(opts) {
       const me = await meRes.json();
       // Only the id, display name and avatar are kept (spec: discord-integration).
       const user = { id: String(me.id), name: me.global_name || me.username || 'Commander', avatar: me.avatar ? `https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=64` : null };
-      res.writeHead(302, { Location: '/', 'Set-Cookie': [clearState, cookie(SESSION_COOKIE, issue(user), { maxAge: SESSION_DAYS * 86_400, secure })], 'Cache-Control': 'no-store' });
+      const next = safeNext(parseCookies(req.headers.cookie)[NEXT_COOKIE]);
+      res.writeHead(302, { Location: next, 'Set-Cookie': [clearState, cookie(NEXT_COOKIE, '', { maxAge: 0, secure }), cookie(SESSION_COOKIE, issue(user), { maxAge: SESSION_DAYS * 86_400, secure })], 'Cache-Control': 'no-store' });
       res.end();
     } catch (err) {
       console.error('discord sign-in failed:', err.message);

@@ -4,6 +4,7 @@ import { buildYears, hasWarships, isSurveyClass, isWarship, REPAIR, specOf, wars
 import { SHIP_CLASSES, ShipClassDef } from '../content/shipClasses';
 import { BattleResult, CombatBonuses, Damage, menderRepair, repairDamage, resolveAssault, resolveBattle, Side, Squadron } from '../core/combat/Combat';
 import { recordRound } from '../core/combat/BattleRecord';
+import { logBattle, tallyLost, tallyOf, type BattleLogEntry } from '../core/combat/BattleLog';
 import { ROLE_TRAIT } from '../core/ships/ClassDesign';
 import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf } from '../core/economy/Economy';
 import { cargoCapacity, FREIGHTER, saleValue, type Market } from '../core/economy/Trade';
@@ -1255,6 +1256,13 @@ export class EmpireSim {
       : result.phaseReached === 'bombardment' ? `Bombardment of ${target.name} could not break its defences: bring siege ships`
       : `Landing on ${target.name} repelled: ${result.troopsLanded} troops vs ${result.troopsNeeded} needed`;
     const outcome: CombatOutcome = { kind: 'planet', result, summary };
+    this.logBattle({
+      year: s.turn, kind: 'assault', attacked: false, place: placeOf(at), ours: group.name, ...(group.id !== 'dock' ? { fleetId: group.id } : {}),
+      foe: target.name, foeEmpire: target.owner, outcome: result.captured ? 'won' : 'lost',
+      lost: tallyLost(committed, result.survivors), killed: result.space ? tallyLost(target.planet.garrison.ships, result.space.survivors[1]) : {},
+      ...(result.space?.captured[0].length ? { boarded: tallyOf(result.space.captured[0]) } : {}), ...(result.space?.captured[1].length ? { taken: tallyOf(result.space.captured[1]) } : {}),
+      summary,
+    });
     this.deps.store.update({ empire: { ...s.empire, research }, engaged: [...s.engaged, targetId], economy: { ...s.economy, colonies } });
     this.adjustGroup(groupId, delta, undefined, result.damage);
     this.emit(effects);
@@ -1312,6 +1320,14 @@ export class EmpireSim {
       : result.winner === other ? `${force.fleetName} was destroyed by ${foeName} of ${foeEmpire} at ${place} in round ${round}`
       : `Battle at ${place}, round ${round}: ${force.fleetName} against ${foeName} of ${foeEmpire}, ${tally}.${round === 1 ? ' A round a year until one side is gone or breaks off: Retreat from the fleet card.' : ''}`;
     this.dispatch(overtaken ? `Overtaken while breaking off: ${text}` : text, result.winner === index ? 'good' : result.winner === other || mine > theirs ? 'bad' : undefined);
+    this.logBattle({
+      year: tick, kind: overtaken ? 'pursuit' : 'sea', attacked: overtaken || !force.aggressive, place: force.star ? placeOf(force.star) : { name: 'deep space', q: force.at.q, r: force.at.r },
+      ours: force.fleetName, fleetId: force.fleetId, foe: foeName, foeEmpire, round,
+      outcome: result.winner === index ? 'won' : result.winner === other ? 'lost' : 'ongoing',
+      lost: tallyLost(force.ships, result.survivors[index]), killed: tallyLost(foe.ships, result.survivors[other]),
+      ...(result.captured[index].length ? { boarded: tallyOf(result.captured[index]) } : {}), ...(result.captured[other].length ? { taken: tallyOf(result.captured[other]) } : {}),
+      summary: overtaken ? `Overtaken while breaking off: ${text}` : text,
+    });
   }
 
   /** Another player's fleet by `${ownerId}:${fleetId}` (from the server's list of empires, or the live feed). */
@@ -1596,6 +1612,7 @@ export class EmpireSim {
     const defender = [...candidates].sort((a, b) => this.groupPower(armed(b)) - this.groupPower(armed(a)))[0];
     const colony = !!star && (atHome || this.colonyStars().has(star.id));
     let lost = !defender;
+    let raidEntry: Omit<BattleLogEntry, 'id'> | null = null;
     if (defender) {
       const fighting = defender.id === 'dock' || armed(defender).length ? armed(defender) : defender.ships;
       if (fighting.length) {
@@ -1616,6 +1633,13 @@ export class EmpireSim {
         this.dispatch(text, result.winner === 1 ? 'good' : 'bad');
         if (star) this.deps.report?.('battle', text, placeOf(star));
         lost = result.winner !== 1;
+        raidEntry = {
+          year: s.turn, kind: 'raid', attacked: true, place: star ? placeOf(star) : null, ours: defender.name, ...(defender.id !== 'dock' ? { fleetId: defender.id } : {}),
+          foe: raiders, foeEmpire: def.name, outcome: result.winner === 1 ? 'won' : result.winner === 0 ? 'lost' : 'draw',
+          lost: tallyLost(fighting, result.survivors[1]), killed: tallyLost(raid.ships, result.survivors[0]),
+          ...(result.captured[1].length ? { boarded: tallyOf(result.captured[1]) } : {}), ...(result.captured[0].length ? { taken: tallyOf(result.captured[0]) } : {}),
+          summary: text,
+        };
       } else lost = true;
     }
     if (lost && colony) {
@@ -1626,11 +1650,21 @@ export class EmpireSim {
       for (const [r, n] of Object.entries(taken)) materials[r as Resource] -= n!;
       this.deps.store.update((st) => ({ empire: { ...st.empire, materials } }));
       const list = Object.entries(taken).filter(([, n]) => n! > 0).map(([r, n]) => `${n} ${RESOURCES.find((x) => x.id === r)?.name.toLowerCase()}`).join(', ');
-      this.dispatch(`${raiders} plundered ${place}${list ? `: ${list} taken` : ''}. Station warships there to defend it.`, 'bad');
+      const text = `${raiders} plundered ${place}${list ? `: ${list} taken` : ''}. Station warships there to defend it.`;
+      this.dispatch(text, 'bad');
+      raidEntry = raidEntry
+        ? { ...raidEntry, outcome: 'plundered', plunder: taken, summary: `${raidEntry.summary}. ${text}` }
+        : { year: s.turn, kind: 'raid', attacked: true, place: star ? placeOf(star) : null, ours: place, foe: raiders, foeEmpire: def.name, outcome: 'plundered', lost: {}, killed: {}, plunder: taken, summary: text };
       void m;
     } else if (!defender) {
       this.dispatch(`${raiders} struck at ${place} but found nothing to take`);
     }
+    if (raidEntry) this.logBattle(raidEntry);
+  }
+
+  /** Add a battle to the empire's battle log (War Room › Battle log). */
+  protected logBattle(entry: Omit<BattleLogEntry, 'id'>): void {
+    this.deps.store.update((st) => ({ battleLog: logBattle(st.battleLog, entry) }));
   }
 
 

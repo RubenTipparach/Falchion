@@ -6,6 +6,7 @@ import type { StarSystem } from '../core/galaxy/GalaxyModel';
 import type { Planet } from '../core/galaxy/Planets';
 import type { Stores } from '../core/fleet/Logistics';
 import type { Loadout } from '../core/fleet/Presence';
+import type { BattleLogEntry } from '../core/combat/BattleLog';
 import type { Job } from '../core/construction/Construction';
 import type { ShipDesign } from '../core/ships/ShipDesign';
 import type { FleetView } from '../render/map/FleetLayer';
@@ -53,6 +54,8 @@ export interface GameState {
   readonly engaged: readonly string[];
   /** Reputation history for the chart: standing with each known NPC faction, sampled every few years. */
   readonly relations?: Relations;
+  /** Raids on our worlds and fleets, battles at sea and our assaults, newest first (War Room › Battle log). */
+  readonly battleLog?: readonly BattleLogEntry[];
 }
 
 export interface Relations {

@@ -8,6 +8,8 @@ import { Drawer } from '../Drawer';
 import type { CombatOutcome, FleetGroup, GameActions, GameQueries, WarTarget } from '../GameActions';
 import { locateButton, storesView } from '../widgets';
 import { clear, h } from '../dom';
+import { unseenAttacks } from '../../core/combat/BattleLog';
+import { battleLogView, lastSeenBattle, markBattlesSeen } from '../BattleLogView';
 
 const nameOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)?.name ?? id;
 const docOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)?.doctrine ?? 'civilian';
@@ -20,19 +22,61 @@ export class WarRoomPanel extends Drawer {
   private outcome: CombatOutcome | null = null;
   private readonly left = h('div', { class: 'war-left' });
   private readonly right = h('div', { class: 'war-right' });
+  /** Attack (assaults on NPC worlds) or the battle log. */
+  private mode: 'attack' | 'log' = 'attack';
+  private onlyAttacks = false;
+  private readonly modeBar = h('div', { class: 'seg war-mode', role: 'tablist' });
+  private readonly attackBox = h('div', { class: 'war' }, this.left, this.right);
+  private readonly logBox = h('div', { class: 'war-log' });
 
   constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries) {
     super('war', 'War Room', 'Combat is automated and deterministic, and only ships on station at the target can fight. Damage stays with your ships: repair in a friendly system.', true);
-    this.body.append(h('div', { class: 'war' }, this.left, this.right));
+    this.body.append(this.modeBar, this.attackBox, this.logBox);
     store.subscribe((s, prev) => {
       if (!this.opened) return;
-      if (s.economy.roster !== prev.economy.roster || s.engaged !== prev.engaged || s.loadouts !== prev.loadouts || s.turn !== prev.turn) { this.resetCommit(); this.render(); }
+      if (s.economy.roster !== prev.economy.roster || s.engaged !== prev.engaged || s.loadouts !== prev.loadouts || s.turn !== prev.turn || s.battleLog !== prev.battleLog) { this.resetCommit(); this.render(); }
     });
   }
 
   protected onOpen(): void {
+    // Attacked since the log was last read: open on it.
+    if (unseenAttacks(this.store.state.battleLog, lastSeenBattle()) > 0) this.mode = 'log';
     this.resetCommit();
     this.render();
+  }
+
+  /** Open the War Room on its battle log. */
+  showLog(): void {
+    this.mode = 'log';
+    this.open();
+    this.render();
+  }
+
+  private renderMode(): void {
+    clear(this.modeBar);
+    const log = this.store.state.battleLog;
+    const unseen = this.mode === 'log' ? 0 : unseenAttacks(log, lastSeenBattle());
+    const btn = (id: 'attack' | 'log', label: string, extra?: HTMLElement) => h('button', { class: `seg-btn ${this.mode === id ? 'active' : ''}`, role: 'tab', 'aria-selected': String(this.mode === id), onclick: () => { this.mode = id; this.render(); } }, label, extra ?? '');
+    this.modeBar.append(btn('attack', 'Attack'), btn('log', 'Battle log', unseen ? h('span', { class: 'badge hot', title: `${unseen} attack${unseen === 1 ? '' : 's'} on us since you last looked` }, String(unseen)) : undefined));
+    this.attackBox.hidden = this.mode !== 'attack';
+    this.logBox.hidden = this.mode !== 'log';
+  }
+
+  private renderLog(): void {
+    const log = this.store.state.battleLog;
+    clear(this.logBox);
+    this.logBox.append(battleLogView(log, {
+      onlyAttacks: this.onlyAttacks,
+      setOnlyAttacks: (on) => { this.onlyAttacks = on; this.renderLog(); },
+      watchable: (fleetId) => !!this.q.battleOf(fleetId),
+      watch: (fleetId) => this.actions.watchBattle(fleetId),
+      locate: (e) => {
+        const star = e.place ? this.q.starById(`${e.place.q},${e.place.r}`) : null;
+        if (e.fleetId && this.store.state.fleets.some((f) => f.id === e.fleetId)) return this.actions.focusFleet(e.fleetId, false);
+        if (star) { this.actions.select(star); this.actions.flyTo(star, false); }
+      },
+    }));
+    markBattlesSeen(log);
   }
 
   /** The selected target (the first known one when none is chosen). */
@@ -64,6 +108,8 @@ export class WarRoomPanel extends Drawer {
   }
 
   private render(): void {
+    this.renderMode();
+    if (this.mode === 'log') return this.renderLog();
     const s = this.store.state;
     const target = this.target();
     clear(this.left);

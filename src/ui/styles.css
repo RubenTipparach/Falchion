@@ -310,6 +310,25 @@ table.compact td, table.compact th { padding: 4px 6px; font-size: 12px; }
 td.heat { background: rgba(127, 211, 230, calc(var(--v) * 0.35)); }
 
 /* War room */
+.war-mode { margin-bottom: 12px; width: max-content; }
+.war[hidden], .war-log[hidden] { display: none; }
+.war-mode .seg-btn { display: inline-flex; align-items: center; gap: 6px; }
+.war-mode .seg-btn.active { color: var(--brass); background: rgba(230, 180, 80, 0.12); }
+.battle-log .toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.log-list { display: grid; gap: 6px; }
+.log-entry { border: 1px solid var(--line); border-left: 3px solid var(--line-strong); border-radius: 4px; background: rgba(10, 16, 32, 0.5); }
+.log-entry.attacked { border-left-color: var(--bad); }
+.log-entry > summary { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 8px 10px; cursor: pointer; list-style: none; }
+.log-entry > summary::-webkit-details-marker { display: none; }
+.log-entry .log-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.log-entry .log-what .tag { margin-left: 6px; }
+.log-year { color: var(--muted); font-size: 12px; }
+.log-outcome { font: 600 11px var(--font-display); letter-spacing: 0.12em; text-transform: uppercase; }
+.log-outcome.good { color: var(--good); } .log-outcome.bad { color: var(--bad); } .log-outcome.even { color: var(--brass); }
+.log-body { padding: 0 10px 10px 76px; display: grid; gap: 4px; }
+.log-row { display: grid; grid-template-columns: 130px 1fr; gap: 8px; font-size: 12px; }
+.log-row.bad span:last-child { color: var(--bad); } .log-row.good span:last-child { color: var(--good); }
+@media (max-width: 720px) { .log-body { padding-left: 10px; } .log-entry > summary { grid-template-columns: 48px minmax(0, 1fr) auto; gap: 6px; } .log-row { grid-template-columns: 110px 1fr; } }
 .war { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 18px; }
 .war-left h4:first-child { margin-top: 0; }
 .target-list { display: grid; gap: 6px; }

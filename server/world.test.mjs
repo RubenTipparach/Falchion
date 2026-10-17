@@ -73,6 +73,8 @@ describe('the shared world on the server', () => {
     await createSimTicker({ store, loadSim: async () => sim, withLock, world }).tick(tick);
     const texts = map.get(A).save.dispatches.map((d) => d.text);
     expect(texts.some((t) => t.includes(raiding.name))).toBe(true);
+    // The raid is in the empire's battle log, as an attack on it.
+    expect(map.get(A).save.battleLog[0]).toMatchObject({ kind: 'raid', attacked: true, foe: raiding.name, year: tick });
     const after = await world.get();
     expect(after.tick).toBe(tick);
     expect(after.npcs[def.id].fleets.find((f) => f.id === raiding.id)?.mission ?? 'destroyed').not.toBe('raid');

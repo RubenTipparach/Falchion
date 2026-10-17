@@ -7,6 +7,8 @@ import type { WorldClock } from '../app/WorldClock';
 import type { PlayerIdentity } from '../app/identity';
 import type { Resource } from '../content/resources';
 import { flagEl } from '../render/flag';
+import { unseenAttacks } from '../core/combat/BattleLog';
+import { BATTLE_LOG_SEEN_EVENT, lastSeenBattle } from './BattleLogView';
 
 export class TopBar {
   readonly el: HTMLElement;
@@ -20,6 +22,8 @@ export class TopBar {
   private readonly viewLabel = h('span', {}, 'Galaxy');
   private readonly tabs: Record<PanelId, HTMLButtonElement>;
   private readonly lootBadge = h('span', { class: 'badge', hidden: true });
+  /** Attacks on us since the battle log was last read. */
+  private readonly warBadge = h('span', { class: 'badge hot', hidden: true });
   private readonly empireBtn: HTMLButtonElement;
   private readonly nav: HTMLElement;
 
@@ -33,6 +37,7 @@ export class TopBar {
       h('button', { class: 'tab', 'data-tab': id, title: label, 'aria-label': label, onclick: () => actions.openPanel(id) }, icon(ic), h('span', { class: 'tab-label' }, label));
     this.tabs = { shipyard: tab('shipyard', 'Shipyard', 'shipyard'), research: tab('research', 'Research', 'research'), empire: tab('empire', 'Empire', 'empire'), war: tab('war', 'War Room', 'battle'), explore: tab('explore', 'Explore', 'explore'), fleets: tab('fleets', 'Fleets', 'fleet') };
     this.tabs.explore.append(this.lootBadge);
+    this.tabs.war.append(this.warBadge);
     this.empireBtn = h('button', { class: 'empire-chip', title: 'Your empire: click to change its name, colours and flag', onclick: () => actions.editEmpire() });
     this.el = h('header', { class: 'topbar' },
       h('div', { class: 'brand' }, icon('logo'), h('span', { class: 'wordmark' }, 'Falchion')),
@@ -53,7 +58,10 @@ export class TopBar {
       if (s.turn !== prev.turn) this.renderTurn(s.turn);
       if (s.explored !== prev.explored || s.openedCrates !== prev.openedCrates) this.renderLoot(s);
       if (s.identity !== prev.identity) this.renderEmpire(s);
+      if (s.battleLog !== prev.battleLog) this.renderWar(s);
     });
+    window.addEventListener(BATTLE_LOG_SEEN_EVENT, () => this.renderWar(store.state));
+    this.renderWar(store.state);
     this.renderEmpire(store.state);
     this.renderStats(store.state);
     this.renderTurn(store.state.turn);
@@ -109,6 +117,13 @@ export class TopBar {
     if (!id) return;
     this.empireBtn.style.setProperty('--empire', id.color);
     this.empireBtn.replaceChildren(flagEl(id.flag, 30), h('span', { class: 'empire-name' }, id.name));
+  }
+
+  private renderWar(s: GameState): void {
+    const n = unseenAttacks(s.battleLog, lastSeenBattle());
+    this.warBadge.hidden = n === 0;
+    this.warBadge.textContent = String(n);
+    this.warBadge.title = `Attacked ${n} time${n === 1 ? '' : 's'} since you last opened the battle log`;
   }
 
   private renderLoot(s: GameState): void {

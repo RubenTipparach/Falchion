@@ -418,3 +418,17 @@ describe('damage carries over, Menders and friendly systems repair it', () => {
     expect('ammo' in next.dockSpent).toBe(false);
   });
 });
+
+describe('the battle log', () => {
+  it('logs each round of a battle at sea for both empires, with each side\'s losses', () => {
+    const a = empireWith(A, interceptors(6), HERE, { stance: 'aggressive' });
+    const b = empireWith(B, interceptors(6), HERE);
+    const r = meet(a, b)!;
+    const [ea] = asSave(r.saveA).battleLog, [eb] = asSave(r.saveB).battleLog;
+    expect(ea).toMatchObject({ kind: 'sea', round: 1, ours: 'Strike 11', foe: 'Strike 22', attacked: false, fleetId: fid(A) });
+    expect(eb).toMatchObject({ kind: 'sea', round: 1, attacked: true });
+    const n = (t: Record<string, number>) => Object.values(t).reduce((x, y) => x + y, 0);
+    expect(n(ea.lost)).toBe(n(eb.killed));
+    expect(n(ea.killed)).toBe(n(eb.lost));
+  });
+});

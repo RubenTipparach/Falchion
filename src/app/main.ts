@@ -7,7 +7,7 @@ import { CLOCK, connectWorldClock } from './WorldClock';
 import { SaveGame } from './SaveGame';
 import { DEFAULT_ADDRESS_SCHEME } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel } from '../core/galaxy/GalaxyModel';
-import { hexAdd, hexDistance, hexToWorld } from '../core/hex/Hex';
+import { hexAdd, hexDistance, hexToWorld, worldToHex } from '../core/hex/Hex';
 import { TechTree } from '../core/research/TechTree';
 import { DEFAULT_DESIGN } from '../core/ships/ShipDesign';
 import { DEFAULT_LOOT_TABLES } from '../content/lootTables';
@@ -24,6 +24,7 @@ import { specOf, upkeepOf } from '../content/logistics';
 import { planetsOf, Planet } from '../core/galaxy/Planets';
 import { PlanetThumbnails } from '../render/planets/PlanetThumbnails';
 import { NebulaLayer } from '../render/map/NebulaLayer';
+import { NebulaSkyboxLayer } from '../render/map/NebulaSkyboxLayer';
 import { GalaxyDiscLayer } from '../render/map/GalaxyDiscLayer';
 import { StarfieldLayer } from '../render/map/StarfieldLayer';
 import { SystemLayer } from '../render/map/SystemLayer';
@@ -142,6 +143,11 @@ async function bootstrap(): Promise<void> {
 
   map.layers.add(new StarfieldLayer(galaxy.params.seed));
   map.layers.add(new NebulaLayer(galaxy.params.seed));
+  // System view: the star (or a followed ship in deep space) sits inside the map's nebula.
+  map.layers.add(new NebulaSkyboxLayer(galaxy.params.seed, (x, z) => {
+    const star = galaxy.nearestStar(worldToHex(x, z), 1);
+    return star && { id: star.id, x: star.position.x, z: star.position.z };
+  }));
   map.layers.add(new GalaxyDiscLayer(galaxy.params));
   map.layers.add(new GalaxyCloudLayer(galaxy));
   map.layers.add(new MidStarLayer(galaxy));

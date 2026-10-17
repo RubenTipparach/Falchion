@@ -1,12 +1,25 @@
 import type { GameState } from './GameState';
+import type { Hex } from '../core/hex/Hex';
 
 /** Fields that persist between sessions; the rest is view state or derived from the world. */
 const SAVED = [
   'turn', 'empire', 'economy', 'designs', 'shipyardClass', 'hiddenTraits', 'explored', 'openedCrates', 'collectedCaches',
-  'fleets', 'loadouts', 'dockSpent', 'depots', 'construction', 'lastReport', 'dispatches', 'engaged', 'identity',
+  'fleets', 'loadouts', 'dockSpent', 'depots', 'construction', 'lastReport', 'dispatches', 'engaged', 'identity', 'home',
 ] as const satisfies ReadonlyArray<keyof GameState>;
 
-export type SavedGame = Pick<GameState, (typeof SAVED)[number]> & { readonly version: number; readonly seed: number };
+export type SavedGame = Omit<Pick<GameState, (typeof SAVED)[number]>, 'home'> & { readonly version: number; readonly seed: number; readonly home?: GameState['home'] };
+
+/**
+ * Where a save's empire lives: its recorded home, or (saves from before homes were recorded)
+ * the star of its capital colony. Keeps a player's home when the galaxy's star layout changes.
+ */
+export function savedHome(save: SavedGame | null): Hex | null {
+  const h = save?.home?.hex;
+  if (h && Number.isInteger(h.q) && Number.isInteger(h.r)) return { q: h.q, r: h.r };
+  const id = save?.economy?.colonies?.find((c) => c.capital)?.starId;
+  const [q, r] = (id ?? '').split(',').map(Number);
+  return Number.isInteger(q) && Number.isInteger(r) ? { q, r } : null;
+}
 
 const VERSION = 1;
 const BASE_KEY = 'falchion.save';

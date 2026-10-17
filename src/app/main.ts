@@ -4,7 +4,7 @@ import { newEmpire } from '../core/empire/Empire';
 import { planMovement, travelTurns } from '../core/fleet/Fleet';
 import { formatDuration } from '../core/time/WorldTime';
 import { CLOCK, connectWorldClock } from './WorldClock';
-import { SaveGame } from './SaveGame';
+import { SaveGame, savedHome } from './SaveGame';
 import { DEFAULT_ADDRESS_SCHEME } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel } from '../core/galaxy/GalaxyModel';
 import { hexAdd, hexDistance, hexToWorld, worldToHex } from '../core/hex/Hex';
@@ -74,7 +74,16 @@ async function bootstrap(): Promise<void> {
   const galaxy = new GalaxyModel();
   const tree = new TechTree(TECH_NODES, SHARD_SOURCES);
   const encounters = new EncounterResolver(DEFAULT_LOOT_TABLES, tree);
-  const world = createWorld(galaxy, signedIn ? identity.id : undefined);
+  const saveGame = new SaveGame(galaxy.params.seed, undefined, signedIn ? identity.id : undefined);
+  const serverSaves = signedIn ? new ServerSaves() : null;
+  let saved = saveGame.load();
+  if (serverSaves) {
+    // The server copy follows the player between devices; use whichever is further along.
+    const remote = await serverSaves.load();
+    if (saveGame.valid(remote) && (!saved || remote.turn >= saved.turn)) saved = remote;
+  }
+  // A saved empire keeps its home system wherever the galaxy puts stars now.
+  const world = createWorld(galaxy, signedIn ? identity.id : undefined, savedHome(saved));
   const { factory, styles, traits } = createDefaultShipFactory();
   const partners = tradePartners(world, world.home);
   const economyTables: EconomyTables = { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, partners, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf };
@@ -102,14 +111,6 @@ async function bootstrap(): Promise<void> {
     ...settleable.slice(1, 3).map((p) => colonyOf(p, ['mine'])),
   ];
   const clock = await connectWorldClock();
-  const saveGame = new SaveGame(galaxy.params.seed, undefined, signedIn ? identity.id : undefined);
-  const serverSaves = signedIn ? new ServerSaves() : null;
-  let saved = saveGame.load();
-  if (serverSaves) {
-    // The server copy follows the player between devices; use whichever is further along.
-    const remote = await serverSaves.load();
-    if (saveGame.valid(remote) && (!saved || remote.turn >= saved.turn)) saved = remote;
-  }
   const t0 = clock.tick();
   const start = initialFleets(galaxy, world, identity.displayName, t0);
   const houseDesign = { ...DEFAULT_DESIGN, colors: { primary: '#c8d0dc', secondary: '#2b3448', accent: '#ffb547' } };
@@ -127,7 +128,7 @@ async function bootstrap(): Promise<void> {
     dispatches: [{ turn: t0, text: 'Welcome, Commander. One year passes every minute. Survey Group Alpha is on station nearby: explore its planets and collect what you find. Ships need supply to explore and ammunition to fight; both refill in friendly systems.' }],
   };
   // A saved empire carries on where it left off; the missed years are caught up below.
-  const store = new Store<GameState>(saved ? { ...fresh, ...saved, identity: cleanIdentity(saved.identity, HERALDRY) } : fresh);
+  const store = new Store<GameState>(saved ? { ...fresh, ...saved, home: world.home, identity: cleanIdentity(saved.identity, HERALDRY) } : fresh);
 
   const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame,
     // Signed-in players' notable news goes to the Discord channel (the server rate-limits it).

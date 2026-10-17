@@ -24,9 +24,10 @@ export interface World {
 /**
  * The world around one player. Signed-in players (`playerKey` = Discord id) get their
  * own home in a shared starting region 60–260 ly around the original home, so friends
- * start within an hour or two of each other; guests keep the original home.
+ * start within an hour or two of each other; guests keep the original home. `homeHint` is a
+ * saved empire's home system, kept as it is.
  */
-export function createWorld(galaxy: GalaxyModel, playerKey?: string): World {
+export function createWorld(galaxy: GalaxyModel, playerKey?: string, homeHint?: Hex | null): World {
   const rng = new Rng(playerKey ? hashSeed(galaxy.params.seed, 'world', playerKey) : hashSeed(galaxy.params.seed, 'world'));
   const offset = (dist: number): Hex => {
     const a = rng.next() * Math.PI * 2;
@@ -49,6 +50,9 @@ export function createWorld(galaxy: GalaxyModel, playerKey?: string): World {
     const d = 60 + hash01(galaxy.params.seed, hashSeed(playerKey), 2) * 200;
     home = starNear(hexAdd(origin.hex, { q: Math.round(Math.cos(a) * d), r: Math.round(Math.sin(a) * d) })) ?? origin;
   }
+  // A saved empire keeps its home, even if the galaxy's star layout has changed since.
+  const kept = homeHint ? galaxy.starAt(homeHint) : null;
+  if (kept) home = kept;
   const around = (dist: number): StarSystem => starNear(hexAdd(home.hex, offset(dist))) ?? home;
 
   const neighbours: Neighbour[] = [

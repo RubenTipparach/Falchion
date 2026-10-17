@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { hex, hexSpiral, worldToHex } from '../hex/Hex';
 import { Rng } from '../rng/Rng';
-import { CORE_OUTER, DEFAULT_GALAXY, GalaxyModel, coreShape } from './GalaxyModel';
+import { ARM_GAP, ARM_POWER, CORE_OUTER, DEFAULT_GALAXY, GalaxyModel, coreShape } from './GalaxyModel';
 import { planetsOf } from './Planets';
 
 const galaxy = new GalaxyModel();
@@ -72,21 +72,32 @@ describe('galactic core', () => {
   const { bulgeRadius, pitch, arms, radius } = galaxy.params;
   const noise = (galaxy as unknown as { valueNoise(x: number, y: number): number }).valueNoise.bind(galaxy);
   const smooth = (e0: number, e1: number, x: number) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
-  // The density formula from before the core existed (round bulge, arms to the centre).
-  const before = (x: number, z: number) => {
+  // The plain spiral (round bulge, arms to the centre) with an arm shape.
+  const spiral = (x: number, z: number, power: number, gap: number) => {
     const r = Math.hypot(x, z);
     if (r >= radius) return 0;
     const phase = arms * (Math.atan2(z, x) - Math.log(Math.max(r, 1) / 1_500) / Math.tan(pitch));
-    const arm = (0.5 + 0.5 * Math.cos(phase)) ** 3;
-    const v = Math.exp(-((r / bulgeRadius) ** 2)) + Math.exp(-r / 14_000) * (0.07 + 0.93 * arm) * (1 - smooth(radius * 0.8, radius, r)) * (0.75 + 0.5 * noise(x / 900, z / 900));
+    const arm = (0.5 + 0.5 * Math.cos(phase)) ** power;
+    const v = Math.exp(-((r / bulgeRadius) ** 2)) + Math.exp(-r / 14_000) * (gap + (1 - gap) * arm) * (1 - smooth(radius * 0.8, radius, r)) * (0.75 + 0.5 * noise(x / 900, z / 900));
     return Math.min(1, Math.max(0, v));
   };
+  const armOf = (x: number, z: number) => 0.5 + 0.5 * Math.cos(arms * (Math.atan2(z, x) - Math.log(Math.max(Math.hypot(x, z), 1) / 1_500) / Math.tan(pitch)));
 
-  it('leaves the disc beyond the core exactly as it was, so saved homes keep their stars', () => {
+  it('beyond the core the disc is the plain spiral', () => {
     for (let i = 0; i < 300; i++) {
       const a = i * 0.731, r = bulgeRadius * CORE_OUTER + 1 + i * 100;
       const x = r * Math.cos(a), z = r * Math.sin(a);
-      expect(galaxy.density(x, z)).toBe(before(x, z));
+      expect(galaxy.density(x, z)).toBe(spiral(x, z, ARM_POWER, ARM_GAP));
+    }
+  });
+
+  it('arms are broader than before and the gaps emptier: only the deepest gaps lose stars', () => {
+    for (let i = 0; i < 2000; i++) {
+      const a = i * 0.731, r = bulgeRadius * CORE_OUTER + 1 + (i % 300) * 100;
+      const x = r * Math.cos(a), z = r * Math.sin(a);
+      const now = galaxy.density(x, z), old = spiral(x, z, 3, 0.07);
+      if (armOf(x, z) > 0.2) expect(now).toBeGreaterThanOrEqual(old);
+      if (armOf(x, z) < 0.05 && old > 0) expect(now).toBeLessThan(old);
     }
   });
 

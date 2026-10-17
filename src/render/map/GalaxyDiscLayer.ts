@@ -47,8 +47,8 @@ export class GalaxyDiscLayer implements MapLayer {
           float phase = uArms * (theta - log(max(r, 1.0) / 1500.0) / tan(uPitch));
           // Arms lose their contrast toward the core and merge into its glow.
           float armFade = smoothstep(uBulge * 0.55, uBulge * 1.6, r);
-          float arm = mix(0.45, pow(0.5 + 0.5 * cos(phase), 2.6), armFade);
-          float armCore = pow(0.5 + 0.5 * cos(phase), 9.0) * armFade;
+          float arm = mix(0.45, pow(0.5 + 0.5 * cos(phase), 1.5), armFade);
+          float armCore = pow(0.5 + 0.5 * cos(phase), 5.0) * armFade;
           // Dust lanes trail the inner (leading) edge of each arm and thin out into the core.
           float lane = pow(0.5 + 0.5 * cos(phase + 0.85), 10.0) * mix(0.35, 1.0, armFade);
 

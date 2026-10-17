@@ -59,11 +59,10 @@ export class GalaxyModel {
     if (r >= radius) return 0;
     const theta = Math.atan2(z, x);
     const spiralPhase = arms * (theta - Math.log(Math.max(r, 1) / 1_500) / Math.tan(pitch));
-    let arm = (0.5 + 0.5 * Math.cos(spiralPhase)) ** 3;
+    let arm = (0.5 + 0.5 * Math.cos(spiralPhase)) ** ARM_POWER;
     let bulge = Math.exp(-((r / bulgeRadius) ** 2));
     // The core: arms do not wind into the centre but dissolve into a bright oval bulge, its long
-    // axis on the arms' roots (like M101 or the Milky Way). Everything is unchanged beyond
-    // CORE_OUTER x bulgeRadius, so stars (and saved homes) in the disc keep their places.
+    // axis on the arms' roots (like M101 or the Milky Way).
     if (r < bulgeRadius * CORE_OUTER) {
       const c = coreShape(x, z, r, bulgeRadius, pitch);
       arm = arm * c.armFade + 0.45 * (1 - c.armFade);
@@ -72,7 +71,7 @@ export class GalaxyModel {
     const disk = Math.exp(-r / 14_000);
     const edge = 1 - smoothstep(radius * 0.8, radius, r);
     const noise = 0.75 + 0.5 * this.valueNoise(x / 900, z / 900);
-    return clamp01(bulge + disk * (0.07 + 0.93 * arm) * edge * noise);
+    return clamp01(bulge + disk * (ARM_GAP + (1 - ARM_GAP) * arm) * edge * noise);
   }
 
   /** The star in a hex, or null. Same seed + hex always gives the same answer. */
@@ -139,6 +138,15 @@ export class GalaxyModel {
     return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
   }
 }
+
+/**
+ * Arm shape: the arm profile is (0.5 + 0.5 cos phase) ^ ARM_POWER (lower is broader), and
+ * ARM_GAP is the share of the disc's stars left between the arms. Broad arms with near-empty
+ * gaps between them. Existing empires keep their homes through changes here: saves record
+ * the home system.
+ */
+export const ARM_POWER = 1.6;
+export const ARM_GAP = 0.02;
 
 /** The core reaches out to this many bulge radii; beyond it density is the plain spiral. */
 export const CORE_OUTER = 2.5;

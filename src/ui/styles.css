@@ -520,3 +520,59 @@ td.heat { background: rgba(127, 211, 230, calc(var(--v) * 0.35)); }
 .empire-banner b { font: 600 15px var(--font-display); letter-spacing: 0.05em; }
 .empire-marker .flag-wrap { margin-right: 6px; vertical-align: middle; }
 @media (max-width: 900px) { .empire-chip .empire-name { display: none; } }
+/* ── Chat (Comms drawer) ── */
+.drawer-body.chat-body { overflow: hidden; gap: 10px; }
+.chat-people { flex: none; border: 1px solid var(--line); border-radius: var(--r); background: rgba(12, 19, 38, 0.6); }
+.chat-people-head { display: flex; justify-content: space-between; align-items: center; width: 100%; background: none; border: 0; padding: 8px 10px; }
+.chat-people-list { max-height: 150px; overflow: auto; padding: 0 6px 6px; gap: 1px; }
+.chat-person { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 4px; }
+.chat-person:hover { background: var(--raise); }
+.chat-person:not(.on) { opacity: 0.72; }
+.chat-person-name { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.chat-person-name:hover { color: var(--brass); }
+.avatar.small { width: 20px; height: 20px; font-size: 10px; flex: none; }
+.chat-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); opacity: 0.5; flex: none; }
+.chat-dot.on { background: var(--good); opacity: 1; box-shadow: 0 0 6px var(--good); }
+.chat-threads { flex: none; flex-wrap: nowrap; overflow-x: auto; }
+.chat-thread { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.chat-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 4px; }
+.chat-msg { padding: 5px 8px; border-left: 2px solid transparent; border-radius: 3px; }
+.chat-msg:hover { background: rgba(28, 40, 68, 0.35); }
+.chat-msg.mine { border-left-color: var(--brass-deep); }
+.chat-msg.for-me { border-left-color: var(--brass); background: rgba(230, 180, 80, 0.08); }
+.chat-meta { display: flex; align-items: baseline; gap: 8px; }
+.chat-name { background: none; border: 0; padding: 0; font: 600 12px var(--font-display); letter-spacing: 0.04em; color: var(--chart); }
+button.chat-name:hover { text-decoration: underline; }
+.chat-msg.mine .chat-name { color: var(--brass); }
+.chat-meta time { color: var(--muted); font-size: 10px; }
+.chat-reply { margin-left: auto; background: none; border: 0; padding: 0 2px; color: var(--muted); font: 10px var(--font-mono); opacity: 0; }
+.chat-msg:hover .chat-reply, .chat-reply:focus-visible { opacity: 1; }
+.chat-reply:hover { color: var(--chart); }
+.chat-text { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.chat-link { background: none; border: 0; padding: 0; font: inherit; color: var(--chart); text-decoration: underline dotted; text-underline-offset: 3px; }
+.chat-link.place::before { content: '\25C6'; font-size: 0.6em; margin-right: 3px; vertical-align: 2px; color: var(--brass); }
+.chat-link:hover { color: #fff; text-decoration-style: solid; }
+.chat-mention { background: rgba(127, 211, 230, 0.14); color: var(--chart); border: 0; border-radius: 3px; padding: 0 3px; font: inherit; font-weight: 600; }
+.chat-mention.me { background: rgba(230, 180, 80, 0.22); color: var(--brass); }
+button.chat-mention:hover { filter: brightness(1.25); }
+.chat-compose { position: relative; flex: none; display: flex; gap: 8px; }
+.chat-input { flex: 1; min-width: 0; background: rgba(5, 8, 16, 0.7); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; }
+.chat-input:focus { outline: none; border-color: var(--line-strong); box-shadow: 0 0 0 1px rgba(127, 211, 230, 0.15); }
+.chat-suggest { position: absolute; left: 0; bottom: calc(100% + 4px); z-index: 2; min-width: 220px; list-style: none; margin: 0; padding: 4px;
+  background: var(--panel-solid); border: 1px solid var(--line-strong); border-radius: var(--r); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
+.chat-suggestion { display: flex; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.chat-suggestion.active, .chat-suggestion:hover { background: rgba(127, 211, 230, 0.12); color: var(--chart); }
+.chat-suggestion small { margin-left: auto; }
+.chat-status { flex: none; min-height: 16px; }
+.chat-guest p { margin: 0 0 12px; }
+.badge.hot { background: var(--bad); color: #fff; }
+
+/* Narrower screens: tabs show their icons only (the label stays as a tooltip). */
+@media (max-width: 1700px) {
+  .tabs .tab .tab-label { display: none; }
+  .tabs .tab { padding: 7px 9px; }
+}
+@media (max-width: 1440px) {
+  .topbar { gap: 10px; }
+  .topbar .brand .wordmark { display: none; }
+}

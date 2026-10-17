@@ -26,9 +26,10 @@ export class TopBar {
     const skip = import.meta.env.DEV ? h('button', { class: 'chip', title: 'Development only: advance one year now', onclick: () => actions.skipYear() }, '+1 yr') : '';
     this.clockEl.title = clock.source === 'server' ? 'World clock from the Falchion server: one year passes every minute for everyone' : 'Offline world clock (no server here): one year passes every minute';
     this.clockEl.append(this.ring, h('span', { class: 'year-meta' }, h('span', { class: 'year-src' }, clock.source === 'server' ? '● LIVE' : '○ LOCAL'), this.countdown), skip);
+    this.viewLabel.className = 'tab-label';
     this.viewBtn = h('button', { class: 'tab', title: 'Toggle hex / galaxy view (G)', onclick: () => actions.toggleView() }, icon('galaxy'), this.viewLabel);
     const tab = (id: PanelId, label: string, ic: IconName) =>
-      h('button', { class: 'tab', onclick: () => actions.openPanel(id) }, icon(ic), h('span', {}, label));
+      h('button', { class: 'tab', title: label, 'aria-label': label, onclick: () => actions.openPanel(id) }, icon(ic), h('span', { class: 'tab-label' }, label));
     this.tabs = { shipyard: tab('shipyard', 'Shipyard', 'shipyard'), research: tab('research', 'Research', 'research'), empire: tab('empire', 'Empire', 'empire'), war: tab('war', 'War Room', 'battle'), explore: tab('explore', 'Explore', 'explore'), fleets: tab('fleets', 'Fleets', 'fleet') };
     this.tabs.explore.append(this.lootBadge);
     this.empireBtn = h('button', { class: 'empire-chip', title: 'Your empire: click to change its name, colours and flag', onclick: () => actions.editEmpire() });
@@ -63,6 +64,11 @@ export class TopBar {
   setGalaxyMode(on: boolean): void {
     this.viewLabel.textContent = on ? 'Hex' : 'Galaxy';
     this.viewBtn.firstElementChild!.replaceWith(icon(on ? 'hex' : 'galaxy'));
+  }
+
+  /** A tab that manages its own drawer (e.g. Chat), added after the game tabs. */
+  addTab(tab: HTMLElement): void {
+    this.el.querySelector('nav.tabs')?.append(tab);
   }
 
   setActivePanel(id: PanelId | null): void {

@@ -130,6 +130,31 @@ Use this if you want the posts to come from the bot user itself.
 If both are set, the webhook is used. When the test fails, `/admin` says why (missing
 permission, wrong channel id, rejected token, deleted webhook).
 
+## In-game chat and @mentions
+
+Signed-in players have a **Chat** tab: a global channel, private direct messages, and the
+list of players online right now (anyone with the game open). Guests are asked to sign in.
+
+- **Location links**: names of stars and planets you know (your home, colonies, explored
+  systems, depots, fleet destinations, other players' homes) become links when you send
+  them. Click one to fly there. Player names link to their home.
+- **@mentions**: type `@` to pick a player. If they are **not in the game**, the bot tells
+  them on Discord: "**Name** mentioned you in Falchion: … — https://falchion.fly.dev". A
+  direct message to someone who is away does the same.
+
+Notifications need the bot token (`DISCORD_BOT_TOKEN`, see *Channel notifications*):
+
+- The bot sends a **Discord DM**. Discord only allows that when the player **shares a
+  server with the bot** (invite the bot to your community server) and accepts DMs from
+  server members.
+- If the DM fails and `DISCORD_CHANNEL_ID` is set, the bot posts in that channel and pings
+  **only that player**. Direct-message text is never posted there, only "sent you a direct
+  message".
+- Each sender triggers at most 10 notifications an hour, and each player receives at most 6.
+
+Chat keeps the last 300 global messages and 200 per conversation in `/data/chat.json`.
+Each player may send 5 messages every 10 seconds.
+
 ## Running it locally
 
 ```sh
@@ -156,10 +181,11 @@ Saves go to `./data/` (ignored by git).
 One file per player at `/data/<discord id>.json`: their Discord id, name and avatar, the
 saved empire, and a public view (home, colony stars, fleets) that other players receive
 from `/api/players`. Stockpiles, research and orders are never sent to other players.
+Chat history is in `/data/chat.json`; direct messages are only ever sent to the two
+players in them.
 
 ## Not built yet
 
 - Launching Falchion as a **Discord Activity** inside a voice channel.
-- Direct messages to individual players (the bot posts in one channel only).
 
-Both are in the `mmo-core-systems` OpenSpec change.
+It is in the `mmo-core-systems` OpenSpec change.

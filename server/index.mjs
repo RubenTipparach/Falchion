@@ -10,6 +10,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { adminIds, createAdmin } from './admin.mjs';
 import { createAuth } from './auth.mjs';
+import { createChat } from './chat.mjs';
 import { createNotifier } from './notifier.mjs';
 import { createStore } from './store.mjs';
 
@@ -35,11 +36,16 @@ const STARTED_AT = Date.now();
 // Same secret as High Frontier: ADMIN_DISCORD_ID (or ADMIN_DISCORD_IDS), comma-separated.
 export const admins = adminIds(process.env);
 // Channel notifications (optional): DISCORD_WEBHOOK_URL, or DISCORD_BOT_TOKEN + DISCORD_CHANNEL_ID.
+// The bot token also lets the server tell players about chat mentions.
 export const notifier = createNotifier({
   webhookUrl: process.env.DISCORD_WEBHOOK_URL,
   token: process.env.DISCORD_BOT_TOKEN,
   channelId: process.env.DISCORD_CHANNEL_ID,
+  publicUrl: process.env.PUBLIC_URL ?? 'https://falchion.fly.dev',
+  ...(process.env.DISCORD_API_BASE ? { api: process.env.DISCORD_API_BASE } : {}),
 });
+// In-game chat (global + direct messages), presence, and Discord pings for @mentions (server/chat.mjs).
+export const chat = createChat({ auth, file: join(store.dir, 'chat.json'), players: () => store.players(), notifier });
 const admin = createAdmin({
   auth, store, admins, notifier,
   info: () => ({ version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, notifications: notifier.mode, notificationsProblem: notifier.problem, uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000) }),
@@ -200,6 +206,7 @@ export const server = createServer(async (req, res) => {
   if (pathname === '/api/ticks') return streamTicks(req, res);
   if (pathname === '/auth/discord') return auth.enabled ? auth.login(res, new URL(req.url ?? '/', 'http://localhost').searchParams.get('next') ?? '/') : send(res, 404, 'Discord sign-in is not configured on this server (see docs/discord.md).');
   if (await admin(req, res, pathname)) return;
+  if (await chat.handle(req, res, pathname)) return;
   if (pathname === '/auth/discord/callback') return auth.enabled ? auth.callback(req, res, new URL(req.url ?? '/', 'http://localhost')) : send(res, 404, 'not configured');
   if (pathname === '/auth/logout') return auth.logout(res);
   if (pathname === '/api/me' || pathname === '/api/save' || pathname === '/api/players' || pathname === '/api/events') return api(req, res, pathname);
@@ -209,5 +216,7 @@ export const server = createServer(async (req, res) => {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   scheduleTick();
+  // Write pending chat before the machine stops (deploys send SIGINT/SIGTERM).
+  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { void chat.flush().finally(() => process.exit(0)); });
   server.listen(PORT, () => console.log(`falchion server on :${PORT} serving ${STATIC_DIR} (${VERSION}), world year ${worldTick}, 1 year per ${CLOCK.msPerTick / 1000}s`));
 }

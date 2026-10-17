@@ -59,6 +59,7 @@ import { showFounding } from '../ui/Founding';
 import { showSignIn } from '../ui/SignIn';
 import { Store } from './Store';
 import { createWorld } from './World';
+import { setupChat } from './ChatSetup';
 
 /** Composition root: build the pure services, the views, and wire them together. */
 async function bootstrap(): Promise<void> {
@@ -179,6 +180,10 @@ async function bootstrap(): Promise<void> {
   app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, dispatches.el, ...Object.values(panels).map((p) => p.el));
 
   controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system });
+  // In-game chat (global + DMs, location links, @mentions): see ChatSetup.
+  const chat = setupChat({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, panels: Object.values(panels) });
+  topBar.addTab(chat.tab);
+  app.append(chat.el);
 
   // ── Start ──
   const home = hexToWorld(world.home.hex);

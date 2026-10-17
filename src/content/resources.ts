@@ -35,7 +35,7 @@ export const LEGACY_MATERIALS: Readonly<Record<string, readonly [Mineral, number
 };
 
 /** What the capital adds each year on top of its biome: taxes and the seat of government. */
-export const CAPITAL_YIELDS: Readonly<Partial<Record<Resource, number>>> = { credits: 20, goods: 2 };
+export const CAPITAL_YIELDS: Readonly<Partial<Record<Resource, number>>> = { credits: 20, goods: 2, food: 4 };
 
 /** Per-turn yield of a colony by biome (before bonuses). Living worlds make trade goods. */
 export const BIOME_YIELDS: Readonly<Record<string, Partial<Record<Resource, number>>>> = {

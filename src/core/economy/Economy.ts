@@ -1,3 +1,4 @@
+import { FOOD_PER_POP, growWorld, populationOf } from './Population';
 import { BIOME_YIELDS, CAPITAL_YIELDS, RESOURCES, Resource } from '../../content/resources';
 import type { BuildingDef } from '../../content/buildings';
 import type { ShipClassDef } from '../../content/shipClasses';
@@ -40,10 +41,13 @@ export interface Colony {
   readonly size?: number;
   readonly capital?: boolean;
   readonly buildings?: readonly string[];
+  /** Population (at least 1; see Population.ts), and food put towards the next point of it. */
+  readonly pop?: number;
+  readonly growth?: number;
 }
 
-/** Food each colony eats per turn. */
-export const FOOD_PER_COLONY = 2;
+/** Food a colony of population 1 eats per turn (each point of population eats this much). */
+export const FOOD_PER_COLONY = FOOD_PER_POP;
 
 export interface EconomyTables {
   readonly tree: TechTree;
@@ -183,7 +187,7 @@ export function colonyYield(c: Colony, t: EconomyTables): { income: Partial<Reco
     if (b.mineralBoost) for (const [r, n] of Object.entries(biome)) if (MINERALS.has(r as Resource)) add(r as Resource, n! * b.mineralBoost);
     science += b.science ?? 0;
   }
-  add('food', -FOOD_PER_COLONY);
+  add('food', -FOOD_PER_POP * populationOf(c));
   return { income, science };
 }
 
@@ -318,7 +322,32 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
     lines.push(`Spies in ${target} stole ${espionage} shards of ${t.tree.node(nodeId).name}`);
   }
 
-  return { economy: { ...e, stock, faith }, research: res, report: { income, lines, science }, mined };
+  // Population: each world grows from its own food surplus; a shortfall is fed from the stores,
+  // and only what the stores cannot cover makes it shrink.
+  const colonies = populationYear(e, t, income.food ?? 0, lines);
+
+  return { economy: { ...e, stock, faith, colonies }, research: res, report: { income, lines, science }, mined };
+}
+
+/**
+ * One year of every colony's population. Each world's own food balance drives it; when the empire's
+ * stores plus this year's food cannot cover every shortfall, the gap is shared among the hungry
+ * worlds in proportion to their shortfall.
+ */
+function populationYear(e: EconomyState, t: EconomyTables, foodIncome: number, lines: string[]): Colony[] {
+  const balances = e.colonies.map((c) => colonyYield(c, t).income.food ?? 0);
+  const gap = Math.max(0, -((e.stock.food ?? 0) + foodIncome));
+  const short = balances.reduce((n, b) => n + Math.max(0, -b), 0);
+  let changed = false;
+  const out = e.colonies.map((c, i) => {
+    const uncovered = gap > 0 && balances[i] < 0 ? Math.min(-balances[i], (gap * -balances[i]) / short) : 0;
+    const r = growWorld(c, balances[i], uncovered);
+    if (r.colony !== c) changed = true;
+    if (r.change > 0) lines.push(`${c.name} grew to population ${r.colony.pop}`);
+    if (r.change < 0) lines.push(`${c.name} is starving: population fell to ${r.colony.pop}. Build farms there, or more food elsewhere`);
+    return r.colony;
+  });
+  return changed ? out : (e.colonies as Colony[]);
 }
 
 /** Can the empire pay a cost? */

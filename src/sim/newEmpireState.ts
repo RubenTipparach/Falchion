@@ -1,3 +1,4 @@
+import { CAPITAL_START_POP } from '../core/economy/Population';
 import { specOf } from '../content/logistics';
 import type { Squadron } from '../core/combat/Combat';
 import type { Colony } from '../core/economy/Economy';
@@ -42,7 +43,7 @@ export function newEmpireState({ galaxy, tree, world, playerName, t0 }: NewEmpir
   // Colonies are real planets: an empire starts with one star system, settled on three of its worlds (the capital has a shipyard).
   const homePlanets = planetsOf(world.home, galaxy.params.seed);
   const colonyOf = (p: Planet, buildings: string[], capital = false): Colony =>
-    ({ name: capital ? `${p.name} (capital)` : p.name, biome: p.biome, planetId: p.id, starId: p.starId, size: p.size, capital, buildings });
+    ({ name: capital ? `${p.name} (capital)` : p.name, biome: p.biome, planetId: p.id, starId: p.starId, size: p.size, capital, buildings, pop: capital ? CAPITAL_START_POP : 1 });
   // Capital on the most habitable world; gas giants cannot be settled.
   const HABITABLE = ['terran', 'ocean', 'jungle', 'desert', 'ice', 'barren', 'volcanic', 'toxic'];
   const settleable = homePlanets.filter((p) => p.biome !== 'gas')

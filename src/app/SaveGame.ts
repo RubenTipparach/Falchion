@@ -1,3 +1,4 @@
+import { CAPITAL_START_POP } from '../core/economy/Population';
 import type { GameState } from './GameState';
 import type { Hex } from '../core/hex/Hex';
 import { LEGACY_MATERIALS, RESOURCES } from '../content/resources';
@@ -37,7 +38,7 @@ export function savedHome(save: SavedGame | null): Hex | null {
  * (fleets with no ships of yours aboard). Idempotent: an up-to-date save comes back unchanged.
  */
 export function upgradeSave<T extends SavedGame>(save: T): T {
-  save = dropAmmunition(save);
+  save = dropAmmunition(givePopulation(save));
   const old = save.empire?.materials as Record<string, number> | undefined;
   const routes = 'routes' in (save.economy ?? {});
   const scenery = (save.fleets ?? []).some((f) => !save.loadouts?.[f.id]);
@@ -48,6 +49,13 @@ export function upgradeSave<T extends SavedGame>(save: T): T {
   const { routes: _routes, ...economy } = save.economy as typeof save.economy & { routes?: unknown };
   const fleets = (save.fleets ?? []).filter((f) => save.loadouts?.[f.id]);
   return { ...save, economy, fleets, empire: { ...save.empire, materials } };
+}
+
+/** Saves from before population: every colony gets population 1, the capital its starting population. */
+function givePopulation<T extends SavedGame>(save: T): T {
+  const colonies = save.economy?.colonies;
+  if (!colonies?.some((c) => c.pop === undefined)) return save;
+  return { ...save, economy: { ...save.economy, colonies: colonies.map((c) => (c.pop === undefined ? { ...c, pop: c.capital ? CAPITAL_START_POP : 1 } : c)) } };
 }
 
 /** Saves from before ammunition was removed: drop it from fleets and the home dock. */

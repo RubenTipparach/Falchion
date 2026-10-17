@@ -78,3 +78,38 @@ describe('economy', () => {
     expect(upkeepOf({ roster: { prospector: 3, lancer: 2 }, policies: ['conscription'] }, t)).toBe(3);
   });
 });
+
+describe('population and food', () => {
+  const year = (e: EconomyState, n = 1) => { let s = e; for (let i = 0; i < n; i++) s = resolveTurn(s, EMPTY_RESEARCH, i, tables).economy; return s; };
+
+  it('each point of population eats 2 food', () => {
+    const one = colonyYield({ name: 'A', biome: 'terran', size: 4, pop: 1 }, tables).income.food!;
+    const three = colonyYield({ name: 'A', biome: 'terran', size: 4, pop: 3 }, tables).income.food!;
+    expect(one - three).toBe(4);
+  });
+
+  it('a world grows on its own surplus, and says so', () => {
+    // A terran world with a farm makes 8 food; at population 1 it eats 2: +6 a year.
+    const e = econ({ colonies: [{ name: 'Farmworld', biome: 'terran', size: 4, pop: 1, buildings: ['farm'] }] });
+    const r = resolveTurn(year(e, 1), EMPTY_RESEARCH, 1, tables);
+    expect(r.economy.colonies[0].pop).toBe(2);
+    expect(r.report.lines).toContain('Farmworld grew to population 2');
+  });
+
+  it('a hungry world fed from the stores neither grows nor shrinks; with the stores empty it shrinks', () => {
+    // Barren: no food of its own; population 3 eats 6.
+    const hungry = { name: 'Rock', biome: 'barren', size: 4, pop: 3 };
+    const fed = year(econ({ colonies: [hungry], stock: { ...START_RESOURCES, food: 500 } }), 10);
+    expect(fed.colonies[0]).toMatchObject({ pop: 3 });
+    expect(fed.colonies[0].growth ?? 0).toBe(0);
+    const starved = year(econ({ colonies: [hungry], stock: { ...START_RESOURCES, food: 0 } }), 3);
+    expect(starved.colonies[0].pop).toBe(2);
+  });
+
+  it('another world\'s surplus keeps a hungry world from shrinking, but does not make it grow', () => {
+    const colonies = [{ name: 'Rock', biome: 'barren', size: 4, pop: 2 }, { name: 'Farm', biome: 'terran', size: 6, pop: 1, buildings: ['farm', 'farm'] }];
+    const e = year(econ({ colonies, stock: { ...START_RESOURCES, food: 0 } }), 6);
+    expect(e.colonies[0].pop).toBe(2);
+    expect(e.colonies[1].pop).toBeGreaterThan(1);
+  });
+});

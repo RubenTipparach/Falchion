@@ -821,7 +821,8 @@ export class EmpireSim {
     const g = this.groupsAt(star).find((x) => countOf(x.ships, 'colony-ark') > 0);
     if (!g) return this.dispatch(`Settling ${planet.name} needs a Colony Ark on station in ${star.name}`, 'bad');
     this.adjustGroup(g.id, [{ classId: 'colony-ark', count: -1 }]);
-    const colony: Colony = { name: planet.name, biome: planet.biome, planetId: planet.id, starId: star.id, size: planet.size, buildings: [] };
+    // A new world starts with one point of population; it grows on its own food surplus.
+    const colony: Colony = { name: planet.name, biome: planet.biome, planetId: planet.id, starId: star.id, size: planet.size, buildings: [], pop: 1 };
     this.deps.store.update((st) => ({ economy: { ...st.economy, colonies: [...st.economy.colonies, colony] } }));
     this.dispatch(`${planet.name} settled: a new colony with ${slotsOf(planet.size)} building slots`, 'good');
     this.deps.report?.('colony', `settled ${planet.name} in ${star.name}`, placeOf(star));
@@ -1247,7 +1248,7 @@ export class EmpireSim {
     effects.push({ kind: 'standing', npc: target.npc, player: this.me, delta: STANDING.assault + (result.captured ? STANDING.capture : 0), base: disposition });
     if (result.captured) {
       const planet = [...this.planets(at)].sort((a, b) => b.size - a.size || (a.id < b.id ? -1 : 1))[0];
-      colonies = [...colonies, { name: planet?.name ?? at.name, biome: planet?.biome ?? 'barren', planetId: planet?.id, starId: at.id, size: planet?.size ?? 3, buildings: [] }];
+      colonies = [...colonies, { name: planet?.name ?? at.name, biome: planet?.biome ?? 'barren', planetId: planet?.id, starId: at.id, size: planet?.size ?? 3, buildings: [], pop: 1 }];
       const pool = target.tech.filter((id) => !research.researched.includes(id));
       for (const id of pool.slice(0, 2)) research = this.deps.tree.grantShards(research, id, 'reverse-engineering', 40);
     }

@@ -23,7 +23,7 @@ export interface BuildingDef {
 }
 
 export const BUILDINGS: readonly BuildingDef[] = [
-  { id: 'farm', years: 2, name: 'Hydroponic Farm', cost: { credits: 60, metals: 20 }, yields: { food: 4 }, blurb: '+4 food. Every colony eats 2 a year.' },
+  { id: 'farm', years: 2, name: 'Hydroponic Farm', cost: { credits: 60, metals: 20 }, yields: { food: 4 }, blurb: '+4 food. Each point of population eats 2 a year; a world grows only on its own surplus.' },
   { id: 'mine', years: 3, name: 'Deep Mine', cost: { credits: 80, metals: 40 }, mineralBoost: 1, yields: { metals: 2 }, blurb: 'Doubles the planet’s mineral output, +2 metals.' },
   { id: 'manufactory', years: 3, name: 'Manufactory', cost: { credits: 90, metals: 50 }, yields: { goods: 4 }, blurb: '+4 trade goods a year, for freighters to sell.' },
   { id: 'trade-hub', years: 3, name: 'Trade Hub', cost: { credits: 100, metals: 30 }, yields: { credits: 15 }, blurb: '+15 credits from markets and tariffs.' },

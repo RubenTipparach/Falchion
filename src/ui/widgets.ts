@@ -1,3 +1,4 @@
+import { DECLINE_PER_POP, growthNeeded, popCap, populationOf } from '../core/economy/Population';
 import type { Squadron } from '../core/combat/Combat';
 import { BUILDINGS, BuildingDef, slotsOf } from '../content/buildings';
 import { RESOURCES, Resource } from '../content/resources';
@@ -60,6 +61,7 @@ export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>,
   const affordable = (b: BuildingDef) => Object.entries(b.cost).every(([r, n]) => stock[r as Resource] >= n!);
   const free = slots - have.length - pending.length;
   return h('div', { class: 'colony' },
+    populationView(c, y.income.food ?? 0),
     h('div', { class: 'small' }, h('b', {}, 'Output '), out.join('  ') || '—', h('span', { class: 'muted' }, ' / yr')),
     h('div', { class: 'buildings' },
       ...have.map((id) => h('span', { class: 'building', title: BUILDINGS.find((b) => b.id === id)?.blurb ?? '' }, BUILDINGS.find((b) => b.id === id)?.name ?? id)),
@@ -71,6 +73,25 @@ export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>,
         ? h('button', { class: 'btn locked-build', title: `Needs research: ${gates.nodeName(b.unlock)}. Open it in the research tree.`, onclick: () => gates.openResearch(b.unlock!) },
           icon('lock'), ` ${b.name}`, h('small', {}, `Research ${gates.nodeName(b.unlock)} → · ${b.blurb}`))
         : h('button', { class: 'btn', disabled: !affordable(b), title: b.blurb, onclick: () => build(b.id) }, icon('build'), ` ${b.name}`, h('small', {}, `${costText(b)} · ${formatDuration(b.years, CLOCK)} · ${b.blurb}`)))) : h('p', { class: 'small muted' }, 'All building slots used.'));
+}
+
+/** A colony's population, its own food balance and how close it is to growing (or shrinking). */
+function populationView(c: Colony, food: number): HTMLElement {
+  const pop = populationOf(c), growth = c.growth ?? 0, cap = popCap(c);
+  const need = growthNeeded(pop), floor = DECLINE_PER_POP * pop;
+  const full = pop >= cap;
+  const state = full ? `At its limit (${cap} for a world this size)`
+    : food > 0 ? `Growing: ${Math.max(0, growth)} / ${need} food to population ${pop + 1}`
+    : growth < 0 ? `Starving: ${-growth} / ${floor} short. It loses population if the empire runs out of food`
+    : food < 0 ? 'Fed from the empire\'s stores: it will not grow until it makes its own surplus'
+    : 'Not growing: it needs a food surplus of its own';
+  const pct = full ? 100 : growth >= 0 ? (Math.max(0, growth) / need) * 100 : (-growth / floor) * 100;
+  return h('div', { class: 'pop-line' },
+    h('div', { class: 'row-between small' },
+      h('span', {}, h('b', {}, `Population ${pop}`), h('span', { class: 'muted' }, ` · ${pop} ${pop === 1 ? 'city' : 'cities'}`)),
+      h('span', { class: food > 0 ? 'green' : food < 0 ? 'red' : 'muted', title: 'Food this world makes minus what its population eats (2 each)' }, `${food > 0 ? '+' : ''}${food} food here`)),
+    h('div', { class: `gauge pop ${growth < 0 ? 'low' : ''}`, title: state }, h('span', { class: 'track' }, h('i', { style: `width:${Math.min(100, pct)}%` }))),
+    h('div', { class: 'small muted' }, state));
 }
 
 /** Resources as icon + amount chips, e.g. what a planet's cache holds. */

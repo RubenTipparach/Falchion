@@ -742,3 +742,19 @@ button.chat-mention:hover { filter: brightness(1.25); }
 .standing-bar .zero { left: 50%; background: rgba(255, 255, 255, 0.3); }
 .standing-bar .mark { width: 10px; height: 10px; top: -1px; border-radius: 50%; transform: translateX(-50%); box-shadow: 0 0 6px rgba(0, 0, 0, 0.6); }
 .standing-bar .home { width: 0; border-left: 2px dotted rgba(255, 255, 255, 0.55); }
+
+/* Fleet labels as icons: a chip per fleet (or per stack, with a count) until selected or zoomed in. */
+.fleet-label.compact { padding: 3px 5px; border-left-width: 0; border-radius: 9px; background: rgba(5, 8, 16, 0.8); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.fl-chip { display: inline-flex; align-items: center; gap: 2px; }
+.fl-chip i, .fl-list i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 4px currentColor; }
+.fl-chip i + i { margin-left: -4px; box-shadow: 0 0 0 1px #05080f; }
+.fl-chip b { margin-left: 4px; font-size: 10px; color: var(--text, #e8eef7); }
+.fl-list { display: grid; gap: 2px; margin-top: 4px; min-width: 180px; max-width: min(280px, 80vw); max-height: 50vh; overflow-y: auto; }
+.fl-list button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-list button { display: grid; grid-template-columns: 10px 1fr; column-gap: 6px; align-items: center; text-align: left; font: 11px var(--font-mono); color: inherit; background: rgba(255, 255, 255, 0.04); border: 0; border-radius: 4px; padding: 5px 6px; cursor: pointer; }
+.fl-list button small { grid-column: 2; color: var(--muted); }
+.fl-list button:hover { background: rgba(127, 211, 230, 0.15); }
+@media (pointer: coarse) {
+  .fleet-label.compact { padding: 6px 8px; }
+  .fl-list button { padding: 8px; }
+}

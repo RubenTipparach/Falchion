@@ -26,6 +26,9 @@ interface ClaimSet {
   readonly materials: THREE.MeshBasicMaterial[];
 }
 
+/** Height of an empire name marker (CSS px), for keeping them apart. */
+const MARKER_H = 26;
+
 const HEX_GEO = new THREE.CircleGeometry(HEX_SIZE * 0.96, 6).rotateX(-Math.PI / 2);
 
 /**
@@ -123,11 +126,24 @@ export class TerritoryLayer implements MapLayer {
   update(view: ViewState): void {
     const opacity = fade(view.visibleWidth, 600, 1_500) * fadeIn(view.visibleWidth, 4, 9);
     const showMarkers = view.visibleWidth > 80;
-    for (const set of [this.fixed, this.own, this.dynamic]) {
+    // Your own empire's name first, then other players', then NPCs': a name that would overlap one
+    // already placed is hidden until you zoom in and they separate.
+    const sets = [this.own, this.dynamic, this.npcs, this.fixed];
+    const placed: Array<{ x: number; y: number; w: number }> = [];
+    const cssH = typeof window === 'undefined' ? 800 : window.innerHeight;
+    const cssW = cssH * view.camera.aspect;
+    const p = new THREE.Vector3();
+    for (const set of sets) {
       if (!set) continue;
       set.fills.visible = opacity > 0.01;
       set.materials.forEach((mat) => (mat.opacity = 0.2 * opacity));
-      set.markers.forEach((mk) => (mk.visible = showMarkers));
+      for (const mk of set.markers) {
+        if (!showMarkers) { mk.visible = false; continue; }
+        mk.getWorldPosition(p).project(view.camera);
+        const at = { x: (p.x * cssW) / 2, y: (-p.y * cssH) / 2, w: 34 + 8 * (mk.element.textContent?.length ?? 8) };
+        mk.visible = !placed.some((o) => Math.abs(o.y - at.y) < MARKER_H && Math.abs(o.x - at.x) < (o.w + at.w) / 2);
+        if (mk.visible) placed.push(at);
+      }
     }
   }
 
@@ -135,5 +151,6 @@ export class TerritoryLayer implements MapLayer {
     this.release(this.fixed);
     if (this.dynamic) this.release(this.dynamic);
     if (this.own) this.release(this.own);
+    if (this.npcs) this.release(this.npcs);
   }
 }

@@ -73,6 +73,10 @@ interface FleetVisual {
   readonly model: ShipModel;
   readonly line: THREE.Line;
   readonly label: CSS2DObject;
+  /** Fleets whose labels this one stands for this frame (itself first). */
+  stack: string[];
+  /** Years to arrival, as of the last frame. */
+  eta: number;
   fleet: FleetView;
   readonly start: THREE.Vector3;
   readonly end: THREE.Vector3;
@@ -96,6 +100,8 @@ interface FleetVisual {
 }
 
 /** How fast a ship turns to a new heading, in radians per second. */
+/** Labels closer than this on screen (CSS px) stack into one. */
+const STACK_PX = 26;
 const TURN_RATE = 1.4;
 
 /** Step an angle toward a target by at most `max`, the short way round. */
@@ -121,7 +127,14 @@ export class FleetLayer implements MapLayer {
     private readonly pointAt: (h: Hex) => { readonly x: number; readonly z: number } = hexToWorld,
     /** Called when a fleet's map label is clicked. */
     private readonly onSelect: (fleetId: string) => void = () => {},
-  ) {}
+  ) {
+    // A tap anywhere but on a fleet label closes an open stack list.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pointerdown', (e) => {
+        if (this.openStack && !(e.target as Element | null)?.closest?.('.fleet-label')) this.openStack = null;
+      }, true);
+    }
+  }
 
   private selectedId: string | null = null;
   /**
@@ -337,12 +350,74 @@ export class FleetLayer implements MapLayer {
       v.line.visible = routeOpacity > 0.01 && v.shown < 1;
       const near = !local || Math.hypot(v.root.position.x - fx, v.root.position.z - fz) < Math.max(1, view.visibleWidth * 1.5);
       v.root.visible = near;
-      // Fleet names can come from other players: always escaped.
-      const html = `<b>${escapeHtml(v.fleet.name)}</b><br>${remaining > 0 ? `ETA ${this.formatEta(remaining)}` : 'Arrived'}${v.fleet.status ? `<br><small>${escapeHtml(v.fleet.status)}</small>` : ''}`;
-      if (v.label.element.innerHTML !== html) v.label.element.innerHTML = html;
-      v.label.element.classList.toggle('selected', v.fleet.id === this.selectedId);
+      v.eta = remaining;
       v.label.visible = near && view.visibleWidth < 4_000;
     }
+    this.declutter(view);
+  }
+
+  /** The fleet whose label the pointer is over (desktop): it shows in full. */
+  private hoveredId: string | null = null;
+  /** A stack of labels opened into a list (its first fleet's id). */
+  private openStack: string | null = null;
+
+  /**
+   * Labels as icons until wanted: each fleet shows a small chip in its colour, and chips that
+   * overlap on screen merge into one with a count. The selected fleet, the one under the
+   * pointer, and every fleet when zoomed right in show their name, ETA and status. Clicking a
+   * stack lists its fleets; clicking a fleet selects it.
+   */
+  private declutter(view: ViewState): void {
+    const cssH = typeof window === 'undefined' ? 800 : window.innerHeight;
+    const cssW = cssH * view.camera.aspect;
+    const close = view.visibleWidth < 12;
+    const shown = [...this.visuals.values()].filter((v) => v.label.visible);
+    const p = new THREE.Vector3();
+    const at = new Map<FleetVisual, { x: number; y: number }>();
+    for (const v of shown) {
+      v.root.getWorldPosition(p).project(view.camera);
+      at.set(v, { x: (p.x * cssW) / 2, y: (-p.y * cssH) / 2 });
+    }
+    // The selected fleet first, then a stable order, so stacks do not flicker.
+    shown.sort((a, b) => (a.fleet.id === this.selectedId ? -1 : b.fleet.id === this.selectedId ? 1 : a.fleet.id < b.fleet.id ? -1 : 1));
+    // Hovering expands a lone icon only: a stack stays a stack (click it to list its fleets).
+    const isFull = (v: FleetVisual) => close || v.fleet.id === this.selectedId || (v.fleet.id === this.hoveredId && v.stack.length === 1);
+    const stacks: FleetVisual[][] = [];
+    for (const v of shown) {
+      const q = at.get(v)!;
+      const home = isFull(v) ? undefined : stacks.find((st) => {
+        const r = at.get(st[0])!;
+        return !isFull(st[0]) && Math.hypot(r.x - q.x, r.y - q.y) < STACK_PX;
+      });
+      if (home) home.push(v);
+      else stacks.push([v]);
+    }
+    if (this.openStack && !stacks.some((st) => st[0].fleet.id === this.openStack && st.length > 1)) this.openStack = null;
+    for (const st of stacks) {
+      const [lead, ...rest] = st;
+      for (const v of rest) v.label.visible = false;
+      lead.stack = st.map((v) => v.fleet.id);
+      const full = isFull(lead) && st.length === 1;
+      // Fleet names can come from other players: always escaped.
+      const dot = (v: FleetVisual) => `<i style="background:${escapeHtml(v.fleet.color)}"></i>`;
+      const html = st.length > 1
+        ? `<span class="fl-chip">${st.slice(0, 4).map(dot).join('')}<b>${st.length}</b></span>${this.openStack === lead.fleet.id ? `<span class="fl-list">${st.map((v) => `<button data-fleet="${escapeHtml(v.fleet.id)}">${dot(v)}${escapeHtml(v.fleet.name)}<small>${this.etaText(v)}</small></button>`).join('')}</span>` : ''}`
+        : full
+          ? `<b>${escapeHtml(lead.fleet.name)}</b><br>${this.etaText(lead)}${lead.fleet.status ? `<br><small>${escapeHtml(lead.fleet.status)}</small>` : ''}`
+          : `<span class="fl-chip">${dot(lead)}</span>`;
+      const el = lead.label.element;
+      if (el.innerHTML !== html) el.innerHTML = html;
+      // An open list is centred on its stack so it fits on a narrow screen.
+      if (this.openStack === lead.fleet.id) lead.label.center.set(0.5, 1.05);
+      else lead.label.center.set(-0.15, 1.2);
+      el.classList.toggle('selected', lead.fleet.id === this.selectedId);
+      el.classList.toggle('compact', !full);
+      el.title = st.length > 1 ? `${st.length} fleets: click to list them` : lead.fleet.name;
+    }
+  }
+
+  private etaText(v: FleetVisual): string {
+    return v.eta > 0 ? `ETA ${this.formatEta(v.eta)}` : 'Arrived';
   }
 
   private createVisual(fleet: FleetView): FleetVisual {
@@ -377,7 +452,16 @@ export class FleetLayer implements MapLayer {
     el.style.borderColor = fleet.color;
     el.title = `Select ${fleet.name}`; // title is an attribute: not parsed as HTML
     el.addEventListener('pointerdown', (e) => e.stopPropagation());
-    el.addEventListener('click', (e) => { e.stopPropagation(); this.onSelect(fleet.id); });
+    el.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') this.hoveredId = fleet.id; });
+    el.addEventListener('pointerleave', () => { if (this.hoveredId === fleet.id) this.hoveredId = null; });
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const pick = (e.target as HTMLElement).closest('[data-fleet]') as HTMLElement | null;
+      const v = this.visuals.get(fleet.id);
+      if (pick?.dataset.fleet) { this.openStack = null; this.onSelect(pick.dataset.fleet); return; }
+      if (v && v.stack.length > 1) { this.openStack = this.openStack === fleet.id ? null : fleet.id; return; }
+      this.onSelect(fleet.id);
+    });
     const label = new CSS2DObject(el);
     label.center.set(-0.15, 1.2);
     root.add(label);
@@ -387,7 +471,7 @@ export class FleetLayer implements MapLayer {
     // Spread fleets parked at the same star around the orbit (stable per fleet).
     let h = 0;
     for (const ch of fleet.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return { root, model, line, label, fleet, start, end, heading, modelLength, parkPhase: (h % 360) * (Math.PI / 180), shown: progressAtTime(fleet.movement, this.time), station: new THREE.Vector3(), stationSet: false, carry: new THREE.Vector3(), yaw: heading };
+    return { stack: [fleet.id], eta: 0, root, model, line, label, fleet, start, end, heading, modelLength, parkPhase: (h % 360) * (Math.PI / 180), shown: progressAtTime(fleet.movement, this.time), station: new THREE.Vector3(), stationSet: false, carry: new THREE.Vector3(), yaw: heading };
   }
 
   private removeVisual(id: string, v: FleetVisual): void {

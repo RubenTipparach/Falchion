@@ -206,7 +206,8 @@ export class ResearchPanel extends Drawer {
         h('li', {}, `Grants: ${node.grants.map(grantText).join(', ')}`)),
       h('div', { class: 'td-shards' },
         h('span', { class: 'mono' }, `${this.tree.shardsOf(state, node.id)} / ${node.shards} shards`),
-        ...SHARD_SOURCES.filter((src) => src.id !== 'loot' && src.id !== 'science').map((src) => {
+        // Free shards: a development aid only (the server refuses them).
+        ...SHARD_SOURCES.filter((src) => import.meta.env.DEV && src.id !== 'loot' && src.id !== 'science').map((src) => {
           const amount = Math.max(1, Math.round(node.shards / 10));
           const ok = this.tree.canReceive(state, node.id, src.id) && this.tree.shardsOf(state, node.id) < node.shards;
           return h('button', { class: 'chip', disabled: !ok, title: src.reachesUnconnected ? `${src.name} can reach unconnected nodes` : `${src.name} only reaches connected nodes`, onclick: () => this.actions.grantShards(node.id, src.id, amount) }, `+${amount} ${src.name}`);

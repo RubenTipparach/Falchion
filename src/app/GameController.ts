@@ -275,11 +275,14 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
   }
 
   /** Abandon this empire and found a new one in the current year. */
+  /** Runs before a reset reloads the page (the server deletes its copy of the empire). */
+  beforeReset: () => Promise<void> = async () => {};
+
   resetEmpire(): void {
     // Stop first: the reload fires pagehide, which would otherwise save the old empire again.
     this.deps.save.stop();
     this.deps.save.clear();
-    location.reload();
+    void this.beforeReset().finally(() => location.reload());
   }
 
   openPanel(id: PanelId): void {
@@ -394,6 +397,11 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
    * tick arrives; holding at the year's end keeps ships from stepping back and forth.
    */
   protected override now(): number {
+    return this.fleetTime();
+  }
+
+  /** The current world time in years, fractional (as orders are dated). */
+  worldTime(): number {
     return this.fleetTime();
   }
 

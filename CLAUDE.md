@@ -15,9 +15,13 @@ validation, build and a server smoke test, then deploys to **Fly.io**, the one a
 (`server/`: zero-dependency Node server serving the client + `/healthz` +
 `/api/info` + the world clock `/api/clock` and tick stream `/api/ticks`; future home of the MMO server).
 The world is realtime: one tick per minute = one game year (`server/clock.json`, shared with the client).
-Empires keep playing while their owners are away: each world year the server plays every away empire
-forward with the game's own rules (`src/sim/headless.ts`, bundled by `npm run build:sim` into
-`server/sim/`, driven by `server/simTicker.mjs`).
+The server runs every empire (full authority): each world year it plays every empire forward with the
+game's own rules (`src/sim/headless.ts`, bundled by `npm run build:sim` into `server/sim/`, driven by
+`server/simTicker.mjs`) and pushes the owner their state. Orders are commands (`src/sim/commands.ts`,
+`POST /api/command`, `server/commands.mjs`): the browser applies each at once, the server validates and
+applies it, and the browser adopts the server's answer (`src/app/Authority.ts`). A save is uploaded only
+to found a new empire. Any new player action must be added to `COMMANDS`. Local multiplayer dev:
+run the server, then `FALCHION_SERVER=http://localhost:8080 npm run dev`.
 The most recent push wins. The Fly job skips
 with a notice until `FLY_API_TOKEN` is set and the `falchion` app exists (see
 `server/fly.toml`). Secrets: `FLY_API_TOKEN`, plus `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` and

@@ -95,37 +95,8 @@ export function othersOnMap(players: readonly OtherPlayer[]): { fleets: FleetVie
 }
 
 /** Routine saves reach the server at most every 10 s; news other players should see, every 2.5 s. */
-export const PUSH_GAP_MS = 10_000;
-export const URGENT_PUSH_GAP_MS = 2_500;
-
-/** Milliseconds to wait before the next push, given the last one (never sooner than its gap). */
-export function pushDelay(now: number, lastPush: number, urgent: boolean): number {
-  return Math.max(0, lastPush + (urgent ? URGENT_PUSH_GAP_MS : PUSH_GAP_MS) - now);
-}
-
-const ownFleets = (s: GameState) => s.fleets.filter((f) => f.owner === s.playerName);
-const colonyKey = (s: GameState) => s.economy.colonies.map((c) => c.starId ?? '').join('|');
-
-/**
- * A change other players should see on their maps soon: one of your fleets set a new course
- * (or left or docked), a colony or depot appeared, or the empire was founded or renamed.
- */
-export function notableChange(prev: GameState, next: GameState): boolean {
-  if (next.identity !== prev.identity || next.depots !== prev.depots) return true;
-  if (next.economy.colonies !== prev.economy.colonies && colonyKey(next) !== colonyKey(prev)) return true;
-  if (next.fleets === prev.fleets) return false;
-  const a = ownFleets(prev);
-  const b = ownFleets(next);
-  return a.length !== b.length || b.some((f, i) => f.id !== a[i].id || f.movement !== a[i].movement);
-}
-
-/** Saves for a signed-in player live on the server, so they follow them between devices. */
+/** A signed-in player's empire as the server holds (and runs) it, and the other players. */
 export class ServerSaves {
-  private lastPush = 0;
-  private pending: ReturnType<typeof setTimeout> | null = null;
-  private pendingAt = 0;
-  private latest: string | null = null;
-
   async load(): Promise<SavedGame | null> {
     try {
       const res = await fetch('./api/save', { credentials: 'same-origin', cache: 'no-store' });
@@ -136,42 +107,18 @@ export class ServerSaves {
   }
 
   /**
-   * Push at most every 10 s, or every 2.5 s when `urgent` (a change other players should see
-   * soon, such as a move order). The latest state wins; a sooner push already waiting is kept.
+   * Start a new empire on the server: the one save it ever takes from this browser. After that
+   * the server runs the empire. `existing`: the server already had one (founded on another device).
    */
-  push(save: object, pub: PublicEmpire, urgent = false): void {
-    this.latest = JSON.stringify({ save, public: pub });
-    this.schedule(pushDelay(Date.now(), this.lastPush, urgent));
-  }
-
-  /**
-   * Send a waiting push now. `closing`: the page is going away (keepalive lets the request
-   * finish after it); otherwise the push still keeps 2.5 s from the previous one.
-   */
-  flush(closing = false): void {
-    if (!this.pending) return;
-    const wait = pushDelay(Date.now(), this.lastPush, true);
-    if (closing || wait === 0) this.send(closing);
-    else this.schedule(wait);
-  }
-
-  private schedule(wait: number): void {
-    const at = Date.now() + wait;
-    if (this.pending && this.pendingAt <= at) return;
-    if (this.pending) clearTimeout(this.pending);
-    this.pendingAt = at;
-    this.pending = setTimeout(() => this.send(false), wait);
-  }
-
-  private send(keepalive: boolean): void {
-    if (this.pending) clearTimeout(this.pending);
-    this.pending = null;
-    const body = this.latest;
-    if (!body) return;
-    this.lastPush = Date.now();
-    // Browsers cap keepalive bodies at 64 KB; a larger save goes as a normal request.
-    fetch('./api/save', { method: 'PUT', credentials: 'same-origin', keepalive: keepalive && body.length < 60_000, headers: { 'Content-Type': 'application/json' }, body })
-      .catch(() => { /* offline: the local save still has it; the next push retries */ });
+  async create(save: object, pub: PublicEmpire): Promise<{ created: boolean; existing?: SavedGame }> {
+    try {
+      const res = await fetch('./api/save', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ save, public: pub }) });
+      if (res.ok) return { created: true };
+      const body = (await res.json().catch(() => ({}))) as { save?: SavedGame };
+      return { created: false, existing: res.status === 409 ? body.save : undefined };
+    } catch {
+      return { created: false };
+    }
   }
 
   async players(): Promise<OtherPlayer[]> {

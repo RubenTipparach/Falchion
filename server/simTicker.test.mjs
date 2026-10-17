@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createSimTicker, PLAYING_GRACE_MS } from './simTicker.mjs';
+import { createSimTicker } from './simTicker.mjs';
+import { createCommandService } from './commands.mjs';
+import { createLocks } from './locks.mjs';
+import { encodeCommand } from '../src/sim/commands.ts';
 import * as sim from '../src/sim/headless.ts';
 import { newEmpireState } from '../src/sim/newEmpireState.ts';
 import { GalaxyModel } from '../src/core/galaxy/GalaxyModel.ts';
@@ -30,42 +33,70 @@ function memoryStore(records) {
   };
 }
 
-describe('empires keep playing while their owners are away', () => {
+describe('the server runs every empire', () => {
   const NOW = 10_000_000;
-  const AWAY = '111111111111111111', PLAYING = '222222222222222222', ONLINE = '333333333333333333';
+  const A = '111111111111111111', B = '222222222222222222';
 
-  it('plays away empires to the world year, leaves playing ones to their browsers, and tells everyone', async () => {
+  it('plays every empire forward each world year, tells other players and sends the owner their state', async () => {
     const store = memoryStore({
-      [AWAY]: { player: { id: AWAY, name: 'Away' }, save: saveFor(AWAY, 500), public: {}, updatedAt: NOW - 10 * 60_000 },
-      [PLAYING]: { player: { id: PLAYING, name: 'Playing' }, save: saveFor(PLAYING, 500), public: {}, updatedAt: NOW - 30_000 },
-      [ONLINE]: { player: { id: ONLINE, name: 'Online' }, save: saveFor(ONLINE, 500), public: {}, updatedAt: NOW - PLAYING_GRACE_MS * 2 },
+      [A]: { player: { id: A, name: 'A' }, save: saveFor(A, 500), public: {}, updatedAt: NOW - 10 * 60_000 },
+      [B]: { player: { id: B, name: 'B' }, save: saveFor(B, 500), public: {}, updatedAt: NOW - 1_000 },
     });
-    const published = [];
-    const ticker = createSimTicker({ store, loadSim: async () => sim, isOnline: (id) => id === ONLINE, publish: (p) => published.push(p), now: () => NOW });
-    expect(await ticker.tick(520)).toBe(1);
-    expect(store.map.get(AWAY).save.turn).toBe(520);
-    expect(store.map.get(AWAY).updatedAt).toBe(NOW - 10 * 60_000); // still the owner's last save time
-    expect(store.map.get(AWAY).simulatedAt).toBe(NOW);
-    expect(store.map.get(PLAYING).save.turn).toBe(500);
-    expect(store.map.get(ONLINE).save.turn).toBe(500);
-    expect(published.map((p) => p.id)).toEqual([AWAY]);
-    expect(published[0].fleets.length).toBeGreaterThan(0);
-    // Next year: one more.
+    const published = [], owners = [];
+    const ticker = createSimTicker({ store, loadSim: async () => sim, publish: (p) => published.push(p.id), notifyOwner: (id, save) => owners.push([id, save.turn]), now: () => NOW });
+    expect(await ticker.tick(520)).toBe(2);
+    expect(store.map.get(A).save.turn).toBe(520);
+    expect(store.map.get(B).save.turn).toBe(520);
+    expect(store.map.get(A).updatedAt).toBe(NOW - 10 * 60_000); // the owner's last order, unchanged
+    expect(store.map.get(A).simulatedAt).toBe(NOW);
+    expect(published.sort()).toEqual([A, B]);
+    expect(owners).toContainEqual([A, 520]);
     await ticker.tick(521);
-    expect(store.map.get(AWAY).save.turn).toBe(521);
-  });
-
-  it('never overwrites a save the owner wrote while the server was working', async () => {
-    const store = memoryStore({ [AWAY]: { player: { id: AWAY, name: 'Away' }, save: saveFor(AWAY, 500), public: {}, updatedAt: NOW - 600_000 } });
-    const slowSim = { advanceSave: (...a) => { store.map.set(AWAY, { ...store.map.get(AWAY), updatedAt: NOW, save: { ...store.map.get(AWAY).save, turn: 999 } }); return sim.advanceSave(...a); } };
-    const ticker = createSimTicker({ store, loadSim: async () => slowSim, isOnline: () => false, now: () => NOW });
-    expect(await ticker.tick(520)).toBe(0);
-    expect(store.map.get(AWAY).save.turn).toBe(999);
+    expect(store.map.get(A).save.turn).toBe(521);
   });
 
   it('does nothing without the bundled simulation, and skips broken saves', async () => {
-    const store = memoryStore({ [AWAY]: { player: { id: AWAY, name: 'Away' }, save: { turn: 1 }, public: {}, updatedAt: 0 } });
-    expect(await createSimTicker({ store, loadSim: async () => null, isOnline: () => false }).tick(520)).toBe(0);
-    expect(await createSimTicker({ store, loadSim: async () => sim, isOnline: () => false }).tick(520)).toBe(0);
+    const store = memoryStore({ [A]: { player: { id: A, name: 'A' }, save: { turn: 1 }, public: {}, updatedAt: 0 } });
+    expect(await createSimTicker({ store, loadSim: async () => null }).tick(520)).toBe(0);
+    expect(await createSimTicker({ store, loadSim: async () => sim }).tick(520)).toBe(0);
+  });
+});
+
+describe('orders are commands the server applies', () => {
+  const A = '111111111111111111';
+  const user = { id: A, name: 'A', avatar: null };
+
+  function service(store, opts = {}) {
+    return createCommandService({ store, loadSim: async () => sim, withLock: createLocks(), worldTime: () => 600.25, ...opts });
+  }
+
+  it('applies an order to the server copy, saves it and returns the truth', async () => {
+    const store = memoryStore({ [A]: { player: { id: A, name: 'A' }, save: saveFor(A, 600), public: {}, updatedAt: 0 } });
+    const published = [];
+    const r = await service(store, { publish: (p) => published.push(p.id) }).apply(user, { command: encodeCommand('setOrders', ['survey-1', { autoExplore: true, autoReturn: true }]) });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+    expect(store.map.get(A).save.loadouts['survey-1'].orders).toEqual({ autoExplore: true, autoReturn: true });
+    expect(r.body.save.loadouts['survey-1'].orders.autoExplore).toBe(true);
+    expect(published).toEqual([A]);
+  });
+
+  it('refuses what the rules refuse, and orders for an empire that does not exist yet', async () => {
+    const store = memoryStore({ [A]: { player: { id: A, name: 'A' }, save: saveFor(A, 600), public: {}, updatedAt: 0 } });
+    const bad = await service(store).apply(user, { command: { name: 'grantShards', args: ['t-fusion', 'exploration', 1e6] } });
+    expect(bad.body.ok).toBe(false);
+    expect(store.map.get(A).save.empire.research).toEqual(saveFor(A, 600).empire.research);
+    const none = await service(memoryStore({})).apply(user, { command: encodeCommand('collectAllLoot', []) });
+    expect(none.status).toBe(404);
+  });
+
+  it('applies a quick burst of orders one at a time, in order, and rate-limits a flood', async () => {
+    const store = memoryStore({ [A]: { player: { id: A, name: 'A' }, save: saveFor(A, 600), public: {}, updatedAt: 0 } });
+    const svc = service(store);
+    const results = await Promise.all([true, false, true].map((on) => svc.apply(user, { command: encodeCommand('setOrders', ['survey-1', { autoExplore: on, autoReturn: false }]) })));
+    expect(results.every((r) => r.body.ok)).toBe(true);
+    expect(store.map.get(A).save.loadouts['survey-1'].orders.autoExplore).toBe(true);
+    const flood = await Promise.all(Array.from({ length: 50 }, () => svc.apply(user, { command: encodeCommand('collectAllLoot', []) })));
+    expect(flood.some((r) => r.status === 429)).toBe(true);
   });
 });

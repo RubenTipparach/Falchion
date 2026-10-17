@@ -16,7 +16,8 @@ import { SaveGame, savedHome, type SavedGame } from '../app/SaveGame';
 import { colorFor, publicEmpire, type PublicEmpire } from '../app/ServerSync';
 import { Store } from '../app/Store';
 import { createWorld, tradePartners } from '../app/World';
-import { EmpireSim } from './EmpireSim';
+import { EmpireSim, type SimDeps } from './EmpireSim';
+import { CommandError, decodeArgs, type Command } from './commands';
 
 /**
  * The game rules without a browser: the server runs this to keep every empire going while its
@@ -41,6 +42,8 @@ export function validSave(save: unknown): save is SavedGame {
   return new SaveGame(tables().galaxy.params.seed, null).valid(save);
 }
 
+export type { Command };
+
 export interface Advanced {
   /** The save after the years were played (same format the client stores). */
   readonly save: Record<string, unknown>;
@@ -55,8 +58,66 @@ export interface Advanced {
  * name: the name owns the fleets). Null when the save is invalid or already up to date. A long
  * absence is caught up as the client would (the most recent week in full).
  */
-export function advanceSave(save: unknown, player: { readonly id: string; readonly name: string }, toTurn: number): Advanced | null {
+export function advanceSave(save: unknown, player: Player, toTurn: number): Advanced | null {
   if (!validSave(save) || !Number.isInteger(toTurn) || save.turn >= toTurn) return null;
+  const { deps, store } = runtime(save, player);
+  const from = store.state.turn;
+  const sim = new EmpireSim(deps);
+  sim.advanceTo(toTurn);
+  sim.retimeFleets();
+  return { ...result(store.state, player), years: store.state.turn - from };
+}
+
+export interface Applied extends Omit<Advanced, 'years'> {
+  readonly ok: boolean;
+  /** Why the command was refused (the save is then unchanged apart from catching up). */
+  readonly error?: string;
+}
+
+/**
+ * Apply one player command to an empire on the server: catch the empire up to the world year,
+ * decode and validate the command against it, run it with the game's rules, and return the
+ * resulting save (the truth the client adopts). `worldTime` is the current world time in years
+ * (fractional); `clientTime` is when the player gave the order, honoured within a few seconds
+ * so a fleet sets off from where the player saw it.
+ */
+export function applyCommand(save: unknown, player: Player, worldTime: number, command: unknown, clientTime?: number): Applied | null {
+  if (!validSave(save) || !Number.isFinite(worldTime)) return null;
+  const { deps, store } = runtime(save, player);
+  const at = typeof clientTime === 'number' && Number.isFinite(clientTime) ? Math.min(worldTime, Math.max(worldTime - ORDER_SLACK_YEARS, clientTime)) : worldTime;
+  const sim = new ServerSim(deps, at);
+  sim.advanceTo(Math.floor(worldTime));
+  sim.retimeFleets();
+  try {
+    const { name, args } = decodeArgs(command, sim);
+    // An empire is founded once; later identity changes are edits.
+    if (name === 'setIdentity' && store.state.identity) args[1] = false;
+    (sim[name] as (...a: unknown[]) => unknown)(...args);
+    return { ...result(store.state, player), ok: true };
+  } catch (err) {
+    const error = err instanceof CommandError ? err.message : `command failed: ${(err as Error)?.message ?? err}`;
+    return { ...result(store.state, player), ok: false, error };
+  }
+}
+
+/** How far back (in years) a player's order may be dated: a few seconds of latency. */
+const ORDER_SLACK_YEARS = 5 / 60;
+
+type Player = { readonly id: string; readonly name: string };
+
+/** The simulation at a fixed moment: orders between ticks take effect from then. */
+class ServerSim extends EmpireSim {
+  constructor(deps: SimDeps, private readonly time: number) {
+    super(deps);
+  }
+
+  protected override now(): number {
+    return Math.max(this.state.turn, this.time);
+  }
+}
+
+/** A save as live simulation state, with its world. */
+function runtime(save: SavedGame, player: Player): { deps: SimDeps; store: Store<GameState> } {
   const { galaxy, tree, encounters } = tables();
   const world = createWorld(galaxy, player.id, savedHome(save));
   const economy: EconomyTables = {
@@ -73,10 +134,11 @@ export function advanceSave(save: unknown, player: { readonly id: string; readon
     playerName: owner,
   };
   const store = new Store<GameState>(state);
-  const from = state.turn;
-  new EmpireSim({ store, galaxy, tree, encounters, world, economy }).advanceTo(toTurn);
-  const after = store.state;
-  const snapshot = new SaveGame(galaxy.params.seed, null).snapshot(after);
+  return { deps: { store, galaxy, tree, encounters, world, economy }, store };
+}
+
+function result(state: GameState, player: Player): { save: Record<string, unknown>; public: PublicEmpire } {
+  const snapshot = new SaveGame(tables().galaxy.params.seed, null).snapshot(state);
   delete snapshot.tab; // written by the server, not a browser tab
-  return { save: snapshot, public: publicEmpire(after, colorFor(player.id)), years: after.turn - from };
+  return { save: snapshot, public: publicEmpire(state, colorFor(player.id)) };
 }

@@ -2,10 +2,17 @@ import type { GameState } from './GameState';
 import type { Hex } from '../core/hex/Hex';
 
 /** Fields that persist between sessions; the rest is view state or derived from the world. */
-const SAVED = [
+export const SAVED = [
   'turn', 'empire', 'economy', 'designs', 'shipyardClass', 'hiddenTraits', 'explored', 'openedCrates', 'collectedCaches',
   'fleets', 'loadouts', 'dockSpent', 'depots', 'construction', 'lastReport', 'dispatches', 'engaged', 'identity', 'home',
 ] as const satisfies ReadonlyArray<keyof GameState>;
+
+/** The persistent fields of a save, as a patch for the game state (view state untouched). */
+export function savedFields(save: SavedGame): Partial<GameState> {
+  const out: Record<string, unknown> = {};
+  for (const k of SAVED) if (k in save) out[k] = (save as unknown as Record<string, unknown>)[k];
+  return out as Partial<GameState>;
+}
 
 export type SavedGame = Omit<Pick<GameState, (typeof SAVED)[number]>, 'home'> & { readonly version: number; readonly seed: number; readonly home?: GameState['home'] };
 

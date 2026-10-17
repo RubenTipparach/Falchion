@@ -167,6 +167,14 @@ export function createChat(deps) {
     for (const [uid, { conns }] of clients) if (uid !== except) for (const res of conns) send(res, event, data);
   }
 
+  /** Send an event to one player's open streams (all their tabs); false when they are not connected. */
+  function sendTo(userId, event, data) {
+    const entry = clients.get(userId);
+    if (!entry) return false;
+    for (const res of entry.conns) send(res, event, data);
+    return true;
+  }
+
   // ── Posting ──
   function allow(uid) {
     const t = now();
@@ -254,7 +262,7 @@ export function createChat(deps) {
   }
 
   return {
-    handle, post, history, online, flush, broadcast,
+    handle, post, history, online, flush, broadcast, sendTo,
     /** Resolves when Discord notifications for the latest message are done. */
     settled: () => pending,
     loaded: () => loaded,

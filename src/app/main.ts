@@ -2,7 +2,7 @@ import '../ui/styles.css';
 import { EncounterResolver } from '../core/encounters/Encounters';
 import { formatDuration } from '../core/time/WorldTime';
 import { CLOCK, connectWorldClock } from './WorldClock';
-import { SaveGame, savedHome } from './SaveGame';
+import { SaveGame, savedHome, type SavedGame } from './SaveGame';
 import { DEFAULT_ADDRESS_SCHEME } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel } from '../core/galaxy/GalaxyModel';
 import { hexToWorld, worldToHex } from '../core/hex/Hex';
@@ -49,7 +49,7 @@ import type { PanelId } from '../ui/GameActions';
 import { GameController, tradePartners } from './GameController';
 import type { GameState } from './GameState';
 import { GUEST, probeSession } from './identity';
-import { colorFor, notableChange, ownClaim, publicEmpire, ServerSaves } from './ServerSync';
+import { colorFor, ownClaim, publicEmpire, ServerSaves } from './ServerSync';
 import { cleanIdentity, suggestIdentity } from '../core/empire/Identity';
 import { HERALDRY } from '../content/heraldry';
 import { showFounding } from '../ui/Founding';
@@ -59,6 +59,8 @@ import { createWorld } from './World';
 import { setupChat } from './ChatSetup';
 import { setupPlayers } from './PlayersSetup';
 import { setupRouting } from './Router';
+import { ServerAuthority } from './Authority';
+import { COMMANDS, encodeCommand, type CommandName } from '../sim/commands';
 import { newEmpireState } from '../sim/newEmpireState';
 import { reportActivity } from './GalaxyApi';
 
@@ -77,11 +79,10 @@ async function bootstrap(): Promise<void> {
   const saveGame = new SaveGame(galaxy.params.seed, undefined, signedIn ? identity.id : undefined);
   const serverSaves = signedIn ? new ServerSaves() : null;
   let saved = saveGame.load();
-  if (serverSaves) {
-    // The server copy follows the player between devices; use whichever is further along.
-    const remote = await serverSaves.load();
-    if (saveGame.valid(remote) && (!saved || remote.turn >= saved.turn)) saved = remote;
-  }
+  // The server runs signed-in players' empires: its copy is the empire, on every device.
+  const remote = serverSaves ? await serverSaves.load() : null;
+  const onServer = saveGame.valid(remote);
+  if (onServer) saved = remote;
   // A saved empire keeps its home system wherever the galaxy puts stars now.
   const world = createWorld(galaxy, signedIn ? identity.id : undefined, savedHome(saved));
   const { factory, styles, traits } = createDefaultShipFactory();
@@ -98,6 +99,32 @@ async function bootstrap(): Promise<void> {
     // Signed-in players' notable news goes to the galaxy feed and the Discord channel (the server rate-limits it).
     report: signedIn ? reportActivity : undefined,
   });
+  // Signed in: the server runs the empire. Every order is applied here at once and sent to the
+  // server as a command (only the outermost call: an order that gives others sends just itself);
+  // the server's answer is the truth the browser adopts. Guests play on their own.
+  const authority = serverSaves && probe.server ? new ServerAuthority(store, onServer, (text) => store.update((s) => ({ dispatches: [{ turn: s.turn, text, tone: 'bad' as const }, ...s.dispatches].slice(0, 40) }))) : null;
+  if (authority) {
+    let depth = 0;
+    const calls = controller as unknown as Record<string, (...args: unknown[]) => unknown>;
+    for (const name of Object.keys(COMMANDS) as CommandName[]) {
+      const original = calls[name].bind(controller);
+      calls[name] = (...args: unknown[]) => {
+        if (depth > 0 || !authority.running) return original(...args);
+        depth++;
+        try {
+          return original(...args);
+        } finally {
+          depth--;
+          try {
+            authority.send(encodeCommand(name, args), controller.worldTime());
+          } catch {
+            // Not sendable (should not happen): the next state from the server corrects it.
+          }
+        }
+      };
+    }
+    controller.beforeReset = async () => { await fetch('./api/save', { method: 'DELETE', credentials: 'same-origin' }).catch(() => {}); };
+  }
 
   // ── Views ──
   const app = document.getElementById('app')!;
@@ -163,7 +190,9 @@ async function bootstrap(): Promise<void> {
   const players = setupPlayers({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, store, territory,
     fetchPlayers: serverSaves && (() => serverSaves.players()), message: (id) => chat.openThread(id) });
   // In-game chat (global + DMs, location links, @mentions): see ChatSetup. Its stream also carries the players' live events.
-  const chat = setupChat({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, panels: Object.values(panels), live: players.live });
+  // The live stream also carries the server's state of this empire each year.
+  const live = { ...players.live, taps: { ...players.live.taps, state: (data: unknown) => authority?.onServerState((data as { save?: SavedGame }).save) } };
+  const chat = setupChat({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, panels: Object.values(panels), live });
   players.alongside([...Object.values(panels), chat]);
   topBar.addTab(players.panel.tab);
   topBar.addTab(chat.tab);
@@ -191,33 +220,46 @@ async function bootstrap(): Promise<void> {
   // Other players in the shared galaxy: live over the stream, and polled every year as a fallback.
   const refreshOthers = () => players.refresh();
   void refreshOthers();
-  clock.onTick((tick) => { controller.advanceTo(tick); void refreshOthers(); });
-  // Saved journeys planned at other speeds continue at the empire's speed, then the missed years run.
-  controller.retimeFleets();
-  controller.advanceTo(clock.tick());
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) controller.advanceTo(clock.tick()); });
+  // Signed in: the server runs the empire and each year sends what it decided; guests (and an
+  // empire not yet founded) run it here.
+  const yearly = (tick: number) => { if (authority?.running) authority.expectTick(tick); else controller.advanceTo(tick); };
+  clock.onTick((tick) => { yearly(tick); void refreshOthers(); });
+  if (!authority?.running) {
+    // Saved journeys planned at other speeds continue at the empire's speed, then the missed years run.
+    controller.retimeFleets();
+    controller.advanceTo(clock.tick());
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    if (authority?.running) void authority.refresh();
+    else controller.advanceTo(clock.tick());
+  });
   let saveTimer = 0;
-  // A move order, colony, depot or founding is news for other players' maps: push it within seconds.
-  let urgent = false;
+  let creating = false;
   const persist = () => {
     saveGame.save(store.state);
-    // The server copy starts once the empire is founded, so the galaxy (and the Discord channel)
-    // first hears of a new player with their chosen name and flag.
-    if (serverSaves && store.state.identity && !saveGame.stoppedSaving) serverSaves.push(saveGame.snapshot(store.state), publicEmpire(store.state, colorFor(identity.id)), urgent);
-    urgent = false;
+    // The server's copy starts once the empire is founded, so the galaxy (and the Discord channel)
+    // first hears of a new player with their chosen name and flag. From then on the server runs it.
+    if (!serverSaves || !authority || authority.running || creating || !store.state.identity || saveGame.stoppedSaving) return;
+    creating = true;
+    void serverSaves.create(saveGame.snapshot(store.state), publicEmpire(store.state, colorFor(identity.id))).then((r) => {
+      creating = false;
+      if (r.created) authority.activate();
+      else if (r.existing) { authority.activate(); authority.adopt(r.existing); }
+    });
   };
-  store.subscribe((s, prev) => {
-    if (notableChange(prev, s)) urgent = true;
+  // The local copy (guests' only one; a cache for signed-in players) follows every change.
+  store.subscribe(() => {
     clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(persist, urgent ? 300 : 1500);
+    saveTimer = window.setTimeout(persist, 1500);
   });
   // Leaving or reloading: write the local save and send the server copy now, so another device
   // (or this one after a reload) picks up exactly where this tab left off.
-  const persistNow = (closing = false) => { clearTimeout(saveTimer); persist(); serverSaves?.flush(closing); };
-  window.addEventListener('pagehide', () => persistNow(true));
+  const persistNow = () => { clearTimeout(saveTimer); persist(); };
+  window.addEventListener('pagehide', () => persistNow());
   // A new version on the server: save, say so, and reload onto it.
   clock.onNewVersion(() => {
-    persistNow(true);
+    persistNow();
     hud.setContact('Falchion was updated. Saving and reloading…');
     setTimeout(() => location.reload(), 2_500);
   });
@@ -265,5 +307,4 @@ async function bootstrap(): Promise<void> {
   if (import.meta.env.DEV) Object.assign(window, { falchion: controller });
 }
 
-/** Starting fleets, timed relative to the year the empire is founded (t0). */
 bootstrap();

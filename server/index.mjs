@@ -16,6 +16,8 @@ import { createPlayerFeed } from './live.mjs';
 import { createNotifier } from './notifier.mjs';
 import { linkPreview, withPreview } from './links.mjs';
 import { createSimTicker } from './simTicker.mjs';
+import { createCommandService } from './commands.mjs';
+import { createLocks } from './locks.mjs';
 import { createStore } from './store.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -121,22 +123,39 @@ async function api(req, res, pathname) {
     const record = await store.load(user.id);
     return record ? json(res, 200, record.save) : json(res, 404, { error: 'no save yet' });
   }
+  // The server runs every empire: a save is uploaded once, to start a new empire. After that
+  // the empire changes only through commands (POST /api/command) and the yearly tick.
   if (pathname === '/api/save' && req.method === 'PUT') {
     try {
       const body = await readJson(req, MAX_SAVE_BYTES);
       if (!body || typeof body.save !== 'object' || !Number.isInteger(body.save?.turn)) return json(res, 400, { error: 'bad save' });
-      const isNew = !(await store.load(user.id));
-      const pub = publicView(body.public);
-      const updatedAt = Date.now();
-      await store.save(user.id, { player: user, save: body.save, public: pub, updatedAt });
-      playerFeed.publish({ ...pub, id: user.id, name: user.name, avatar: user.avatar ?? null, updatedAt });
-      if (isNew) {
+      return await withLock(user.id, async () => {
+        const existing = await store.load(user.id);
+        if (existing?.save) return json(res, 409, { error: 'this empire is run by the server', save: existing.save });
+        const pub = publicView(body.public);
+        const updatedAt = Date.now();
+        await store.save(user.id, { player: user, save: body.save, public: pub, updatedAt });
+        playerFeed.publish({ ...pub, id: user.id, name: user.name, avatar: user.avatar ?? null, updatedAt });
         void notifier.joined(user.name, body.public?.empire?.name);
         void activity.founded(user, pub);
-      }
-      return json(res, 200, { ok: true });
+        return json(res, 200, { ok: true });
+      });
     } catch (err) {
       return json(res, err.status ?? 400, { error: err.status === 413 ? 'save too large' : 'bad save' });
+    }
+  }
+  // Abandon your empire and start again (the Empire panel's reset).
+  if (pathname === '/api/save' && req.method === 'DELETE') {
+    await withLock(user.id, () => store.remove(user.id));
+    return json(res, 200, { ok: true });
+  }
+  if (pathname === '/api/command' && req.method === 'POST') {
+    try {
+      const body = await readJson(req, 64 * 1024);
+      const r = await commands.apply(user, body);
+      return json(res, r.status, r.body);
+    } catch (err) {
+      return json(res, err.status ?? 400, { ok: false, error: 'bad command' });
     }
   }
   if (pathname === '/api/players' && req.method === 'GET') {
@@ -185,12 +204,22 @@ const loadSim = async () => {
     return null;
   }
 };
+// The server runs every empire: one writer per empire at a time (orders and the yearly tick).
+const withLock = createLocks();
+/** World time in years, fractional (one year per tick). */
+const worldTime = () => (Date.now() - CLOCK.epochMs) / CLOCK.msPerTick;
 export const simTicker = createSimTicker({
-  store, loadSim,
-  isOnline: (id) => chat.online().some((u) => u.id === id),
+  store, loadSim, withLock,
   publish: (p) => playerFeed.publish(p),
+  // The owner's browser shows what the server decided this year.
+  notifyOwner: (id, save) => chat.sendTo(id, 'state', { save }),
   publicView: (p) => publicView(p),
   log: (m) => console.warn(m),
+});
+export const commands = createCommandService({
+  store, loadSim, withLock, worldTime,
+  publish: (p) => playerFeed.publish(p),
+  publicView: (p) => publicView(p),
 });
 // Proxies drop idle streams; a comment every 20 s keeps them open.
 setInterval(() => { for (const res of listeners) res.write(': keep-alive\n\n'); }, 20_000).unref?.();
@@ -267,7 +296,7 @@ export const server = createServer(async (req, res) => {
   if (await activity.handle(req, res, pathname)) return;
   if (pathname === '/auth/discord/callback') return auth.enabled ? auth.callback(req, res, new URL(req.url ?? '/', 'http://localhost')) : send(res, 404, 'not configured');
   if (pathname === '/auth/logout') return auth.logout(res);
-  if (pathname === '/api/me' || pathname === '/api/save' || pathname === '/api/players') return api(req, res, pathname);
+  if (pathname === '/api/me' || pathname === '/api/save' || pathname === '/api/command' || pathname === '/api/players') return api(req, res, pathname);
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed');
   return serveStatic(pathname, res);
 });

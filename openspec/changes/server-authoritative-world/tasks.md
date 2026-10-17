@@ -1,6 +1,6 @@
 - [x] 1 Extract the rules from GameController into a pure EmpireSim (no three/DOM); controller extends it
 - [x] 2 Server bundle of the simulation (Vite SSR: `npm run build:sim` → server/sim/headless.mjs), built in CI and Docker
-- [x] 3 Server plays every away empire forward each world year and persists it (server/simTicker.mjs); owners playing (online, or saved within 2.5 min) are left to their browsers
-- [ ] 4 Command API: client sends commands, server applies them and returns state; validation by ids
-- [ ] 5 Client adopts server state after each command and tick (signed in); guests stay local
-- [x] 6 Tests: the server's simulation equals the client's, determinism, ticking away empires, never overwriting a fresher owner save
+- [x] 3 Server plays every empire forward each world year, persists it and pushes the owner their state (server/simTicker.mjs)
+- [x] 4 Command API (POST /api/command): src/sim/commands.ts encodes each order with ids; the server decodes and validates against its copy, applies it with the game's rules (one writer per empire), saves and returns the state
+- [x] 5 Client applies each order at once and sends it; adopts the server's state after its orders are answered and each year (pushed, or fetched); a save is uploaded only to found a new empire; guests stay local
+- [x] 6 Tests: server = client for every kind of order and for the years, determinism, refused/malformed orders, rate limit, ordering, the ticker; end to end through a fake Discord (orders, a refused build, a doctored save and console edits undone, the year pushed, a second device)

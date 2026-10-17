@@ -1,0 +1,43 @@
+# Fly.io app for the Falchion server (client + future MMO API).
+#
+# Deploys via .github/workflows/deploy.yml using the FLY_API_TOKEN repo
+# secret. Bootstrap once locally with flyctl:
+#
+#   fly apps create falchion
+#   fly tokens create deploy -a falchion   # -> GitHub secret FLY_API_TOKEN
+#
+# Until then the Fly job skips with a notice instead of failing.
+# When the MMO server lands, add a volume + [[mounts]] for persistence.
+
+app = "falchion"
+primary_region = "ams"
+
+[build]
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 200
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256

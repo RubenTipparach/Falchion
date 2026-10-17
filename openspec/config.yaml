@@ -1,0 +1,18 @@
+schema: spec-driven
+
+context: |
+  Falchion is a hex-based, at-scale 4X MMO with Discord integration, rendered with three.js.
+  One hex = 1 light year; the shared galaxy is ~70,000 ly across and is generated from seeds, never stored in full.
+  First iteration is fully async PvE (players may meet peacefully and co-op against aliens); PvP is out of scope until a later change.
+  When players' fleets meet, a deterministic lockstep turn system takes precedence over async time.
+  Domain logic must be deterministic and runnable headless on a server (no three.js/DOM in src/core).
+  Follow the project skills: solid-principles, modular-game-systems, deterministic-simulation, testing-practices.
+
+rules:
+  proposal:
+    - State what is out of scope (PvP, monetisation) when relevant
+    - Identify which existing extension points (registries, content tables) the change uses
+  design:
+    - Name the extension point (interface or registry) every new variant plugs into
+  tasks:
+    - Every core-logic task names the Vitest test that verifies it

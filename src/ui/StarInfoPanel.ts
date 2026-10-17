@@ -62,7 +62,11 @@ export class StarInfoPanel {
       h('dl', {},
         h('dt', {}, 'Address'), h('dd', {}, d.address),
         h('dt', {}, 'From home'), h('dd', {}, `${fmt(d.distanceFromHome)} ly`),
-        h('dt', {}, 'Travel time'), h('dd', {}, `${d.travel} at ${d.speed} ly/min`)),
+        h('dt', {}, 'Travel time'), h('dd', {}, `${d.travel} at ${d.speed} ly/min`),
+        ...(star.planetCount ? (() => {
+          const p = this.q.surveyProgress(star);
+          return [h('dt', {}, 'Surveyed'), h('dd', {}, `${Math.round((100 * p.done) / p.total)}% · ${p.done} of ${p.total} planets`)];
+        })() : [])),
       here.length ? h('div', { class: 'here' }, h('span', { class: 'eyebrow' }, 'On station'), ...here.map((g) => h('div', { class: 'here-group' }, h('b', {}, g.name), h('div', { class: 'small muted' }, shipsText(g.ships)), storesView(g)))) : '',
       friendly && !isHome ? h('p', { class: 'small green' }, 'Friendly system: fleets here resupply and rearm.') : '',
       h('div', { class: 'planet-row' }, ...d.planets.map((p) => {
@@ -130,6 +134,14 @@ export class StarInfoPanel {
         h('div', { class: 'row orders' },
           this.orderChip(group, 'autoExplore', 'Auto-explore'),
           this.orderChip(group, 'autoReturn', 'Return to resupply')),
+        info.surveying ? h('p', { class: 'small' }, `Surveying ${info.surveying.name} this year`) : '',
+        info.plan.length ? h('div', { class: 'survey-plan' }, h('span', { class: 'eyebrow' }, 'Survey route'),
+          ...info.plan.map((st, i) => {
+            const p = this.q.surveyProgress(st);
+            return h('button', { class: 'survey-row', title: `Locate ${st.name}`, onclick: () => { this.actions.flyTo(st); } },
+              h('span', { class: 'survey-num' }, String(i + 1)), h('b', {}, st.name),
+              h('small', { class: 'muted' }, `${Math.round((100 * p.done) / Math.max(1, p.total))}% surveyed · ${p.total} planets`));
+          })) : '',
         h('p', { class: 'notice' }, 'Right-click a star, or anywhere in empty space, to send this fleet there. Right-drag to orbit the camera.'))
         : h('p', { class: 'small muted' }, fleet.owner.startsWith('alien:') ? 'Hostile alien fleet.' : 'Another empire\'s fleet.'),
       h('div', { class: 'actions' },

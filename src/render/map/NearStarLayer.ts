@@ -25,6 +25,8 @@ export class NearStarLayer implements MapLayer {
   private readonly cache: ChunkCache<StarChunk>;
   private readonly active = new Map<string, StarChunk>();
   private readonly labels: CSS2DObject[] = [];
+  /** Percent of a star's planets surveyed, or null before any are (shown after its name). */
+  surveyed: ((star: StarSystem) => number | null) | null = null;
 
   constructor(private readonly galaxy: GalaxyModel) {
     this.cache = new ChunkCache<StarChunk>(900, (c) => c.points.geometry.dispose());
@@ -106,7 +108,9 @@ export class NearStarLayer implements MapLayer {
       label.visible = !!e;
       if (!e) return;
       label.position.set(e.s.position.x, 0, e.s.position.z);
-      label.element.textContent = e.s.name;
+      const pct = this.surveyed?.(e.s) ?? null;
+      const text = pct === null ? e.s.name : `${e.s.name} · ${pct}%`;
+      if (label.element.textContent !== text) label.element.textContent = text;
     });
   }
 

@@ -576,3 +576,10 @@ button.chat-mention:hover { filter: brightness(1.25); }
   .topbar { gap: 10px; }
   .topbar .brand .wordmark { display: none; }
 }
+/* Survey route: numbered stops on the map and in the fleet card. */
+.survey-stop { min-width: 16px; height: 16px; padding: 0 4px; border: 1px solid var(--brass); border-radius: 8px; background: rgba(8, 12, 24, 0.85); color: var(--text); font: 600 10px/14px var(--font-mono); text-align: center; pointer-events: none; transform: translateY(-12px); }
+.survey-plan { display: grid; gap: 4px; margin: 8px 0; }
+.survey-row { display: grid; grid-template-columns: 20px auto 1fr; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.survey-row:hover { background: var(--raise); }
+.survey-row small { justify-self: end; }
+.survey-num { width: 18px; height: 18px; border-radius: 9px; border: 1px solid var(--brass); font: 600 10px/16px var(--font-mono); text-align: center; }

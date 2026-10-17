@@ -47,9 +47,15 @@ describe('nebula drift', () => {
 
   it('drifts subtly: barely changed after a few seconds, more over minutes', () => {
     const a: NebulaColor = { r: 0, g: 0, b: 0, a: 0 }, b: NebulaColor = { r: 0, g: 0, b: 0, a: 0 };
+    // Points inside the large clouds (outside them there is nothing to drift).
+    const inside: Array<[number, number]> = [];
+    for (let i = 0; inside.length < 200 && i < 20000; i++) {
+      const x = (i % 141) * 53 - 3000, z = Math.floor(i / 141) * 61 - 3000;
+      if (field.sample(x, z, 0, a).a > 0.3) inside.push([x, z]);
+    }
+    expect(inside.length).toBe(200);
     let minute = 0, hour = 0;
-    for (let i = 0; i < 200; i++) {
-      const x = (i % 20) * 37 - 15000, z = Math.floor(i / 20) * 41 + 20000;
+    for (const [x, z] of inside) {
       field.sample(x, z, 0, a);
       field.sample(x, z, 2, b);
       minute += Math.abs(a.a - b.a);
@@ -106,8 +112,9 @@ describe('NebulaSkyPainter', () => {
     // Find two spots whose local map colours differ strongly in hue.
     const s: NebulaColor = { r: 0, g: 0, b: 0, a: 0 };
     const spots: Array<{ x: number; z: number; h: number }> = [];
-    for (let i = 0; i < 400 && spots.length < 2; i++) {
-      const x = (i % 20) * 977 - 9000, z = Math.floor(i / 20) * 1013 - 9000;
+    // The large layer sets hue over thousands of ly, so search a wide area.
+    for (let i = 0; i < 1600 && spots.length < 2; i++) {
+      const x = (i % 40) * 1877 - 37000, z = Math.floor(i / 40) * 1913 - 37000;
       field.sample(x, z, 0, s);
       if (s.a < 0.4) continue;
       const h = hue(s);

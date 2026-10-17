@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { MapLayer, ViewState } from './MapLayer';
-import { DRIFT_RATE, NEBULA_GLSL, nebulaSeed } from './nebulaField';
+import { DRIFT_RATE, NEBULA_GLSL, nebulaDetail, nebulaSeed } from './nebulaField';
 import { SKY_FULL, SKY_ZERO } from './NebulaSkyboxLayer';
 import { fade, fadeIn } from './ZoomModel';
 
@@ -8,8 +8,8 @@ import { fade, fadeIn } from './ZoomModel';
  * Drifting, multi-hued nebula on the galactic plane, drawn as a full-screen pass:
  * each pixel casts a ray from the camera and samples the plane where it lands, so
  * there is no finite plane to clip at the horizon. Rays that run toward the
- * horizon fade out into the starfield. One layer of fine (~220 ly) clouds that
- * drift very slowly (see `nebulaField`, which the CPU samples too).
+ * horizon fade out into the starfield. Large clouds mask and colour fine, slowly drifting
+ * clouds (see `nebulaField`, which the CPU samples too).
  *
  * Inside a star system the plane fades out: NebulaSkyboxLayer surrounds the
  * camera with this field's colours instead.
@@ -25,7 +25,7 @@ export class NebulaLayer implements MapLayer {
       depthTest: false,
       blending: THREE.AdditiveBlending,
       uniforms: {
-        uOpacity: { value: 1 }, uSeed: { value: nebulaSeed(seed) }, uTime: { value: 0 },
+        uOpacity: { value: 1 }, uSeed: { value: nebulaSeed(seed) }, uTime: { value: 0 }, uDetail: { value: 1 },
         uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() },
         uOrigin: { value: new THREE.Vector2() }, uAlt: { value: 1 },
       },
@@ -33,7 +33,7 @@ export class NebulaLayer implements MapLayer {
         varying vec2 vNdc;
         void main() { vNdc = position.xy; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
       fragmentShader: /* glsl */ `
-        uniform float uOpacity; uniform float uSeed; uniform float uTime;
+        uniform float uOpacity; uniform float uSeed; uniform float uTime; uniform float uDetail;
         uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform vec3 uCamPos; uniform vec2 uOrigin; uniform float uAlt;
         varying vec2 vNdc;
         ${NEBULA_GLSL}
@@ -45,7 +45,7 @@ export class NebulaLayer implements MapLayer {
           float t = -uCamPos.y / dir.y;
           vec2 hit = uCamPos.xz + dir.xz * t + uOrigin;   // absolute galaxy coords
           float horizon = smoothstep(0.0, 0.12, -dir.y) * (1.0 - smoothstep(uAlt * 30.0, uAlt * 90.0, t));
-          vec4 c = nebulaSample(hit, uTime * ${DRIFT_RATE});
+          vec4 c = nebulaSample(hit, uTime * ${DRIFT_RATE}, uDetail);
           float alpha = c.a * horizon * uOpacity;
           if (alpha < 0.002) discard;
           vec3 rgb = c.rgb;
@@ -65,6 +65,8 @@ export class NebulaLayer implements MapLayer {
     const u = this.material.uniforms;
     const cam = view.camera;
     u.uOpacity.value = opacity;
+    // Zoomed out the fine texture would only alias into speckle: it fades into a smooth fill.
+    u.uDetail.value = nebulaDetail(view.visibleWidth);
     u.uTime.value = view.time;
     u.uInvProj.value.copy(cam.projectionMatrixInverse);
     u.uCamWorld.value.copy(cam.matrixWorld);

@@ -42,10 +42,16 @@ export interface FleetInfo {
   /** Years (minutes) to arrival. */
   readonly eta: number;
   readonly mine: boolean;
+  /** Auto-explore: the next systems this fleet will survey (up to 3). */
+  readonly plan: readonly StarSystem[];
+  /** Auto-explore: the planet it is surveying this year. */
+  readonly surveying: Planet | null;
 }
 
 /** Read-only game queries the panels use (implemented by the app layer). */
 export interface GameQueries {
+  /** How much of a system has been surveyed: explored or settled planets out of all. */
+  surveyProgress(star: StarSystem): { done: number; total: number };
   groups(): FleetGroup[];
   /** Groups on station at a star (the dock counts at home). */
   groupsAt(star: StarSystem): FleetGroup[];

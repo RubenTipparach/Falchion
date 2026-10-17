@@ -157,7 +157,8 @@ async function bootstrap(): Promise<void> {
   territory.setOwn(ownClaim(store.state));
   store.subscribe((s, prev) => { if (s.identity !== prev.identity || s.economy.colonies !== prev.economy.colonies) territory.setOwn(ownClaim(s)); });
   const hexGrid = map.layers.add(new HexGridLayer(galaxy.params.radius));
-  map.layers.add(new NearStarLayer(galaxy));
+  const nearStars = map.layers.add(new NearStarLayer(galaxy));
+  nearStars.surveyed = controller.surveyedPercent;
   const system = map.layers.add(new SystemLayer(galaxy, { isHome: (s) => s.id === world.home.id, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet) }));
   const selection = map.layers.add(new SelectionLayer());
   const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK), (h) => galaxy.starAt(h)?.position ?? hexToWorld(h), (id) => controller.selectFleet(id)));

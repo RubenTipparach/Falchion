@@ -16,6 +16,7 @@ import { CLOCK, WorldClock } from './WorldClock';
 import type { SaveGame } from './SaveGame';
 import { capacity, clampStores, exploreCost, firepower, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
 import { adjustShips, countOf, dockedShips, FleetOrders, hasShips, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
+import { planSurvey } from '../core/fleet/Survey';
 import { due, enqueue, Job } from '../core/construction/Construction';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
@@ -75,6 +76,8 @@ const LOCATE_ALTITUDE = 48;
 /** Two clicks on the same thing within this many ms are a double-click. */
 const DOUBLE_CLICK_MS = 400;
 const BASE_SPEED = 1; // ly per year (one year = one minute)
+/** Supply an auto-exploring fleet needs to set off for another system. */
+const MIN_SURVEY_SUPPLY = 2;
 /** Map colour of an empire that has not been founded yet. */
 const DEFAULT_EMPIRE_COLOR = '#e6b450';
 /** At most a week of missed years is simulated on return; older years only move fleets. */
@@ -103,7 +106,14 @@ export class GameController implements GameActions, GameQueries {
     view.hexGrid.setHome(this.deps.world.home.hex.q, this.deps.world.home.hex.r);
     this.deps.store.subscribe((s, prev) => {
       if (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts) view.fleets.setFleets(this.fleetViews());
+      if (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts || s.explored !== prev.explored || s.turn !== prev.turn) this.refreshSurveyPlans();
     });
+    // Up close, a surveyor flies to the planet it is surveying (when that system is drawn).
+    view.fleets.surveyPoint = (id) => {
+      const p = this.surveyTargetCached(id);
+      return p ? view.system.planetPosition(p.id) : null;
+    };
+    this.refreshSurveyPlans();
     for (const [id, panel] of Object.entries(view.panels)) panel.onChange(() => view.topBar.setActivePanel(this.openPanelId() ?? (panel.opened ? (id as PanelId) : null)));
     view.fleets.setTime(this.fleetTime());
     view.fleets.setFleets(this.fleetViews());
@@ -513,6 +523,8 @@ export class GameController implements GameActions, GameQueries {
       eta: Math.max(0, arrivalTurn(m) - s.turn),
       // Your own deployed fleets are the ones with a loadout (ships, supply, ammunition).
       mine: !!s.loadouts[fleetId] && s.fleets.some((f) => f.id === fleetId),
+      plan: this.surveyPlan(fleetId),
+      surveying: this.surveyTarget(fleetId),
     };
   };
 
@@ -779,7 +791,78 @@ export class GameController implements GameActions, GameQueries {
     return news;
   }
 
-  /** Standing orders: fleets explore and head home for supply on their own. */
+  /** Planets of a system still to survey (not explored, not settled), in orbit order. */
+  private unsurveyed(star: StarSystem): Planet[] {
+    return this.planets(star).filter((p) => !this.state.explored[p.id] && !this.colonyAt(p.id));
+  }
+
+  /** How much of a system has been surveyed: explored or settled planets out of all. */
+  surveyProgress = (star: StarSystem): { done: number; total: number } => {
+    const total = star.planetCount;
+    return { done: total - this.unsurveyed(star).length, total };
+  };
+
+  /** A system worth a surveyor's visit: it has planets nobody has surveyed. */
+  private isSurveyTarget = (star: StarSystem): boolean => star.planetCount > 0 && this.unsurveyed(star).length > 0;
+
+  /**
+   * The next systems an auto-exploring fleet will survey (up to 3): the system it is heading
+   * to (or surveying now) first, then the nearest unsurveyed systems after it, one hop at a time.
+   */
+  surveyPlan = (fleetId: string): StarSystem[] => {
+    const s = this.state;
+    const f = s.fleets.find((x) => x.id === fleetId);
+    if (!f || !s.loadouts[fleetId]?.orders?.autoExplore) return [];
+    const dest = f.movement.route[f.movement.route.length - 1];
+    const here = this.deps.galaxy.starAt(dest);
+    const first = here && this.isSurveyTarget(here) ? [here] : [];
+    return [...first, ...planSurvey(this.deps.galaxy, dest, 3 - first.length, this.isSurveyTarget)];
+  };
+
+  /** The planet an auto-exploring fleet on station is surveying this year (it flies there in system view). */
+  surveyTarget = (fleetId: string): Planet | null => {
+    const s = this.state;
+    const f = s.fleets.find((x) => x.id === fleetId);
+    const l = s.loadouts[fleetId];
+    if (!f || !l?.orders?.autoExplore || !isStationed(f.movement, s.turn)) return null;
+    const star = this.deps.galaxy.starAt(hexAt(f.movement, s.turn));
+    return star ? this.unsurveyed(star).find((p) => exploreCost(p) <= l.supply) ?? null : null;
+  };
+
+  /** surveyTarget and survey percentages, memoised per state (the map asks every frame). */
+  private surveyMemo: { state: GameState | null; targets: Map<string, Planet | null>; pct: Map<string, number | null> } = { state: null, targets: new Map(), pct: new Map() };
+
+  /** Percent of a star's planets surveyed, or null when none are (map labels). */
+  surveyedPercent = (star: StarSystem): number | null => {
+    if (this.surveyMemo.state !== this.state) this.surveyMemo = { state: this.state, targets: new Map(), pct: new Map() };
+    const m = this.surveyMemo.pct;
+    if (!m.has(star.id)) {
+      const p = star.planetCount ? this.surveyProgress(star) : null;
+      m.set(star.id, p && p.done > 0 ? Math.round((100 * p.done) / p.total) : null);
+    }
+    return m.get(star.id) ?? null;
+  };
+
+  private surveyTargetCached(fleetId: string): Planet | null {
+    if (this.surveyMemo.state !== this.state) this.surveyMemo = { state: this.state, targets: new Map(), pct: new Map() };
+    const m = this.surveyMemo.targets;
+    if (!m.has(fleetId)) m.set(fleetId, this.surveyTarget(fleetId));
+    return m.get(fleetId) ?? null;
+  }
+
+  /** Draw each auto-exploring fleet's next survey stops on the map. */
+  private refreshSurveyPlans(): void {
+    const s = this.state;
+    const pos = (h: Hex) => this.deps.galaxy.starAt(h)?.position ?? hexToWorld(h);
+    const plans = s.fleets.filter((f) => s.loadouts[f.id]?.orders?.autoExplore).map((f) => {
+      const dest = f.movement.route[f.movement.route.length - 1];
+      const from = pos(dest);
+      return { color: f.color, from: { x: from.x, z: from.z }, stops: this.surveyPlan(f.id).map((st) => ({ x: st.position.x, z: st.position.z })) };
+    });
+    this.view.fleets.setPlans(plans);
+  }
+
+  /** Standing orders: fleets survey planet by planet, move on to the next system, and head home for supply. */
   private followOrders(): string[] {
     const s = this.state;
     const news: string[] = [];
@@ -787,14 +870,26 @@ export class GameController implements GameActions, GameQueries {
       const l = s.loadouts[f.id];
       if (!l?.orders || !isStationed(f.movement, s.turn)) continue;
       const star = this.deps.galaxy.starAt(hexAt(f.movement, s.turn));
-      if (!star) continue;
-      const left = () => this.planets(star).filter((p) => !this.state.explored[p.id] && !this.colonyAt(p.id));
+      const left = () => (star ? this.unsurveyed(star) : []);
       if (l.orders.autoExplore) {
-        const before = left().length;
-        for (const p of left()) this.explore(p, true);
-        const n = before - left().length;
-        if (n) news.push(`${f.name} surveyed ${n} planet${n > 1 ? 's' : ''} in ${star.name}`);
+        // One planet a year: the surveyor visits each world in turn.
+        const target = this.surveyTarget(f.id);
+        if (target && star && this.explore(target, true)) {
+          const p = this.surveyProgress(star);
+          news.push(`${f.name} surveyed ${target.name} (${star.name} ${Math.round((100 * p.done) / Math.max(1, p.total))}% surveyed)`);
+        }
+        // System done (or empty space) and supply left: on to the nearest unsurveyed system.
+        const supply = this.state.loadouts[f.id]?.supply ?? 0;
+        if (left().length === 0 && supply >= MIN_SURVEY_SUPPLY) {
+          const next = planSurvey(this.deps.galaxy, hexAt(f.movement, s.turn), 1, this.isSurveyTarget)[0];
+          if (next) {
+            this.moveFleet(f.id, next, true);
+            news.push(`${f.name} heads on to survey ${next.name}`);
+            continue;
+          }
+        }
       }
+      if (!star) continue;
       const now = this.state.loadouts[f.id];
       const atHome = star.id === s.home.id;
       const cap = capacity(now?.ships ?? [], specOf).supply;

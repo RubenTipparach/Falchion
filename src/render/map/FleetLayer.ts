@@ -55,6 +55,8 @@ function outlineMaterial(): THREE.ShaderMaterial {
   });
 }
 
+type Point = { readonly x: number; readonly z: number };
+
 export interface FleetView {
   readonly id: string;
   readonly name: string;
@@ -79,6 +81,9 @@ interface FleetVisual {
   readonly heading: number;
   readonly modelLength: number;
   readonly parkPhase: number;
+  /** Station-keeping offset from the star (park orbit or the planet being surveyed), eased. */
+  readonly station: THREE.Vector3;
+  stationSet: boolean;
 }
 
 /**
@@ -101,6 +106,15 @@ export class FleetLayer implements MapLayer {
   ) {}
 
   private selectedId: string | null = null;
+  /**
+   * Where an auto-exploring fleet is surveying this year (absolute position of the planet, when
+   * its system is drawn): up close the ship flies there instead of parking in orbit.
+   */
+  surveyPoint: ((fleetId: string) => { readonly x: number; readonly z: number } | null) | null = null;
+  private lastTime = -1;
+  /** Survey plans: a faint dashed route through each surveyor's next systems, with numbered stops. */
+  private plans: Array<{ line: THREE.Line; stops: CSS2DObject[] }> = [];
+  private plansKey = '';
   private readonly outline = outlineMaterial();
   private outlined: THREE.Mesh[] = [];
   /** Materials of the selected ship, marking its pixels in the stencil buffer. */
@@ -165,6 +179,46 @@ export class FleetLayer implements MapLayer {
     return best;
   }
 
+  /**
+   * Survey plans per fleet: a dashed route from where the fleet is headed (`from`, absolute)
+   * through its next stops, each marked with its number. Rebuilt only when the plans change.
+   */
+  setPlans(plans: ReadonlyArray<{ readonly color: string; readonly from: Point; readonly stops: readonly Point[] }>): void {
+    const key = JSON.stringify(plans);
+    if (key === this.plansKey) return;
+    this.plansKey = key;
+    for (const p of this.plans) {
+      this.object3d.remove(p.line);
+      p.line.geometry.dispose();
+      (p.line.material as THREE.Material).dispose();
+      p.stops.forEach((st) => st.element.remove());
+    }
+    this.plans = plans.filter((p) => p.stops.length > 0).map((p) => {
+      const o = p.from;
+      const rel = (q: Point) => new THREE.Vector3(q.x - o.x, 0, q.z - o.z);
+      // Relative to the start, like routes (float32 precision at galaxy coordinates).
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), ...p.stops.map(rel)]),
+        new THREE.LineDashedMaterial({ color: p.color, dashSize: 0.3, gapSize: 0.5, transparent: true, opacity: 0.4 }),
+      );
+      line.position.set(o.x, LIFT, o.z);
+      line.computeLineDistances();
+      this.object3d.add(line);
+      const stops = p.stops.map((q, i) => {
+        const el = document.createElement('div');
+        el.className = 'survey-stop';
+        el.textContent = String(i + 1);
+        el.title = 'Next systems this fleet will survey';
+        el.style.borderColor = p.color;
+        const tag = new CSS2DObject(el);
+        tag.position.copy(rel(q));
+        line.add(tag);
+        return tag;
+      });
+      return { line, stops };
+    });
+  }
+
   /** World time in years, fractional: ships glide between yearly ticks. */
   setTime(time: number): void {
     this.time = time;
@@ -196,19 +250,37 @@ export class FleetLayer implements MapLayer {
     const routeOpacity = 0.8 * fadeIn(view.visibleWidth, 4, 12);
     const local = view.visibleWidth < 9;
     const fx = view.focus.x, fz = view.focus.z; // ship roots are in absolute galaxy coordinates
+    const dt = this.lastTime < 0 ? 0 : Math.min(0.1, Math.max(0, view.time - this.lastTime));
+    this.lastTime = view.time;
+    const glide = 1 - Math.exp(-1.2 * dt);
+    for (const p of this.plans) {
+      const m = p.line.material as THREE.LineDashedMaterial;
+      if (m.dashSize !== dash * 0.5) { m.dashSize = dash * 0.5; m.gapSize = dash * 0.8; }
+      m.opacity = routeOpacity * 0.5;
+      p.line.visible = routeOpacity > 0.01;
+      p.stops.forEach((st) => (st.visible = p.line.visible && view.visibleWidth < 4_000));
+    }
+    const target = new THREE.Vector3();
     for (const v of this.visuals.values()) {
       // Exactly where the ship is at this moment: no easing, so it glides at a steady speed
       // (easing toward a moving target and snapping when close made it judder up close).
       v.shown = progressAtTime(v.fleet.movement, this.time);
       v.root.position.lerpVectors(v.start, v.end, v.shown);
       // Up close, a fleet on station parks in a slow orbit outside the planets instead of
-      // sitting inside the star, and turns to fly along that orbit.
+      // sitting inside the star, or flies to the planet it is surveying, gliding between them.
       if (v.shown >= 1 && park > 0) {
         const a = v.parkPhase + view.time * 0.04;
-        v.root.position.x += Math.cos(a) * PARK_ORBIT * park;
-        v.root.position.z += Math.sin(a) * PARK_ORBIT * park;
-        v.model.group.rotation.y = v.heading + (-a - v.heading) * park;
-      } else v.model.group.rotation.y = v.heading;
+        const survey = this.surveyPoint?.(v.fleet.id);
+        if (survey) target.set(survey.x - v.end.x + Math.cos(a * 6) * 0.006, 0, survey.z - v.end.z + Math.sin(a * 6) * 0.006);
+        else target.set(Math.cos(a) * PARK_ORBIT, 0, Math.sin(a) * PARK_ORBIT);
+        if (!v.stationSet) { v.station.copy(target); v.stationSet = true; } else v.station.lerp(target, glide);
+        v.root.position.x += v.station.x * park;
+        v.root.position.z += v.station.z * park;
+        v.model.group.rotation.y = survey ? Math.atan2(target.x - v.station.x, target.z - v.station.z) || v.heading : v.heading + (-a - v.heading) * park;
+      } else {
+        v.stationSet = false;
+        v.model.group.rotation.y = v.heading;
+      }
       v.model.group.scale.setScalar(length / v.modelLength);
       v.model.animate(view.time);
       const remaining = arrivalTurn(v.fleet.movement) - this.time;
@@ -267,7 +339,7 @@ export class FleetLayer implements MapLayer {
     // Spread fleets parked at the same star around the orbit (stable per fleet).
     let h = 0;
     for (const ch of fleet.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return { root, model, line, label, fleet, start, end, heading, modelLength, parkPhase: (h % 360) * (Math.PI / 180), shown: progressAtTime(fleet.movement, this.time) };
+    return { root, model, line, label, fleet, start, end, heading, modelLength, parkPhase: (h % 360) * (Math.PI / 180), shown: progressAtTime(fleet.movement, this.time), station: new THREE.Vector3(), stationSet: false };
   }
 
   private removeVisual(id: string, v: FleetVisual): void {
@@ -281,6 +353,7 @@ export class FleetLayer implements MapLayer {
   }
 
   dispose(): void {
+    this.setPlans([]);
     for (const [id, v] of this.visuals) this.removeVisual(id, v);
     this.outline.dispose();
   }

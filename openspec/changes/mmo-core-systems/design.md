@@ -8,7 +8,7 @@ the server reuses it directly. See proposal.md for scope.
 ## Goals / Non-Goals
 
 **Goals:** authoritative server, scheduled world turns + lockstep turns, PvE combat, expansion, economy, Discord.
-**Non-Goals:** PvP, monetisation, matchmaking.
+**Non-Goals:** monetisation, matchmaking.
 
 ## Decisions
 

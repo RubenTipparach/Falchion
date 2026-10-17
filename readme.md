@@ -20,6 +20,11 @@ npm test         # core unit tests
 - **Explore** newly found planets for loot crates and a one-time resource cache, then press **Collect resources**.
 - Panels: **Fleets**, **Explore**, **War Room** (deterministic combat and planetary assault), **Shipyard** (procedural ship designer), **Research** (branching tree with shards), **Empire** (colonies, trade, politics, religion, espionage). The locate buttons zoom to a planet, star or fleet.
 
+## Play with friends
+
+Sign in with Discord at https://falchion.fly.dev to found your empire in a shared galaxy.
+Setup (once): [docs/discord.md](docs/discord.md).
+
 ## Deployment
 
 Every push to any branch builds, tests and deploys (latest push wins):

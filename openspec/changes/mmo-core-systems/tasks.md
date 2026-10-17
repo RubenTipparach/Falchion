@@ -14,7 +14,7 @@
 
 - [ ] 3.1 Implement combat resolver and `Ability` registry; verify `combat.test.ts` replay and counters
 - [ ] 3.2 Implement bombardment, assault and capture → reverse-engineering shards; verify `capture.test.ts`
-- [ ] 3.3 Enforce no-PvP and co-op reward split; verify `coexistence.test.ts`
+- [ ] 3.3 PvP combat between player fleets and co-op reward split; verify `coexistence.test.ts`
 
 ## 4. Expansion and economy
 

@@ -16,7 +16,7 @@ import { jobProgress } from '../../core/construction/Construction';
 import { formatDuration } from '../../core/time/WorldTime';
 import { CLOCK } from '../../app/WorldClock';
 import { clear, fmt, h } from '../dom';
-import { icon } from '../icons';
+import { icon, resourceIcon } from '../icons';
 
 const PALETTES: Array<[string, string, string]> = [
   ['#b8c4d6', '#3a4a63', '#4fd1ff'], ['#e8e2d0', '#7a2e2e', '#ffb347'], ['#2b2f3a', '#11131a', '#ff3b6b'],
@@ -157,7 +157,7 @@ export class ShipyardPanel extends Drawer {
       const def = RESOURCES.find((x) => x.id === r)!;
       const need = Math.ceil(n! * (1 - discount / 100));
       const short = s.empire.materials[r as Resource] < need;
-      return h('span', { class: `cost ${short ? 'short' : ''}`, title: def.name }, h('i', { style: `background:${def.color}` }), `${fmt(need)} ${def.short}`);
+      return h('span', { class: `cost ${short ? 'short' : ''}`, title: def.name }, resourceIcon(def.id, 14), `${fmt(need)} ${def.short}`);
     });
     clear(this.infoEl);
     this.infoEl.append(

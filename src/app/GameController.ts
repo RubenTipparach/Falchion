@@ -20,11 +20,11 @@ import { due, enqueue, Job } from '../core/construction/Construction';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
 import { planetsOf, Planet } from '../core/galaxy/Planets';
-import { Hex, hexDistance, hexEquals, hexToWorld, worldToHex } from '../core/hex/Hex';
+import { Hex, hexDistance, hexEquals, worldToHex } from '../core/hex/Hex';
 import { hashSeed } from '../core/rng/Rng';
 import type { TechTree } from '../core/research/TechTree';
 import { normalizeDesign, ShipDesign } from '../core/ships/ShipDesign';
-import type { FleetLayer } from '../render/map/FleetLayer';
+import type { FleetLayer, FleetView } from '../render/map/FleetLayer';
 import type { HexGridLayer } from '../render/map/HexGridLayer';
 import type { ViewState } from '../render/map/MapLayer';
 import type { MapView } from '../render/map/MapView';
@@ -32,13 +32,13 @@ import type { SectorOverlayLayer } from '../render/map/SectorOverlayLayer';
 import type { SelectionLayer } from '../render/map/SelectionLayer';
 import { SYSTEM_VIEW_WIDTH, SystemLayer } from '../render/map/SystemLayer';
 import type { Drawer } from '../ui/Drawer';
-import type { CombatOutcome, FleetGroup, GameActions, GameQueries, PanelId } from '../ui/GameActions';
+import type { CombatOutcome, FleetGroup, FleetInfo, GameActions, GameQueries, PanelId } from '../ui/GameActions';
 import type { Hud } from '../ui/Hud';
 import type { StarDetails } from '../ui/StarInfoPanel';
 import type { TopBar } from '../ui/TopBar';
 import type { GameState } from './GameState';
 import type { Store } from './Store';
-import { inContact, World } from './World';
+import type { World } from './World';
 
 export interface ControllerDeps {
   readonly store: Store<GameState>;
@@ -63,6 +63,10 @@ export interface ViewDeps {
   readonly system: SystemLayer;
 }
 
+/** Camera altitude (ly) that frames a whole star system. */
+const SYSTEM_ALTITUDE = 0.45;
+/** Camera altitude (ly) when following a ship: close enough to see the hull. */
+const FLEET_ALTITUDE = 0.03;
 const BASE_SPEED = 1; // ly per year (one year = one minute)
 /** At most a week of missed years is simulated on return; older years only move fleets. */
 const MAX_CATCH_UP = 7 * 24 * 60;
@@ -79,6 +83,9 @@ export class GameController implements GameActions, GameQueries {
   private view!: ViewDeps;
   private readonly classById = new Map(SHIP_CLASSES.map((c) => [c.id, c]));
   private readonly targetStars = new Map<string, StarSystem>();
+  private lastClick: { id: string; at: number } | null = null;
+  /** Other players' fleets in the shared galaxy (drawn and selectable, never simulated here). */
+  private others: FleetView[] = [];
 
   constructor(private readonly deps: ControllerDeps) {}
 
@@ -87,12 +94,16 @@ export class GameController implements GameActions, GameQueries {
     view.hexGrid.setHome(this.deps.world.home.hex.q, this.deps.world.home.hex.r);
     this.deps.store.subscribe((s, prev) => {
       if (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts) view.fleets.setFleets(this.fleetViews());
-      if (s.contact !== prev.contact) view.hud.setContact(s.contact);
     });
     for (const [id, panel] of Object.entries(view.panels)) panel.onChange(() => view.topBar.setActivePanel(this.openPanelId() ?? (panel.opened ? (id as PanelId) : null)));
     view.fleets.setTime(this.state.turn + this.deps.clock.fraction());
     view.fleets.setFleets(this.fleetViews());
-    this.updateContact();
+    // Zooming in close pulls the view onto the nearest star, so you land in its system.
+    view.map.controller.attractor = (ground, width) => {
+      if (width > 25) return null;
+      const star = this.deps.galaxy.nearestStar(worldToHex(ground.x, ground.z), Math.max(1, Math.round(width * 0.15)));
+      return star ? star.position : null;
+    };
   }
 
   // ── Queries ────────────────────────────────────────────────────────
@@ -279,17 +290,23 @@ export class GameController implements GameActions, GameQueries {
     return { miners, reached };
   }
 
+  /** Show other players' fleets (from the server) on the map. */
+  setOtherFleets(fleets: FleetView[]): void {
+    this.others = fleets;
+    this.view.fleets.setFleets(this.fleetViews());
+  }
+
   /** Map fleets with a supply/ammunition line for the player's own. */
-  private fleetViews() {
+  private fleetViews(): FleetView[] {
     const s = this.state;
-    return s.fleets.map((f) => {
+    return [...this.others, ...s.fleets.map((f): FleetView => {
       const l = s.loadouts[f.id];
       if (!l) return f;
       const cap = capacity(l.ships, specOf);
       const parts = [`Supply ${l.supply}/${cap.supply}`];
       if (cap.ammo) parts.push(`Ammo ${l.ammo}/${cap.ammo}`);
       return { ...f, status: parts.join(' · ') };
-    });
+    })];
   }
 
   // ── Commands: map ──────────────────────────────────────────────────
@@ -302,9 +319,9 @@ export class GameController implements GameActions, GameQueries {
     this.view.map.controller.zoom.setTargetAltitude(altitude);
   }
 
+  /** Fly to a star; closeUp dives into its system view. */
   flyTo(star: StarSystem, closeUp = false): void {
-    const p = hexToWorld(star.hex);
-    this.view.map.controller.flyTo(p.x, p.z, closeUp ? 30 : undefined);
+    this.view.map.controller.flyTo(star.position.x, star.position.z, closeUp ? SYSTEM_ALTITUDE : undefined);
   }
 
   select(star: StarSystem | null): void {
@@ -326,14 +343,14 @@ export class GameController implements GameActions, GameQueries {
     const cam = this.view.map.controller;
     if (!planet) {
       this.clearPlanetFocus();
-      cam.flyTo(star.position.x, star.position.z, 0.45);
+      cam.flyTo(star.position.x, star.position.z, SYSTEM_ALTITUDE);
       return;
     }
     this.deps.store.update({ selectedPlanet: planet });
     this.view.system.setSelected(planet.id);
     if (cam.zoom.targetAltitude > 2) {
       // From afar: fly to the system first; follow once it has been built.
-      cam.flyTo(star.position.x, star.position.z, 0.45);
+      cam.flyTo(star.position.x, star.position.z, SYSTEM_ALTITUDE);
       setTimeout(() => this.followPlanet(planet), 900);
     } else this.followPlanet(planet);
   }
@@ -412,14 +429,41 @@ export class GameController implements GameActions, GameQueries {
 
   focusFleet(fleetId: string): void {
     if (fleetId === 'dock') return this.flyTo(this.state.home, true);
-    const f = this.state.fleets.find((x) => x.id === fleetId);
-    if (!f) return;
-    const h = hexAt(f.movement, this.state.turn);
-    const star = this.deps.galaxy.starAt(h);
-    if (star) { this.select(star); this.flyTo(star, true); return; }
-    const p = hexToWorld(h);
-    this.view.map.controller.flyTo(p.x, p.z, 30);
+    this.selectFleet(fleetId);
   }
+
+  /** Select a fleet and keep the camera centred on its ship (right-drag orbits it); null clears. */
+  selectFleet(fleetId: string | null): void {
+    const cam = this.view.map.controller;
+    if (!fleetId) {
+      if (this.state.selectedFleet) {
+        this.deps.store.update({ selectedFleet: null });
+        this.view.fleets.setSelected(null);
+        cam.followTarget(null);
+      }
+      return;
+    }
+    if (!this.state.fleets.some((f) => f.id === fleetId) && !this.others.some((f) => f.id === fleetId)) return;
+    if (this.state.selectedPlanet) { this.deps.store.update({ selectedPlanet: null }); this.view.system.setSelected(null); }
+    this.deps.store.update({ selectedFleet: fleetId });
+    this.view.fleets.setSelected(fleetId);
+    cam.followTarget(() => this.view.fleets.positionOf(fleetId), FLEET_ALTITUDE);
+  }
+
+  fleetInfo = (fleetId: string): FleetInfo | null => {
+    const s = this.state;
+    const fleet = s.fleets.find((f) => f.id === fleetId) ?? this.others.find((f) => f.id === fleetId);
+    if (!fleet) return null;
+    const m = fleet.movement;
+    return {
+      fleet,
+      group: this.groups().find((g) => g.id === fleetId) ?? null,
+      at: isStationed(m, s.turn) ? this.deps.galaxy.starAt(hexAt(m, s.turn)) : null,
+      dest: this.deps.galaxy.starAt(m.route[m.route.length - 1]),
+      eta: Math.max(0, arrivalTurn(m) - s.turn),
+      mine: s.fleets.some((f) => f.id === fleetId) && fleet.owner === s.playerName,
+    };
+  };
 
   /** Change a group's ships (and the empire roster); empty fleets disband. */
   private adjustGroup(groupId: string, delta: Squadron[], stores?: Partial<Stores>): void {
@@ -846,7 +890,6 @@ export class GameController implements GameActions, GameQueries {
       this.dispatch(`While you were away (${away}, ${(run + skipped).toLocaleString('en-US')} years): ${gained || 'no income'}${arrivals.length ? ` · ${arrivals.length} arrival${arrivals.length > 1 ? 's' : ''}` : ''}${skipped ? ` · the earliest ${skipped.toLocaleString('en-US')} years were not simulated` : ''}`, 'good');
       for (const a of arrivals.slice(-5)) this.dispatch(a, 'good');
     });
-    this.updateContact();
   }
 
   /** Abandon this empire and found a new one in the current year. */
@@ -901,7 +944,6 @@ export class GameController implements GameActions, GameQueries {
     // Construction finishing this year, then fleets acting on standing orders.
     const done = [...this.completeConstruction(), ...this.followOrders()];
     if (!quiet && done.length) this.deps.store.update((st) => ({ dispatches: [...done.map((text) => ({ turn: next, text, tone: 'good' as const })), ...st.dispatches].slice(0, 40) }));
-    if (!quiet) this.updateContact();
     return { income: report.income, arrivals: [...arrivals, ...done] };
   }
 
@@ -926,6 +968,9 @@ export class GameController implements GameActions, GameQueries {
   handleClick = (world: THREE.Vector3, ray: THREE.Raycaster): void => {
     const v = this.view.map.view;
     if (!v) return;
+    const fleet = this.view.fleets.pick(ray);
+    if (fleet) return this.selectFleet(fleet);
+    if (this.state.selectedFleet) this.selectFleet(null);
     if (v.visibleWidth < SYSTEM_VIEW_WIDTH) {
       const planet = this.view.system.pick(ray);
       const star = this.view.system.system;
@@ -938,10 +983,40 @@ export class GameController implements GameActions, GameQueries {
       return;
     }
     const reach = Math.min(6, Math.max(1, Math.round(v.visibleWidth * 0.012)));
-    this.select(this.deps.galaxy.nearestStar(h, reach));
+    const star = this.deps.galaxy.nearestStar(h, reach);
+    // Double-click a star to dive into its system.
+    const now = performance.now();
+    if (star && this.lastClick && this.lastClick.id === star.id && now - this.lastClick.at < 400) {
+      this.lastClick = null;
+      this.select(star);
+      this.flyTo(star, true);
+      return;
+    }
+    this.lastClick = star ? { id: star.id, at: now } : null;
+    this.select(star);
+  };
+
+  /** RTS move order: right-click with one of your fleets selected sends it there. */
+  handleRightClick = (world: THREE.Vector3): void => {
+    const id = this.state.selectedFleet;
+    const info = id ? this.fleetInfo(id) : null;
+    if (!id || !info?.mine) return;
+    const v = this.view.map.view;
+    const reach = v ? Math.min(6, Math.max(1, Math.round(v.visibleWidth * 0.02))) : 1;
+    const star = this.deps.galaxy.nearestStar(worldToHex(world.x, world.z), reach);
+    if (!star) return this.dispatch('Move orders go to a star: right-click on or near one', 'bad');
+    this.moveFleet(id, star);
+    this.view.selection.select({ x: star.position.x, z: star.position.z });
   };
 
   handleHover = (world: THREE.Vector3 | null, ray: THREE.Raycaster): void => {
+    const shipUnder = this.view.fleets.pick(ray);
+    if (shipUnder) {
+      const f = this.state.fleets.find((x) => x.id === shipUnder);
+      this.view.map.canvas.style.cursor = 'pointer';
+      this.view.hud.setHover(`${f?.name ?? 'Fleet'}  ·  ${f?.owner === this.state.playerName ? 'click to select, then right-click a star to move' : f?.owner.replace('alien:', '') ?? ''}`);
+      return;
+    }
     const v0 = this.view.map.view;
     if (v0 && v0.visibleWidth < SYSTEM_VIEW_WIDTH) {
       const planet = this.view.system.pick(ray);
@@ -969,20 +1044,6 @@ export class GameController implements GameActions, GameQueries {
     const pxPerLy = this.view.map.viewportWidth() / view.visibleWidth;
     this.view.hud.setScale(view.visibleWidth, pxPerLy, mode, view.altitude);
   };
-
-  /** Fleets of different players close together are in contact (peaceful: no PvP). */
-  private updateContact(): void {
-    const s = this.state;
-    const mine = s.fleets.filter((f) => f.owner === s.playerName);
-    const others = s.fleets.filter((f) => f.owner !== s.playerName && !f.owner.startsWith('alien:'));
-    let contact: string | null = null;
-    for (const a of mine) for (const b of others) {
-      if (inContact(hexAt(a.movement, s.turn), hexAt(b.movement, s.turn))) {
-        contact = `Contact with ${b.owner}. Peaceful: PvP is off.`;
-      }
-    }
-    if (contact !== s.contact) this.deps.store.update({ contact });
-  }
 }
 
 /** Trade partners derived from the world, with distances from home. */

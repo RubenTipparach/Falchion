@@ -7,7 +7,8 @@
 #   fly tokens create deploy -a falchion   # -> GitHub secret FLY_API_TOKEN
 #
 # Until then the Fly job skips with a notice instead of failing.
-# When the MMO server lands, add a volume + [[mounts]] for persistence.
+# Player saves live on the `falchion_data` volume (one machine, one writer).
+# Discord sign-in secrets: see docs/discord.md (CI syncs them from GitHub secrets).
 
 app = "falchion"
 primary_region = "ams"
@@ -16,6 +17,14 @@ primary_region = "ams"
 
 [env]
   PORT = "8080"
+  PUBLIC_URL = "https://falchion.fly.dev"
+  DATA_DIR = "/data"
+
+# fly deploy creates the volume on first deploy if it does not exist yet.
+[mounts]
+  source = "falchion_data"
+  destination = "/data"
+  initial_size = "1gb"
 
 [http_service]
   internal_port = 8080

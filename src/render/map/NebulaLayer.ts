@@ -8,6 +8,11 @@ import { fade } from './ZoomModel';
  * there is no finite plane to clip at the horizon. Rays that run toward the
  * horizon fade out into the starfield. Two noise scales (~220 ly and ~3,200 ly)
  * blend with zoom, and the clouds drift very slowly.
+ *
+ * Inside a star system the nebula becomes a sky that surrounds the camera: the
+ * system sits inside a slab of the same nebula field drawn on the map, so each
+ * view direction (up or down) samples the clouds where it meets that slab, near
+ * the system. The sky's colours are the colours around the star on the map.
  */
 export class NebulaLayer implements MapLayer {
   readonly object3d: THREE.Mesh;
@@ -22,14 +27,14 @@ export class NebulaLayer implements MapLayer {
       uniforms: {
         uOpacity: { value: 1 }, uSeed: { value: (seed % 1000) / 10 }, uTime: { value: 0 }, uRegional: { value: 0 },
         uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() },
-        uOrigin: { value: new THREE.Vector2() }, uAlt: { value: 1 },
+        uOrigin: { value: new THREE.Vector2() }, uAlt: { value: 1 }, uSky: { value: 0 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vNdc;
         void main() { vNdc = position.xy; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
       fragmentShader: /* glsl */ `
         uniform float uOpacity; uniform float uSeed; uniform float uTime; uniform float uRegional;
-        uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform vec3 uCamPos; uniform vec2 uOrigin; uniform float uAlt;
+        uniform mat4 uInvProj; uniform mat4 uCamWorld; uniform vec3 uCamPos; uniform vec2 uOrigin; uniform float uAlt; uniform float uSky;
         varying vec2 vNdc;
         float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + uSeed) * 43758.5453); }
         float noise(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
@@ -52,19 +57,43 @@ export class NebulaLayer implements MapLayer {
           vec4 v = uInvProj * vec4(vNdc, 1.0, 1.0);
           v /= v.w;
           vec3 dir = normalize((uCamWorld * vec4(v.xyz, 0.0)).xyz);
-          if (dir.y > -1e-4) discard;
-          float t = -uCamPos.y / dir.y;
-          vec2 hit = uCamPos.xz + dir.xz * t + uOrigin;   // absolute galaxy coords
-          float horizon = smoothstep(0.0, 0.12, -dir.y) * (1.0 - smoothstep(uAlt * 30.0, uAlt * 90.0, t));
           float tt = uTime * 0.0012; // very slow drift
-          vec4 a = cloud(hit / 220.0, tt);
-          vec4 b = cloud(hit / 3200.0 + 11.0, tt * 0.5);
-          vec4 c = mix(a, b, uRegional);
-          // Faint ambient haze so the sky is never empty between clouds.
-          float hazeN = fbm(hit / 1800.0 + 3.0);
-          vec3 haze = mix(vec3(0.10, 0.16, 0.42), vec3(0.32, 0.12, 0.40), hazeN);
-          float alpha = (c.a * mix(0.85, 0.42, uRegional) + 0.16 * smoothstep(0.25, 0.75, hazeN)) * uOpacity * horizon;
-          vec3 rgb = mix(haze, c.rgb, clamp(c.a * 1.6, 0.0, 1.0));
+          vec3 rgbP = vec3(0.0); float alphaP = 0.0;
+          if (uSky < 0.999 && dir.y < -1e-4) {
+            float t = -uCamPos.y / dir.y;
+            vec2 hit = uCamPos.xz + dir.xz * t + uOrigin;   // absolute galaxy coords
+            float horizon = smoothstep(0.0, 0.12, -dir.y) * (1.0 - smoothstep(uAlt * 30.0, uAlt * 90.0, t));
+            vec4 a = cloud(hit / 220.0, tt);
+            vec4 b = cloud(hit / 3200.0 + 11.0, tt * 0.5);
+            vec4 c = mix(a, b, uRegional);
+            // Faint ambient haze so the sky is never empty between clouds.
+            float hazeN = fbm(hit / 1800.0 + 3.0);
+            vec3 haze = mix(vec3(0.10, 0.16, 0.42), vec3(0.32, 0.12, 0.40), hazeN);
+            alphaP = (c.a * mix(0.85, 0.42, uRegional) + 0.16 * smoothstep(0.25, 0.75, hazeN)) * horizon;
+            rgbP = mix(haze, c.rgb, clamp(c.a * 1.6, 0.0, 1.0));
+          }
+          vec3 rgbS = vec3(0.0); float alphaS = 0.0;
+          if (uSky > 0.001) {
+            // The system sits inside a slab of the map's nebula: a ray up or down meets the
+            // slab within ~25 ly (further toward the horizon), so the sky shows the same
+            // clouds and colours that surround this star on the map.
+            vec2 here = uCamPos.xz + uOrigin;
+            float ay = abs(dir.y);
+            float reach = 25.0 / (ay + 0.06);                 // smooth: ~400 ly at the horizon
+            vec2 hit = here + dir.xz * reach + (dir.y > 0.0 ? vec2(7.0, -4.0) : vec2(0.0));
+            // Toward the horizon fine detail would alias into streaks: blend to the broad pattern.
+            float horizonBlur = 1.0 - smoothstep(0.03, 0.3, ay);
+            vec4 fine = cloud(hit / 220.0, tt);
+            vec4 broad = cloud(hit / 900.0 + 5.0, tt * 0.5);
+            vec4 c = mix(mix(fine, broad, horizonBlur * 0.85), cloud(hit / 3200.0 + 11.0, tt * 0.5), uRegional);
+            float hazeN = fbm(hit / 1800.0 + 3.0);
+            vec3 haze = mix(vec3(0.10, 0.16, 0.42), vec3(0.32, 0.12, 0.40), hazeN);
+            alphaS = c.a * 0.85 + 0.16 * smoothstep(0.25, 0.75, hazeN);
+            rgbS = mix(haze, c.rgb, clamp(c.a * 1.6, 0.0, 1.0));
+          }
+          float alpha = mix(alphaP, alphaS, uSky) * uOpacity;
+          vec3 rgb = mix(rgbP, rgbS, uSky);
+          if (alpha < 0.002) discard;
           gl_FragColor = vec4(rgb * alpha * 1.3, alpha);
         }`,
     });
@@ -86,6 +115,8 @@ export class NebulaLayer implements MapLayer {
     u.uCamPos.value.copy(cam.position);
     u.uOrigin.value.set(view.origin.x, view.origin.z);
     u.uAlt.value = view.altitude;
+    // Inside a star system the nebula surrounds the camera instead of lying on the plane.
+    u.uSky.value = fade(view.visibleWidth, 2, 12);
     // Blend from local to regional clouds between 300 and 2,500 ly of view.
     const t = Math.min(1, Math.max(0, (Math.log(view.visibleWidth) - Math.log(300)) / (Math.log(2500) - Math.log(300))));
     u.uRegional.value = t * t * (3 - 2 * t);

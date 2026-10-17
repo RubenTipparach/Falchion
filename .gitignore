@@ -1,3 +1,6 @@
 node_modules
 dist
 *.log
+
+# Local player saves from the dev server
+data/

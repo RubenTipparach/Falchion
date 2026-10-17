@@ -24,6 +24,8 @@ export interface GameState {
   readonly hiddenTraits: readonly string[];
   readonly home: StarSystem;
   readonly selected: StarSystem | null;
+  /** Fleet the camera is following (its card replaces the star card). */
+  readonly selectedFleet: string | null;
   /** Planet the camera is following in system view. */
   readonly selectedPlanet: Planet | null;
   readonly explored: Readonly<Record<string, EncounterResult>>;
@@ -40,7 +42,6 @@ export interface GameState {
   readonly construction: readonly Job[];
   /** Stars with a supply depot: friendly ports for resupply. */
   readonly depots: readonly string[];
-  readonly contact: string | null;
   readonly playerName: string;
   readonly lastReport: TurnReport | null;
   /** Newest first. */

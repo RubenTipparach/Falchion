@@ -2,8 +2,9 @@ import type { Store } from '../app/Store';
 import type { GameState } from '../app/GameState';
 import type { GameActions, PanelId } from './GameActions';
 import { h, fmt } from './dom';
-import { icon, IconName } from './icons';
+import { icon, IconName, resourceIcon } from './icons';
 import type { WorldClock } from '../app/WorldClock';
+import type { PlayerIdentity } from '../app/identity';
 import type { Resource } from '../content/resources';
 
 export class TopBar {
@@ -19,7 +20,7 @@ export class TopBar {
   private readonly tabs: Record<PanelId, HTMLButtonElement>;
   private readonly lootBadge = h('span', { class: 'badge', hidden: true });
 
-  constructor(store: Store<GameState>, actions: GameActions, identityName: string, private readonly clock: WorldClock, private readonly caps: () => Partial<Record<Resource, number>>) {
+  constructor(store: Store<GameState>, actions: GameActions, identity: PlayerIdentity, private readonly clock: WorldClock, private readonly caps: () => Partial<Record<Resource, number>>) {
     const skip = import.meta.env.DEV ? h('button', { class: 'chip', title: 'Development only: advance one year now', onclick: () => actions.skipYear() }, '+1 yr') : '';
     this.clockEl.title = clock.source === 'server' ? 'World clock from the Falchion server: one year passes every minute for everyone' : 'Offline world clock (no server here): one year passes every minute';
     this.clockEl.append(this.ring, h('span', { class: 'year-meta' }, h('span', { class: 'year-src' }, clock.source === 'server' ? '● LIVE' : '○ LOCAL'), this.countdown), skip);
@@ -35,9 +36,10 @@ export class TopBar {
         h('div', { class: 'turn-dial' }, h('span', { class: 'turn-label' }, 'Year'), this.turnNum),
         this.clockEl),
       h('nav', { class: 'tabs' }, this.viewBtn, this.tabs.shipyard, this.tabs.research, this.tabs.empire, this.tabs.fleets, this.tabs.explore, this.tabs.war),
-      h('div', { class: 'identity', title: 'Discord sign-in is mocked in this preview' },
-        h('span', { class: 'avatar' }, identityName.slice(0, 1)),
-        h('span', { class: 'who' }, h('b', {}, identityName), h('small', {}, 'Discord · preview'))));
+      h('div', { class: 'identity', title: identity.provider === 'discord' ? 'Signed in with Discord: your empire is saved on the server' : 'Guest: your empire is saved in this browser only' },
+        identity.avatar ? h('img', { class: 'avatar', src: identity.avatar, alt: '' }) : h('span', { class: 'avatar' }, identity.displayName.slice(0, 1)),
+        h('span', { class: 'who' }, h('b', {}, identity.displayName),
+          identity.provider === 'discord' ? h('a', { class: 'signout', href: './auth/logout' }, 'Discord · sign out') : h('small', {}, 'Guest · this browser'))));
     store.subscribe((s, prev) => {
       if (s.empire !== prev.empire || s.economy.colonies !== prev.economy.colonies) this.renderStats(s);
       if (s.turn !== prev.turn) this.renderTurn(s.turn);
@@ -90,8 +92,8 @@ export class TopBar {
     this.stats.replaceChildren(...items.map(([label, r]) => {
       const cap = caps[r];
       const full = cap !== undefined && m[r] >= cap;
-      return h('div', { class: `stat ${full ? 'full' : ''}`, title: cap !== undefined ? `${label}: ${fmt(m[r])} of ${fmt(cap)} storage${full ? ' (full: income is lost)' : ''}` : label },
-        h('span', { class: 'stat-label' }, label), h('span', { class: 'stat-value' }, fmt(m[r])));
+      return h('div', { class: `stat ${full ? 'full' : ''}`, title: cap !== undefined ? `${label}: ${fmt(m[r])} of ${fmt(cap)} storage${full ? ' (full: income is lost)' : ''}` : label, 'aria-label': `${label} ${fmt(m[r])}` },
+        resourceIcon(r, 18), h('span', { class: 'stat-value' }, fmt(m[r])));
     }));
   }
 }

@@ -83,7 +83,8 @@ export class HexGridLayer implements MapLayer {
   setHome(q: number, r: number): void { this.material.uniforms.uHome.value.set(q, r); }
 
   update(view: ViewState): void {
-    const opacity = fade(view.visibleWidth, 120, 420) * fadeIn(view.visibleWidth, 2.5, 6);
+    // Gone by the time the star system fills the view (system view starts at 9 ly).
+    const opacity = fade(view.visibleWidth, 120, 420) * fadeIn(view.visibleWidth, 5, 11);
     this.object3d.visible = opacity > 0.01;
     if (!this.object3d.visible) return;
     const size = view.visibleWidth * 4;

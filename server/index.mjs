@@ -8,11 +8,78 @@ import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createAuth } from './auth.mjs';
+import { createStore } from './store.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const STATIC_DIR = resolve(process.env.STATIC_DIR ?? join(here, '..', 'dist'));
 const PORT = Number(process.env.PORT ?? 8080);
 const VERSION = process.env.BUILD_SHA ?? 'dev';
+
+// Discord sign-in and per-player saves. Sign-in switches on when the three
+// secrets are set (docs/discord.md); saves live in DATA_DIR (a Fly volume).
+export const auth = createAuth({
+  clientId: process.env.DISCORD_CLIENT_ID,
+  clientSecret: process.env.DISCORD_CLIENT_SECRET,
+  sessionSecret: process.env.SESSION_SECRET,
+  publicUrl: process.env.PUBLIC_URL ?? `http://localhost:${PORT}`,
+  // Overridable only for local end-to-end tests against a fake Discord.
+  ...(process.env.DISCORD_API_BASE ? { discordApi: process.env.DISCORD_API_BASE } : {}),
+  ...(process.env.DISCORD_AUTHORIZE_URL ? { discordAuthorize: process.env.DISCORD_AUTHORIZE_URL } : {}),
+});
+export const store = createStore(resolve(process.env.DATA_DIR ?? join(here, '..', 'data')));
+const MAX_SAVE_BYTES = 3 * 1024 * 1024;
+
+function json(res, status, body) {
+  send(res, status, JSON.stringify(body), { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+}
+
+async function readJson(req, limit) {
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw Object.assign(new Error('too large'), { status: 413 });
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+/** Only what other players may see: home, colony stars and fleets (no stockpiles or research). */
+function publicView(p) {
+  const fleets = Array.isArray(p?.fleets) ? p.fleets.slice(0, 50) : [];
+  return {
+    color: typeof p?.color === 'string' ? p.color.slice(0, 16) : '#e6b450',
+    home: p?.home && Number.isInteger(p.home.q) && Number.isInteger(p.home.r) ? { q: p.home.q, r: p.home.r } : null,
+    colonies: Array.isArray(p?.colonies) ? p.colonies.filter((h) => Number.isInteger(h?.q) && Number.isInteger(h?.r)).slice(0, 200).map((h) => ({ q: h.q, r: h.r })) : [],
+    fleets: fleets.map((f) => ({ id: String(f.id).slice(0, 64), name: String(f.name).slice(0, 64), movement: f.movement, design: f.design })),
+  };
+}
+
+async function api(req, res, pathname) {
+  const user = auth.userFrom(req);
+  if (pathname === '/api/me') return user ? json(res, 200, user) : json(res, 401, { authEnabled: auth.enabled, login: '/auth/discord' });
+  if (!user) return json(res, 401, { error: 'sign in with Discord first' });
+  if (pathname === '/api/save' && req.method === 'GET') {
+    const record = await store.load(user.id);
+    return record ? json(res, 200, record.save) : json(res, 404, { error: 'no save yet' });
+  }
+  if (pathname === '/api/save' && req.method === 'PUT') {
+    try {
+      const body = await readJson(req, MAX_SAVE_BYTES);
+      if (!body || typeof body.save !== 'object' || !Number.isInteger(body.save?.turn)) return json(res, 400, { error: 'bad save' });
+      await store.save(user.id, { player: user, save: body.save, public: publicView(body.public), updatedAt: Date.now() });
+      return json(res, 200, { ok: true });
+    } catch (err) {
+      return json(res, err.status ?? 400, { error: err.status === 413 ? 'save too large' : 'bad save' });
+    }
+  }
+  if (pathname === '/api/players' && req.method === 'GET') {
+    const players = (await store.players()).filter((p) => p.id !== user.id);
+    return json(res, 200, players);
+  }
+  return json(res, 404, { error: 'not found' });
+}
 
 // One clock for server and client (the client imports the same file).
 const CLOCK = JSON.parse(readFileSync(join(here, 'clock.json'), 'utf8'));
@@ -85,10 +152,14 @@ export const server = createServer(async (req, res) => {
   const { pathname } = new URL(req.url ?? '/', 'http://localhost');
   if (pathname === '/healthz') return send(res, 200, 'ok', { 'Content-Type': 'text/plain' });
   if (pathname === '/api/info') {
-    return send(res, 200, JSON.stringify({ name: 'falchion', version: VERSION, worldTick, listeners: listeners.size }), { 'Content-Type': 'application/json' });
+    return send(res, 200, JSON.stringify({ name: 'falchion', version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled }), { 'Content-Type': 'application/json' });
   }
   if (pathname === '/api/clock') return send(res, 200, JSON.stringify(clockInfo()), { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   if (pathname === '/api/ticks') return streamTicks(req, res);
+  if (pathname === '/auth/discord') return auth.enabled ? auth.login(res) : send(res, 404, 'Discord sign-in is not configured on this server (see docs/discord.md).');
+  if (pathname === '/auth/discord/callback') return auth.enabled ? auth.callback(req, res, new URL(req.url ?? '/', 'http://localhost')) : send(res, 404, 'not configured');
+  if (pathname === '/auth/logout') return auth.logout(res);
+  if (pathname === '/api/me' || pathname === '/api/save' || pathname === '/api/players') return api(req, res, pathname);
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed');
   return serveStatic(pathname, res);
 });

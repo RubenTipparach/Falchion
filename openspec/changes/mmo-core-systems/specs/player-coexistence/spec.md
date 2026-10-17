@@ -2,18 +2,18 @@
 
 ## Purpose
 
-Lets players meet peacefully and cooperate against alien threats in the first, PvE-only iteration.
+Lets players meet, fight each other (PvP is on), trade and cooperate against alien threats.
 
 ## ADDED Requirements
 
-### Requirement: No player-versus-player damage
-Players SHALL NOT be able to attack, bombard, capture or damage other players' ships or planets.
+### Requirement: Player-versus-player combat
+Players SHALL be able to attack other players' fleets and planets with ships on station at the same location, using the same deterministic combat resolution as alien targets.
 
-#### Scenario: Attack order rejected
-- **WHEN** a player orders an attack on another player's fleet
-- **THEN** the order is rejected
+#### Scenario: Attack another player's fleet
+- **WHEN** a player's warships on station at a star engage another player's fleet there
+- **THEN** the battle resolves deterministically and both sides take losses
 
-### Requirement: Peaceful contact
+### Requirement: Diplomacy on contact
 When players meet they SHALL be able to exchange greetings, trade resources and share star charts.
 
 #### Scenario: Share charts

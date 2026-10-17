@@ -17,7 +17,7 @@ export interface ZoomConfig {
 export const DEFAULT_ZOOM: ZoomConfig = {
   minAltitude: 0.02,
   maxAltitude: 110_000,
-  stepPer100px: 0.18,
+  stepPer100px: 0.22,
   galaxyThreshold: 2_500,
   hexPreset: 40,
   galaxyPreset: 80_000,

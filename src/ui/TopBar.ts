@@ -59,6 +59,11 @@ export class TopBar {
     this.viewBtn.firstElementChild!.replaceWith(icon(on ? 'hex' : 'galaxy'));
   }
 
+  /** A tab that manages its own drawer (e.g. Chat), added after the game tabs. */
+  addTab(tab: HTMLElement): void {
+    this.el.querySelector('nav.tabs')?.append(tab);
+  }
+
   setActivePanel(id: PanelId | null): void {
     (Object.keys(this.tabs) as PanelId[]).forEach((k) => this.tabs[k].classList.toggle('active', k === id));
   }

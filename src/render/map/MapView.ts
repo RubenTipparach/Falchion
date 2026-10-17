@@ -28,7 +28,8 @@ export class MapView {
   private lastView: ViewState | null = null;
 
   constructor(private readonly opts: MapViewOptions) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    // stencil: the selected ship masks itself so its outline is drawn only around its silhouette.
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, stencil: true });
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
     this.renderer.setClearColor('#03060d');
     opts.container.appendChild(this.renderer.domElement);

@@ -18,27 +18,40 @@ const PARK_ORBIT = 0.046;
 const SHIP_LENGTH = 0.0025;
 
 /**
- * Selection outline: the ship's own geometry drawn again behind it (back faces), pushed out
- * along its normals in screen space so the rim stays a few pixels wide at any zoom.
+ * Selection outline, one ring around the whole ship: the ship marks its pixels in the stencil
+ * buffer, then a copy of every part, pushed outward from the ship's centre on screen (plus a
+ * little along its normals), is drawn only where the ship is not. Inner edges between parts
+ * stay hidden, and flat parts such as wings still grow a rim.
  */
+const OUTLINE_STENCIL = 1;
+
 function outlineMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: new THREE.Color('#e6b450') }, uWidth: { value: 3 }, uRes: { value: new THREE.Vector2(1, 1) } },
+    uniforms: { uColor: { value: new THREE.Color('#f3a833') }, uWidth: { value: 3 }, uRes: { value: new THREE.Vector2(1, 1) }, uCenter: { value: new THREE.Vector3() } },
     vertexShader: `
       uniform float uWidth;
       uniform vec2 uRes;
+      uniform vec3 uCenter;
       void main() {
         vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        vec3 n = normalize(normalMatrix * normal);
-        vec2 dir = (projectionMatrix * vec4(n, 0.0)).xy;
-        float len = length(dir);
-        if (len > 1e-5) clip.xy += dir / len * uWidth * 2.0 / uRes * clip.w;
+        vec4 c = projectionMatrix * viewMatrix * vec4(uCenter, 1.0);
+        vec2 radial = clip.xy / clip.w - c.xy / c.w;
+        vec2 n = (projectionMatrix * vec4(normalize(normalMatrix * normal), 0.0)).xy;
+        vec2 dir = (length(radial) > 1e-6 ? normalize(radial * uRes) : vec2(0.0)) + (length(n) > 1e-6 ? 0.5 * normalize(n * uRes) : vec2(0.0));
+        if (length(dir) > 1e-6) clip.xy += normalize(dir) * uWidth * 2.0 / uRes * clip.w;
         gl_Position = clip;
       }`,
     fragmentShader: `
       uniform vec3 uColor;
       void main() { gl_FragColor = vec4(uColor, 1.0); }`,
-    side: THREE.BackSide,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    stencilWrite: true,
+    stencilRef: OUTLINE_STENCIL,
+    stencilFunc: THREE.NotEqualStencilFunc,
+    stencilFail: THREE.KeepStencilOp,
+    stencilZFail: THREE.KeepStencilOp,
+    stencilZPass: THREE.KeepStencilOp,
   });
 }
 
@@ -90,6 +103,9 @@ export class FleetLayer implements MapLayer {
   private selectedId: string | null = null;
   private readonly outline = outlineMaterial();
   private outlined: THREE.Mesh[] = [];
+  /** Materials of the selected ship, marking its pixels in the stencil buffer. */
+  private masked: THREE.Material[] = [];
+  private outlinedRoot: THREE.Object3D | null = null;
 
   /** Highlight one fleet as selected: its label, and an outline around its ship. */
   setSelected(id: string | null): void {
@@ -100,9 +116,13 @@ export class FleetLayer implements MapLayer {
   /** Outline the selected fleet's ship (again after its model is rebuilt) in its empire colour. */
   private applyOutline(): void {
     for (const o of this.outlined) o.removeFromParent();
+    for (const m of this.masked) { m.stencilWrite = false; m.needsUpdate = true; }
     this.outlined = [];
+    this.masked = [];
+    this.outlinedRoot = null;
     const v = this.selectedId ? this.visuals.get(this.selectedId) : undefined;
     if (!v) return;
+    this.outlinedRoot = v.root;
     this.outline.uniforms.uColor.value.set(v.fleet.color);
     const meshes: THREE.Mesh[] = [];
     v.model.group.traverse((o) => {
@@ -110,12 +130,18 @@ export class FleetLayer implements MapLayer {
       if (o instanceof THREE.Mesh && o.geometry.getAttribute('normal') && !(o.material as THREE.Material).transparent) meshes.push(o);
     });
     for (const m of meshes) {
+      const mat = m.material as THREE.Material;
+      if (!this.masked.includes(mat)) {
+        Object.assign(mat, { stencilWrite: true, stencilRef: OUTLINE_STENCIL, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp, needsUpdate: true });
+        this.masked.push(mat);
+      }
       const rim = new THREE.Mesh(m.geometry, this.outline);
-      rim.renderOrder = m.renderOrder;
+      rim.renderOrder = 50; // after the ship has written its mask
       m.add(rim);
       this.outlined.push(rim);
     }
   }
+
 
   /** Absolute galaxy position of a fleet's ship right now (for the camera to follow). */
   positionOf(id: string): THREE.Vector3 | null {
@@ -158,6 +184,7 @@ export class FleetLayer implements MapLayer {
 
   update(view: ViewState): void {
     this.outline.uniforms.uRes.value.set(view.viewportHeight * view.camera.aspect, view.viewportHeight);
+    this.outlinedRoot?.getWorldPosition(this.outline.uniforms.uCenter.value);
     // Ships have a real length (smaller than a planet) and only grow on screen as a
     // marker when zoomed out: never bigger than about 1% of the view.
     const length = Math.max(SHIP_LENGTH, view.visibleWidth * 0.01);

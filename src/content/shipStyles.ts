@@ -1,6 +1,6 @@
 /**
  * Ship styles an empire can be founded with. An empire starts with one; research unlocks the
- * others (a `style` grant on each branch's first hull node), and unlocked styles can be mixed
+ * others (a `style` grant on each branch's second hull node), and unlocked styles can be mixed
  * into any design. Ids match the registered ShipStyleGenerators.
  */
 export interface ShipStyleDef {

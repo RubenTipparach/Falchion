@@ -40,28 +40,28 @@ const ROOTS: Record<BranchId, string> = {
 const TREE: Record<DomainId, Record<BranchId, Row[]>> = {
   hulls: {
     organic: [
-      ['o-grown-hulls', 'Grown Hulls', 1, [style('organic'), bonus('hull', 1)], 'Ships are cultured, not built: unlocks the Organic ship style.', { requires: [] }],
-      ['o-spore-drive', 'Spore Drive', 2, [part('spore-drive'), bonus('speed', 1)], 'Mycelial propulsion between stars.'],
+      ['o-grown-hulls', 'Grown Hulls', 1, [bonus('hull', 1)], 'Ships are cultured, not built.', { requires: [] }],
+      ['o-spore-drive', 'Spore Drive', 2, [style('organic'), part('spore-drive'), bonus('speed', 1)], 'Mycelial propulsion between stars. Unlocks the Organic ship style.'],
       ['o-regeneration', 'Regenerative Tissue', 2, [trait('regeneration')], 'Hulls heal between battles.', { requires: ['o-grown-hulls'] }],
       ['o-neural-lattice', 'Neural Lattice', 3, [trait('neural')], 'A nervous system spanning the hull.', { requires: ['o-spore-drive'] }],
       ['o-leviathan', 'Leviathan Gestation', 5, [ship('leviathan')], 'Capital-class living ships.', { requires: ['x-hive-mind'] }],
     ],
     technological: [
-      ['t-alloys', 'Composite Alloys', 1, [style('technological'), bonus('hull', 1)], 'Light, rigid hull frames: unlocks the Technological ship style.', { requires: [] }],
-      ['t-fusion', 'Fusion Torches', 2, [part('fusion-torch'), bonus('speed', 1)], 'Faster sublight and jump spool.'],
+      ['t-alloys', 'Composite Alloys', 1, [bonus('hull', 1)], 'Light, rigid hull frames.', { requires: [] }],
+      ['t-fusion', 'Fusion Torches', 2, [style('technological'), part('fusion-torch'), bonus('speed', 1)], 'Faster sublight and jump spool. Unlocks the Technological ship style.'],
       ['t-warp-lanes', 'Warp Lane Theory', 3, [bonus('speed', 1)], 'Charted lanes shorten long hauls.'],
       ['t-capital-spines', 'Capital Spines', 4, [bonus('hull', 2)], 'Keel structures for ships a kilometre long.'],
       ['t-dreadnought', 'Dreadnought Program', 5, [ship('dreadnought')], 'A spine of lances wrapped in armour.'],
     ],
     utilitarian: [
-      ['u-modular', 'Modular Frames', 1, [style('utilitarian'), ship('prospector')], 'Bolt-together hulls; unlocks the Utilitarian ship style and the Prospector Skiff.', { requires: [] }],
-      ['u-slipways', 'Orbital Slipways', 2, [bonus('build', 10)], 'Ships cost 10% less to build.'],
+      ['u-modular', 'Modular Frames', 1, [ship('prospector')], 'Bolt-together hulls; unlocks the Prospector Skiff.', { requires: [] }],
+      ['u-slipways', 'Orbital Slipways', 2, [style('utilitarian'), bonus('build', 10)], 'Ships cost 10% less to build. Unlocks the Utilitarian ship style.'],
       ['u-shipyards', 'Mobile Shipyards', 3, [part('fabricator')], 'Build ships far from home.'],
       ['u-titan-frames', 'Titan Frames', 4, [bonus('hull', 2)], 'Oversized frames for oversized jobs.'],
     ],
     geometric: [
-      ['g-prism', 'Prismatic Frames', 1, [style('geometric'), bonus('hull', 1)], 'Pure-form hulls with no wasted volume: unlocks the Simple Geometry ship style.', { requires: [] }],
-      ['g-tessellation', 'Tessellated Armour', 2, [trait('armor')], 'Interlocking tiles spread impacts.'],
+      ['g-prism', 'Prismatic Frames', 1, [bonus('hull', 1)], 'Pure-form hulls with no wasted volume.', { requires: [] }],
+      ['g-tessellation', 'Tessellated Armour', 2, [style('geometric'), trait('armor')], 'Interlocking tiles spread impacts. Unlocks the Simple Geometry ship style.'],
       ['g-gyroscopic', 'Gyroscopic Cores', 2, [bonus('speed', 1)], 'Spinning cores that never lose heading.', { requires: ['g-prism'] }],
       ['g-sphere', 'Spherical Doctrine', 3, [bonus('hull', 2)], 'Maximum volume, minimum surface.', { requires: ['g-tessellation'], exclusiveGroup: 'geo-form' }],
       ['g-spike', 'Spike Doctrine', 3, [bonus('short', 2)], 'Every surface is a blade.', { requires: ['g-tessellation'], exclusiveGroup: 'geo-form' }],
@@ -70,8 +70,8 @@ const TREE: Record<DomainId, Record<BranchId, Row[]>> = {
       ['g-monolith', 'Monoliths', 5, [ship('monolith')], 'Silent, enormous siege forms.', { requires: ['x-sacred-geometry'] }],
     ],
     aesthetic: [
-      ['a-heritage', 'Heritage Shipwrights', 1, [style('classic'), bonus('hull', 1)], 'Elegant lines from a proud tradition: unlocks the Aesthetic ship style.', { requires: [] }],
-      ['a-ornament', 'Ornamental Plating', 2, [trait('ornate'), bonus('influence', 1)], 'Gilded trim that inspires awe.'],
+      ['a-heritage', 'Heritage Shipwrights', 1, [bonus('hull', 1)], 'Elegant lines from a proud tradition.', { requires: [] }],
+      ['a-ornament', 'Ornamental Plating', 2, [style('classic'), trait('ornate'), bonus('influence', 1)], 'Gilded trim that inspires awe. Unlocks the Aesthetic ship style.'],
       ['a-sail-yachts', 'Solar Sail Yachts', 2, [bonus('speed', 1)], 'Light sails for long, graceful voyages.', { requires: ['a-heritage'] }],
       ['a-grand-halls', 'Grand Halls', 3, [bonus('morale', 5)], 'Crews fight harder aboard beautiful ships.', { requires: ['a-ornament'] }],
       ['a-flagship', 'Grand Flagships', 5, [ship('flagship')], 'The pride of an empire.', { requires: ['x-sacred-geometry'] }],

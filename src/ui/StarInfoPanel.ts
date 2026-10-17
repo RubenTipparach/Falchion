@@ -13,7 +13,7 @@ import { exploreCost } from '../core/fleet/Logistics';
 import { countOf } from '../core/fleet/Presence';
 import { colonyView, crateLine, haulView, shipsText, storesView } from './widgets';
 import { collectWithFx } from './collectFx';
-import { clear, fmt, h } from './dom';
+import { clear, fmt, h, touchFirst } from './dom';
 import { icon } from './icons';
 
 export interface StarDetails {
@@ -145,7 +145,9 @@ export class StarInfoPanel {
               h('span', { class: 'survey-num' }, String(i + 1)), h('b', {}, st.name),
               h('small', { class: 'muted' }, `${Math.round((100 * p.done) / Math.max(1, p.total))}% surveyed · ${p.total} planets`));
           })) : '',
-        h('p', { class: 'notice' }, 'Right-click a star, or anywhere in empty space, to send this fleet there. Right-drag to orbit the camera.'))
+        h('p', { class: 'notice' }, touchFirst()
+          ? 'Press and hold a star, or anywhere in empty space, to send this fleet there. Twist two fingers to turn the view; slide them up or down together to tilt it.'
+          : 'Right-click a star, or anywhere in empty space, to send this fleet there. Right-drag to orbit the camera.'))
         : h('p', { class: 'small muted' }, fleet.owner.startsWith('alien:') ? 'Hostile alien fleet.' : 'Another empire\'s fleet.'),
       h('div', { class: 'actions' },
         h('button', { class: 'btn', title: 'Centre the camera on this fleet', onclick: () => this.actions.focusFleet(fleet.id) }, icon('locate'), ' Centre'),

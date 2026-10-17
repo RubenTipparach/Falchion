@@ -21,3 +21,6 @@ export function clear(el: HTMLElement): void {
 }
 
 export const fmt = (n: number): string => Math.round(n).toLocaleString('en-US');
+
+/** A touch screen is the main input (phones, tablets): hints say tap and long-press, not click. */
+export const touchFirst = (): boolean => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;

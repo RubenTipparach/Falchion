@@ -56,6 +56,11 @@ export class ZoomModel {
     this.targetZ = this.zOf(altitude);
   }
 
+  /** Jump straight to an altitude (pinch zoom follows the fingers exactly). */
+  setAltitude(altitude: number): void {
+    this.z = this.targetZ = this.zOf(altitude);
+  }
+
   snap(): void {
     this.z = this.targetZ;
   }

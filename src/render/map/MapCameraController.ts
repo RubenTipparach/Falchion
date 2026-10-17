@@ -4,9 +4,17 @@ import { ZoomModel } from './ZoomModel';
 
 /** Rebase once the focus drifts this far (ly) from the render origin. */
 const REBASE_DISTANCE = 256;
+/** A finger may wander this far (px) and still count as a tap or a long press. */
+const TOUCH_SLOP = 10;
+/** Hold a finger this long (ms) for the touch equivalent of a right-click: a move order. */
+const LONG_PRESS_MS = 450;
 
 /**
  * Turns pointer/wheel input into camera focus, exponential zoom, yaw and tilt.
+ *
+ * Mouse: drag pans, right-drag (or shift-drag) turns and tilts, wheel zooms, right-click
+ * orders. Touch, like a maps app: one finger pans, two fingers pinch to zoom, twist to turn
+ * and slide up or down together to tilt; a long press is the right-click.
  *
  * Floating origin: the galaxy spans 70,000 ly but a planet is ~0.005 ly, far
  * below float32 resolution at that range. The camera therefore lives near (0,0,0)
@@ -40,7 +48,15 @@ export class MapCameraController {
    * amount that wobbles with frame time).
    */
   private followOffset: THREE.Vector2 | null = null;
-  private drag: { button: number; x: number; y: number; moved: number } | null = null;
+  private drag: { button: number; x: number; y: number; moved: number; touch: boolean } | null = null;
+  /** Fingers on the map (pointer id → position). */
+  private readonly touches = new Map<number, { x: number; y: number }>();
+  private longPress: ReturnType<typeof setTimeout> | null = null;
+  /** The current touch was a long press or a pinch: lifting it is not a tap. */
+  private consumed = false;
+  /** Both fingers where the last two-finger step left them; each finger reports on its own, so steps run once a frame. */
+  private pinchFrom: Array<{ x: number; y: number }> | null = null;
+  private pinchFrame: number | null = null;
   private readonly raycaster = new THREE.Raycaster();
   private readonly plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private readonly euler = new THREE.Euler();
@@ -58,6 +74,7 @@ export class MapCameraController {
     dom.addEventListener('pointerdown', this.handleDown);
     window.addEventListener('pointermove', this.handleMove);
     window.addEventListener('pointerup', this.handleUp);
+    window.addEventListener('pointercancel', this.handleCancel);
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
@@ -205,13 +222,90 @@ export class MapCameraController {
   };
 
   private readonly handleDown = (e: PointerEvent): void => {
-    this.drag = { button: e.button, x: e.clientX, y: e.clientY, moved: 0 };
     this.flyTarget = null;
     this.flyAltitude = null;
     this.zoomAnchor = null;
+    if (e.pointerType === 'touch') {
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.touches.size >= 2) {
+        this.pinchFrom = null;
+        // A second finger: pinch, twist and tilt from here on; no tap, no long press.
+        this.cancelLongPress();
+        this.consumed = true;
+        this.drag = null;
+        return;
+      }
+      this.consumed = false;
+      this.cancelLongPress();
+      this.longPress = setTimeout(() => this.firePress(), LONG_PRESS_MS);
+    }
+    this.drag = { button: e.button, x: e.clientX, y: e.clientY, moved: 0, touch: e.pointerType === 'touch' };
   };
 
+  /** Long press: the touch right-click (a move order where the finger is). */
+  private firePress(): void {
+    this.longPress = null;
+    const d = this.drag;
+    if (!d || !d.touch || d.moved >= TOUCH_SLOP || this.touches.size !== 1) return;
+    this.consumed = true;
+    const p = this.groundAt(d.x, d.y);
+    if (p) {
+      navigator.vibrate?.(12);
+      this.onRightClick?.(p, this.rayAt(d.x, d.y));
+    }
+  }
+
+  private cancelLongPress(): void {
+    if (this.longPress !== null) clearTimeout(this.longPress);
+    this.longPress = null;
+  }
+
+  /** A finger of a two-finger gesture moved: apply the gesture once this frame, with both fingers' moves. */
+  private pinchMove(id: number, x: number, y: number): void {
+    this.pinchFrom ??= [...this.touches.values()].slice(0, 2).map((p) => ({ ...p }));
+    this.touches.set(id, { x, y });
+    this.pinchFrame ??= requestAnimationFrame(() => {
+      this.pinchFrame = null;
+      const from = this.pinchFrom;
+      this.pinchFrom = null;
+      const to = [...this.touches.values()];
+      if (from && to.length >= 2) this.pinchStep(from[0], from[1], to[0], to[1]);
+    });
+  }
+
+  /** Two fingers moved from a0, b0 to a1, b1: zoom, turn and pan about their midpoint, or tilt when they slide together. */
+  private pinchStep(a0: { x: number; y: number }, b0: { x: number; y: number }, a1: { x: number; y: number }, b1: { x: number; y: number }): void {
+    const da = { x: a1.x - a0.x, y: a1.y - a0.y }, db = { x: b1.x - b0.x, y: b1.y - b0.y };
+    const d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y), d1 = Math.hypot(b1.x - a1.x, b1.y - a1.y);
+    if (d0 < 1 || d1 < 1) return;
+    // Both fingers sliding up or down together, without spreading: tilt.
+    const together = da.y * db.y > 0 && Math.abs(da.y + db.y) > 1.5 * Math.abs(da.x + db.x) && Math.abs(d1 - d0) < 0.5 * Math.abs(da.y + db.y);
+    if (together) {
+      this.tilt = THREE.MathUtils.clamp(this.tilt - ((da.y + db.y) / 2) * 0.006, 0, 1.4);
+      this.place();
+      return;
+    }
+    const m0 = { x: (a0.x + b0.x) / 2, y: (a0.y + b0.y) / 2 }, m1 = { x: (a1.x + b1.x) / 2, y: (a1.y + b1.y) / 2 };
+    const before = this.groundAt(m0.x, m0.y);
+    this.zoom.setAltitude(this.zoom.altitude * (d0 / d1));
+    const turn = Math.atan2(b1.y - a1.y, b1.x - a1.x) - Math.atan2(b0.y - a0.y, b0.x - a0.x);
+    this.yaw += Math.atan2(Math.sin(turn), Math.cos(turn));
+    this.place();
+    // Keep the ground that was under the fingers under them (unless following a ship: then just zoom).
+    const after = this.groundAt(m1.x, m1.y);
+    if (before && after && !this.follow) {
+      this.focus.x += before.x - after.x;
+      this.focus.y += before.z - after.z;
+      this.clampFocus();
+      this.place();
+    }
+  }
+
   private readonly handleMove = (e: PointerEvent): void => {
+    if (e.pointerType === 'touch' && this.touches.has(e.pointerId)) {
+      if (this.touches.size >= 2) { this.pinchMove(e.pointerId, e.clientX, e.clientY); return; }
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
     if (!this.drag) {
       if (e.target === this.dom || this.dom.contains(e.target as Node)) {
         const g = this.groundAt(e.clientX, e.clientY);
@@ -221,8 +315,9 @@ export class MapCameraController {
     }
     const dx = e.clientX - this.drag.x, dy = e.clientY - this.drag.y;
     this.drag.moved += Math.abs(dx) + Math.abs(dy);
+    if (this.drag.moved >= TOUCH_SLOP) this.cancelLongPress();
     if (this.drag.button === 0 && !e.shiftKey) {
-      if (this.drag.moved > 4) this.follow = null;
+      if (this.drag.moved > (this.drag.touch ? TOUCH_SLOP : 4)) this.follow = null;
       const a = this.groundAt(this.drag.x, this.drag.y);
       const b = this.groundAt(e.clientX, e.clientY);
       if (a && b && !this.follow) {
@@ -240,12 +335,33 @@ export class MapCameraController {
   };
 
   private readonly handleUp = (e: PointerEvent): void => {
-    if (this.drag && this.drag.moved < 5 && (this.drag.button === 0 || this.drag.button === 2)) {
+    if (e.pointerType === 'touch' && this.touches.has(e.pointerId)) {
+      this.touches.delete(e.pointerId);
+      this.cancelLongPress();
+      this.pinchFrom = null;
+      if (this.touches.size === 1) {
+        // One finger left after a pinch: it carries on panning from where it is.
+        const [rest] = [...this.touches.values()];
+        this.drag = { button: 0, x: rest.x, y: rest.y, moved: TOUCH_SLOP, touch: true };
+        return;
+      }
+      if (this.touches.size > 1) return;
+      if (this.consumed) { this.drag = null; return; }
+    }
+    const slop = this.drag?.touch ? TOUCH_SLOP : 5;
+    if (this.drag && this.drag.moved < slop && (this.drag.button === 0 || this.drag.button === 2)) {
       const p = this.groundAt(e.clientX, e.clientY);
       if (p && this.drag.button === 0) this.onClick(p, this.rayAt(e.clientX, e.clientY));
       else if (p) this.onRightClick?.(p, this.rayAt(e.clientX, e.clientY));
     }
     this.drag = null;
+  };
+
+  /** The browser took the touch over (e.g. a system gesture): drop it without a tap. */
+  private readonly handleCancel = (e: PointerEvent): void => {
+    this.touches.delete(e.pointerId);
+    this.cancelLongPress();
+    if (!this.touches.size) this.drag = null;
   };
 
   private clampFocus(): void {

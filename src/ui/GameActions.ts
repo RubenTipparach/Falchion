@@ -6,6 +6,9 @@ import type { ShipDesign } from '../core/ships/ShipDesign';
 
 import type { Capacity, Stores } from '../core/fleet/Logistics';
 import type { Colony } from '../core/economy/Economy';
+import type { Job } from '../core/construction/Construction';
+import type { FleetOrders } from '../core/fleet/Presence';
+import type { Resource } from '../content/resources';
 
 export type PanelId = 'shipyard' | 'research' | 'empire' | 'war' | 'explore' | 'fleets';
 
@@ -24,6 +27,7 @@ export interface FleetGroup {
   /** Years (minutes) until arrival (0 when on station). */
   readonly eta: number;
   readonly friendly: boolean;
+  readonly orders?: FleetOrders;
 }
 
 /** Read-only game queries the panels use (implemented by the app layer). */
@@ -45,6 +49,10 @@ export interface GameQueries {
   pendingCaches(star: StarSystem): Array<{ planet: Planet; cache: Haul }>;
   cacheOf(planet: Planet): Haul;
   planetById(id: string): Planet | null;
+  /** Construction queued at a site (planet id), or everywhere. */
+  jobs(site?: string): Job[];
+  /** Storage caps for each resource. */
+  caps(): Partial<Record<Resource, number>>;
 }
 
 export type CombatOutcome =
@@ -67,6 +75,8 @@ export interface GameActions {
   /** Merge a fleet at home back into the dock. */
   dockFleet(fleetId: string): void;
   focusFleet(fleetId: string): void;
+  /** Standing orders a fleet follows on its own. */
+  setOrders(fleetId: string, orders: FleetOrders): void;
   /** Settle an explored planet with a Colony Ark on station. */
   settle(planet: Planet): void;
   /** Build a supply depot with a Construction Tender on station. */

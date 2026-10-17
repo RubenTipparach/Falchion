@@ -58,6 +58,41 @@ export interface EconomyTables {
   readonly partners: readonly TradePartner[];
   readonly alienTech: Readonly<Record<string, readonly string[]>>;
   readonly buildings?: readonly BuildingDef[];
+  /** Storage caps; omit for unlimited storage. */
+  readonly storage?: StorageTable;
+  /** Credits per year per ship; omit for the legacy flat warship upkeep. */
+  readonly upkeepOf?: (c: ShipClassDef) => number;
+}
+
+export interface StorageTable {
+  readonly base: Readonly<Partial<Record<Resource, number>>>;
+  readonly perColony: number;
+  readonly creditsPerColony: number;
+}
+
+/** Most of each resource the empire can hold. Income stops at the cap. */
+export function capsOf(e: Pick<EconomyState, 'colonies'>, t: EconomyTables): Partial<Record<Resource, number>> {
+  const s = t.storage;
+  if (!s) return {};
+  const caps: Partial<Record<Resource, number>> = { ...s.base };
+  const extra = e.colonies.reduce((n, c) => n + (c.buildings ?? []).reduce((m, id) => m + (t.buildings?.find((b) => b.id === id)?.storage ?? 0), 0), 0);
+  for (const r of Object.keys(caps) as Resource[]) {
+    if (MINERALS.has(r) || r === 'food') caps[r] = caps[r]! + e.colonies.length * s.perColony + extra;
+  }
+  if (caps.credits !== undefined) caps.credits += e.colonies.length * s.creditsPerColony;
+  return caps;
+}
+
+/** Credits per year to keep the fleet in service. */
+export function upkeepOf(e: Pick<EconomyState, 'roster' | 'policies'>, t: EconomyTables): number {
+  const conscription = e.policies.includes('conscription');
+  return t.classes.reduce((sum, c) => {
+    const n = e.roster[c.id] ?? 0;
+    if (!n) return sum;
+    const military = c.role === 'combat' || c.role === 'capital';
+    if (military && conscription) return sum;
+    return sum + n * (t.upkeepOf ? t.upkeepOf(c) : military ? 2 : 0);
+  }, 0);
 }
 
 /**
@@ -238,7 +273,7 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   }
 
   // Upkeep
-  if (!e.policies.includes('conscription')) add('credits', -combatShips(e, t) * 2);
+  add('credits', -upkeepOf(e, t));
 
   // Famine: colonies that cannot eat produce less
   const famine = (e.stock.food ?? 0) + (income.food ?? 0) < 0;
@@ -249,8 +284,21 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   for (const r of Object.keys(income) as Resource[]) if (income[r]! > 0) income[r] = Math.round(income[r]! * factor);
   if (unrest < 1) lines.push(`Unrest: stability ${stability}% cut income by 20%`);
 
+  // Storage: income stops at the cap (stock above it from loot is kept, not lost).
+  const caps = capsOf(e, t);
   const stock = { ...e.stock };
-  for (const r of RESOURCES) stock[r.id] = Math.max(0, stock[r.id] + (income[r.id] ?? 0));
+  const full: string[] = [];
+  for (const r of RESOURCES) {
+    const inc = income[r.id] ?? 0;
+    const cap = caps[r.id];
+    let next = Math.max(0, stock[r.id] + inc);
+    if (cap !== undefined && inc > 0 && next > cap) {
+      next = Math.max(stock[r.id], cap);
+      full.push(r.name.toLowerCase());
+    }
+    stock[r.id] = next;
+  }
+  if (full.length) lines.push(`Storage full: ${full.join(', ')}. Spend it, or build Warehouses`);
 
   // Research: science into focus, espionage into alien tech
   let res = research;

@@ -3,6 +3,9 @@ import { BUILDINGS, BuildingDef, slotsOf } from '../content/buildings';
 import { RESOURCES, Resource } from '../content/resources';
 import { SHIP_CLASSES } from '../content/shipClasses';
 import { Colony, colonyYield, EconomyTables } from '../core/economy/Economy';
+import type { Job } from '../core/construction/Construction';
+import { formatDuration } from '../core/time/WorldTime';
+import { CLOCK } from '../app/WorldClock';
 import type { FleetGroup } from './GameActions';
 import { h } from './dom';
 import { icon } from './icons';
@@ -27,20 +30,22 @@ export function shipsText(ships: readonly Squadron[]): string {
 }
 
 /** A colony's buildings, free slots and a build menu. */
-export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>, build: (buildingId: string) => void, tables: EconomyTables): HTMLElement {
+export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>, build: (buildingId: string) => void, tables: EconomyTables, queued: readonly Job[] = [], turn = 0): HTMLElement {
   const have = c.buildings ?? [];
+  const pending = queued.filter((j) => j.kind === 'building');
   const slots = slotsOf(c.size ?? 3, c.capital);
   const y = colonyYield(c, tables);
   const out = Object.entries(y.income).filter(([, n]) => n).map(([r, n]) => `${n! > 0 ? '+' : ''}${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`);
   if (y.science) out.push(`+${y.science} SCI`);
   const costText = (b: BuildingDef) => Object.entries(b.cost).map(([r, n]) => `${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`).join(' ');
   const affordable = (b: BuildingDef) => Object.entries(b.cost).every(([r, n]) => stock[r as Resource] >= n!);
-  const free = slots - have.length;
+  const free = slots - have.length - pending.length;
   return h('div', { class: 'colony' },
     h('div', { class: 'small' }, h('b', {}, 'Output '), out.join('  ') || '—', h('span', { class: 'muted' }, ' / yr')),
     h('div', { class: 'buildings' },
       ...have.map((id) => h('span', { class: 'building', title: BUILDINGS.find((b) => b.id === id)?.blurb ?? '' }, BUILDINGS.find((b) => b.id === id)?.name ?? id)),
+      ...pending.map((j) => h('span', { class: 'building pending', title: j.startTurn > turn ? 'Queued' : 'Under construction' }, `⏳ ${BUILDINGS.find((b) => b.id === j.item)?.name ?? j.item} · ${formatDuration(j.doneTurn - turn, CLOCK)}`)),
       ...Array.from({ length: Math.max(0, free) }, () => h('span', { class: 'building empty' }, 'Empty slot'))),
-    free > 0 ? h('div', { class: 'build-menu' }, ...BUILDINGS.filter((b) => !(b.unique && have.includes(b.id))).map((b) =>
-      h('button', { class: 'btn', disabled: !affordable(b), title: b.blurb, onclick: () => build(b.id) }, icon('build'), ` ${b.name}`, h('small', {}, `${costText(b)} · ${b.blurb}`)))) : h('p', { class: 'small muted' }, 'All building slots used.'));
+    free > 0 ? h('div', { class: 'build-menu' }, ...BUILDINGS.filter((b) => !(b.unique && (have.includes(b.id) || pending.some((j) => j.item === b.id)))).map((b) =>
+      h('button', { class: 'btn', disabled: !affordable(b), title: b.blurb, onclick: () => build(b.id) }, icon('build'), ` ${b.name}`, h('small', {}, `${costText(b)} · ${formatDuration(b.years, CLOCK)} · ${b.blurb}`)))) : h('p', { class: 'small muted' }, 'All building slots used.'));
 }

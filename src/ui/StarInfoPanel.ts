@@ -18,6 +18,8 @@ export interface StarDetails {
   readonly distanceFromHome: number;
   readonly travel: string;
   readonly speed: number;
+  /** Fastest speed among hulls the empire owns. */
+  readonly fastest: number;
   readonly planets: readonly Planet[];
   readonly owner: string | null;
 }
@@ -28,7 +30,7 @@ export class StarInfoPanel {
 
   constructor(store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly describe: (s: StarSystem) => StarDetails, private readonly thumb: (p: Planet) => string, private readonly tables: EconomyTables) {
     store.subscribe((s, prev) => {
-      if (s.selected !== prev.selected || s.selectedPlanet !== prev.selectedPlanet || s.explored !== prev.explored || s.openedCrates !== prev.openedCrates || s.empire !== prev.empire || s.loadouts !== prev.loadouts || s.turn !== prev.turn || s.economy.colonies !== prev.economy.colonies || s.collectedCaches !== prev.collectedCaches || s.depots !== prev.depots) this.render(s);
+      if (s.selected !== prev.selected || s.selectedPlanet !== prev.selectedPlanet || s.explored !== prev.explored || s.openedCrates !== prev.openedCrates || s.empire !== prev.empire || s.loadouts !== prev.loadouts || s.turn !== prev.turn || s.economy.colonies !== prev.economy.colonies || s.collectedCaches !== prev.collectedCaches || s.depots !== prev.depots || s.construction !== prev.construction) this.render(s);
     });
   }
 
@@ -53,7 +55,7 @@ export class StarInfoPanel {
       h('dl', {},
         h('dt', {}, 'Address'), h('dd', {}, d.address),
         h('dt', {}, 'From home'), h('dd', {}, `${fmt(d.distanceFromHome)} ly`),
-        h('dt', {}, 'Travel time'), h('dd', {}, `${d.travel} at ${d.speed} ly/min`)),
+        h('dt', {}, 'Travel time'), h('dd', {}, d.fastest > d.speed ? `${d.travel} (${d.fastest} to ${d.speed} ly/min by hull)` : `${d.travel} at ${d.speed} ly/min`)),
       here.length ? h('div', { class: 'here' }, h('span', { class: 'eyebrow' }, 'On station'), ...here.map((g) => h('div', { class: 'here-group' }, h('b', {}, g.name), h('div', { class: 'small muted' }, shipsText(g.ships)), storesView(g)))) : '',
       friendly && !isHome ? h('p', { class: 'small green' }, 'Friendly system: fleets here resupply and rearm.') : '',
       h('div', { class: 'planet-row' }, ...d.planets.map((p) => {
@@ -92,7 +94,7 @@ export class StarInfoPanel {
         !colony ? h('dt', {}, 'If colonised') : '', !colony ? h('dd', {}, yields.length ? yields.map(([r, n]) => `+${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`).join('  ') + ' / yr' : '—') : '',
         h('dt', {}, 'Survey'), h('dd', {}, colony ? 'Settled' : done ? `${done.kind} · ${done.success ? 'success' : 'failed'}` : 'Unexplored')),
       done ? h('p', { class: 'small muted' }, done.narrative) : '',
-      colony ? h('div', {}, h('span', { class: 'eyebrow' }, colony.capital ? 'Capital' : 'Your colony'), colonyView(colony, s.empire.materials, (b) => this.actions.build(p.id, b), this.tables)) : '',
+      colony ? h('div', {}, h('span', { class: 'eyebrow' }, colony.capital ? 'Capital' : 'Your colony'), colonyView(colony, s.empire.materials, (b) => this.actions.build(p.id, b), this.tables, this.q.jobs(p.id), s.turn)) : '',
       !done && !colony && !canExplore ? h('p', { class: 'small red' }, `Exploring needs a ship on station here with ${cost} supply.`) : '',
       h('div', { class: 'actions' },
         !done && !colony ? h('button', { class: 'btn primary', disabled: !canExplore, onclick: () => this.actions.explore(p) }, icon('explore'), ` Explore · ${cost} supply`) : '',

@@ -2,9 +2,18 @@ import type { Squadron } from '../combat/Combat';
 import { arrivalTurn, type FleetMovement } from './Fleet';
 import type { Stores } from './Logistics';
 
+/** What a fleet does on its own while the player is away. */
+export interface FleetOrders {
+  /** Survey unexplored planets wherever it is on station, while supply lasts. */
+  readonly autoExplore?: boolean;
+  /** Head home to resupply when it can explore nothing more here. */
+  readonly autoReturn?: boolean;
+}
+
 /** A deployed group of ships with its own supply and ammunition. */
 export interface Loadout extends Stores {
   readonly ships: readonly Squadron[];
+  readonly orders?: FleetOrders;
 }
 
 /** A fleet is on station (can explore, fight, mine, settle) once it has arrived. */

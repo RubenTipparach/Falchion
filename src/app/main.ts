@@ -19,8 +19,8 @@ import type { Colony, EconomyTables } from '../core/economy/Economy';
 import type { Squadron } from '../core/combat/Combat';
 import { fullStores } from '../core/fleet/Logistics';
 import type { Loadout } from '../core/fleet/Presence';
-import { BUILDINGS } from '../content/buildings';
-import { specOf } from '../content/logistics';
+import { BUILDINGS, STORAGE } from '../content/buildings';
+import { specOf, upkeepOf } from '../content/logistics';
 import { planetsOf, Planet } from '../core/galaxy/Planets';
 import { PlanetThumbnails } from '../render/planets/PlanetThumbnails';
 import { NebulaLayer } from '../render/map/NebulaLayer';
@@ -66,7 +66,7 @@ async function bootstrap(): Promise<void> {
   const world = createWorld(galaxy);
   const { factory, styles, traits } = createDefaultShipFactory();
   const partners = tradePartners(world, world.home);
-  const economyTables: EconomyTables = { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, partners, alienTech: ALIEN_TECH, buildings: BUILDINGS };
+  const economyTables: EconomyTables = { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, partners, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf };
 
   // Starting position: a young empire with a few roots researched and a small fleet.
   let research = newEmpire(identity.displayName).research;
@@ -111,7 +111,7 @@ async function bootstrap(): Promise<void> {
     },
     designs: { prospector: { ...houseDesign, name: 'Prospector Skiff', style: 'utilitarian', seed: 4, length: 0.8, bulk: 0.8, engines: 2, weapons: 0 } },
     shipyardClass: 'prospector', hiddenTraits: [], home: world.home,
-    selected: null, selectedPlanet: null, explored: {}, openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0, ammo: 0 }, depots: [], contact: null, playerName: identity.displayName,
+    selected: null, selectedPlanet: null, explored: {}, openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0, ammo: 0 }, depots: [], construction: [], contact: null, playerName: identity.displayName,
     lastReport: null, engaged: [],
     dispatches: [{ turn: t0, text: 'Welcome, Commander. One year passes every minute. Survey Group Alpha is on station nearby: explore its planets and collect what you find. Ships need supply to explore and ammunition to fight; both refill in friendly systems.' }],
   };
@@ -141,7 +141,7 @@ async function bootstrap(): Promise<void> {
   const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK)));
 
   const zoomCfg = map.controller.zoom.config;
-  const topBar = new TopBar(store, controller, identity.displayName, clock);
+  const topBar = new TopBar(store, controller, identity.displayName, clock, controller.caps);
   const hud = new Hud({ min: zoomCfg.minAltitude, max: zoomCfg.maxAltitude }, (alt) => controller.zoomTo(alt));
   const thumbs = new PlanetThumbnails(80);
   const thumb = (p: Planet) => thumbs.url(p);
@@ -187,6 +187,11 @@ async function bootstrap(): Promise<void> {
   let saveTimer = 0;
   store.subscribe(() => { clearTimeout(saveTimer); saveTimer = window.setTimeout(() => saveGame.save(store.state), 1500); });
   window.addEventListener('pagehide', () => saveGame.save(store.state));
+  // One tab plays the empire: if another tab saves it, this one stops writing and offers to take over.
+  saveGame.onOtherTab(() => {
+    saveGame.stop();
+    hud.setContact('This empire is open in another tab, so this tab stopped saving. Reload here to play in this tab instead.');
+  });
   saveGame.save(store.state);
   map.start();
   if (import.meta.env.DEV) Object.assign(window, { falchion: controller });
@@ -220,7 +225,7 @@ function initialFleets(galaxy: GalaxyModel, world: ReturnType<typeof createWorld
   const loadout = (ships: Squadron[], supply?: number): Loadout => ({ ships, ...fullStores(ships, specOf), ...(supply === undefined ? {} : { supply }) });
   const loadouts: Record<string, Loadout> = {
     'scout-1': loadout([{ classId: 'pathfinder', count: 2 }]),
-    'survey-1': loadout([{ classId: 'survey-cutter', count: 2 }], 15),
+    'survey-1': { ...loadout([{ classId: 'survey-cutter', count: 2 }], 15), orders: { autoReturn: true } },
     // Wins against the raiders with full magazines, loses at half: ammunition matters.
     'strike-1': loadout([{ classId: 'lancer', count: 6 }, { classId: 'railgun-monitor', count: 2 }, { classId: 'interceptor', count: 2 }]),
   };

@@ -67,11 +67,17 @@ export async function connectWorldClock(): Promise<WorldClock> {
     if (info && info.msPerTick === CLOCK.msPerTick && info.epochMs === CLOCK.epochMs) {
       const clock = new Clock(CLOCK, 'server', info.serverNow - Date.now());
       if (typeof EventSource !== 'undefined') {
-        const es = new EventSource('./api/ticks');
-        es.addEventListener('tick', (e) => {
-          const d = JSON.parse((e as MessageEvent).data);
-          clock.serverTick(d.tick, d.serverNow);
-        });
+        const listen = () => {
+          const es = new EventSource('./api/ticks');
+          es.addEventListener('tick', (e) => {
+            const d = JSON.parse((e as MessageEvent).data);
+            clock.serverTick(d.tick, d.serverNow);
+          });
+          // The browser retries dropped connections itself, but gives up on an error response:
+          // reopen then. The local backstop keeps the year moving meanwhile.
+          es.onerror = () => { if (es.readyState === EventSource.CLOSED) setTimeout(listen, 10_000); };
+        };
+        listen();
       }
       return clock;
     }

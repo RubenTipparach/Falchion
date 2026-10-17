@@ -11,7 +11,10 @@ import type { ShipFactory, ShipGeneratorRegistry, ShipTraitRegistry } from '../.
 import type { ShipModel } from '../../render/ships/ShipKit';
 import { Drawer } from '../Drawer';
 import type { GameActions, GameQueries } from '../GameActions';
-import { logisticsOf } from '../../content/logistics';
+import { buildYears, logisticsOf } from '../../content/logistics';
+import { jobProgress } from '../../core/construction/Construction';
+import { formatDuration } from '../../core/time/WorldTime';
+import { CLOCK } from '../../app/WorldClock';
 import { clear, fmt, h } from '../dom';
 import { icon } from '../icons';
 
@@ -77,7 +80,7 @@ export class ShipyardPanel extends Drawer {
     store.subscribe((s, prev) => {
       if (!this.opened) return;
       if (s.designs !== prev.designs || s.shipyardClass !== prev.shipyardClass || s.empire.research !== prev.empire.research || s.hiddenTraits !== prev.hiddenTraits) this.refreshModel();
-      if (s.shipyardClass !== prev.shipyardClass || s.empire !== prev.empire || s.economy.roster !== prev.economy.roster) { this.renderClasses(); this.renderInfo(); }
+      if (s.shipyardClass !== prev.shipyardClass || s.empire !== prev.empire || s.economy.roster !== prev.economy.roster || s.construction !== prev.construction || s.turn !== prev.turn) { this.renderClasses(); this.renderInfo(); }
       const active = document.activeElement;
       const editing = active instanceof HTMLInputElement && this.controlsEl.contains(active) && (active.type === 'range' || active.type === 'color');
       if ((s.designs !== prev.designs || s.shipyardClass !== prev.shipyardClass || s.empire.research !== prev.empire.research || s.hiddenTraits !== prev.hiddenTraits) && !editing) this.renderControls();
@@ -172,9 +175,22 @@ export class ShipyardPanel extends Drawer {
         h('div', { class: 'costs' }, ...costRow, discount ? h('span', { class: 'muted small' }, `−${discount}% from research`) : null),
         unlocked
           ? h('div', { class: 'build-at' }, this.yardSelect(),
-            h('button', { class: 'btn primary', disabled: !affordable || !this.game.yards().length, onclick: () => this.actions.buildShip(c.id, this.yard) }, affordable ? 'Build' : 'Not enough resources'))
+            h('button', { class: 'btn primary', disabled: !affordable || !this.game.yards().length, onclick: () => this.actions.buildShip(c.id, this.yard) }, affordable ? `Build · ${formatDuration(buildYears(c), CLOCK)}` : 'Not enough resources'))
           : h('span', { class: 'locked-note' }, icon('lock'), ` Research ${c.unlock ? this.tree.node(c.unlock).name : ''}`)),
+      this.queueView(),
     );
+  }
+
+  /** What the selected yard is building, with time left. */
+  private queueView(): HTMLElement | string {
+    const s = this.store.state;
+    const jobs = this.game.jobs(this.yard).filter((j) => j.kind === 'ship');
+    if (!jobs.length) return '';
+    const name = (id: string) => SHIP_CLASSES.find((x) => x.id === id)?.name ?? id;
+    return h('div', { class: 'queue' }, h('span', { class: 'eyebrow' }, 'Yard queue'),
+      ...jobs.map((j) => h('div', { class: 'queue-row' }, h('span', {}, name(j.item)),
+        h('span', { class: 'track' }, h('i', { style: `width:${jobProgress(j, s.turn) * 100}%` })),
+        h('span', { class: 'mono small' }, j.startTurn > s.turn ? `queued · ${formatDuration(j.doneTurn - s.turn, CLOCK)}` : formatDuration(j.doneTurn - s.turn, CLOCK)))));
   }
 
   /** Ships are built at a colony with an Orbital Shipyard and start in that system. */

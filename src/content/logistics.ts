@@ -36,3 +36,14 @@ export const specOf = (classId: string): LogisticsSpec | undefined => SPECS.get(
 /** Ships that explore well enough to form a survey group. */
 export const isSurveyClass = (c: ShipClassDef): boolean => (SUPPLY_OVERRIDES[c.id] ?? 0) >= 8;
 export const isWarship = (c: ShipClassDef): boolean => (c.role === 'combat' || c.role === 'capital') && c.attack > 0;
+
+/** Years (minutes) a hull takes at a shipyard: bigger, costlier hulls take longer. */
+export function buildYears(c: ShipClassDef): number {
+  const total = Object.values(c.cost).reduce((a, n) => a + (n ?? 0), 0);
+  return Math.max(1, Math.round(total / 100));
+}
+
+/** Credits per year to keep a ship in service. */
+export function upkeepOf(c: ShipClassDef): number {
+  return c.role === 'capital' ? 8 : c.role === 'combat' ? 2 : 1;
+}

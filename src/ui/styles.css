@@ -444,3 +444,10 @@ td.heat { background: rgba(127, 211, 230, calc(var(--v) * 0.35)); }
 .year-src { font: 600 9px var(--font-mono); letter-spacing: 0.12em; color: var(--good); white-space: nowrap; }
 .year-next { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .year-clock { flex: none; }
+.stat.full .stat-value { color: var(--bad); }
+.building.pending { background: transparent; border: 1px dashed var(--brass); color: var(--brass); }
+.queue { margin-top: 10px; display: grid; gap: 4px; }
+.queue-row { display: grid; grid-template-columns: 1fr 90px auto; gap: 8px; align-items: center; font-size: 12px; }
+.queue-row .track { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.queue-row .track i { display: block; height: 100%; background: var(--brass); }
+.row.orders { align-items: center; }

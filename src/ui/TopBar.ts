@@ -4,6 +4,7 @@ import type { GameActions, PanelId } from './GameActions';
 import { h, fmt } from './dom';
 import { icon, IconName } from './icons';
 import type { WorldClock } from '../app/WorldClock';
+import type { Resource } from '../content/resources';
 
 export class TopBar {
   readonly el: HTMLElement;
@@ -18,7 +19,7 @@ export class TopBar {
   private readonly tabs: Record<PanelId, HTMLButtonElement>;
   private readonly lootBadge = h('span', { class: 'badge', hidden: true });
 
-  constructor(store: Store<GameState>, actions: GameActions, identityName: string, private readonly clock: WorldClock) {
+  constructor(store: Store<GameState>, actions: GameActions, identityName: string, private readonly clock: WorldClock, private readonly caps: () => Partial<Record<Resource, number>>) {
     const skip = import.meta.env.DEV ? h('button', { class: 'chip', title: 'Development only: advance one year now', onclick: () => actions.skipYear() }, '+1 yr') : '';
     this.clockEl.title = clock.source === 'server' ? 'World clock from the Falchion server: one year passes every minute for everyone' : 'Offline world clock (no server here): one year passes every minute';
     this.clockEl.append(this.ring, h('span', { class: 'year-meta' }, h('span', { class: 'year-src' }, clock.source === 'server' ? '● LIVE' : '○ LOCAL'), this.countdown), skip);
@@ -38,7 +39,7 @@ export class TopBar {
         h('span', { class: 'avatar' }, identityName.slice(0, 1)),
         h('span', { class: 'who' }, h('b', {}, identityName), h('small', {}, 'Discord · preview'))));
     store.subscribe((s, prev) => {
-      if (s.empire !== prev.empire) this.renderStats(s);
+      if (s.empire !== prev.empire || s.economy.colonies !== prev.economy.colonies) this.renderStats(s);
       if (s.turn !== prev.turn) this.renderTurn(s.turn);
       if (s.explored !== prev.explored || s.openedCrates !== prev.openedCrates) this.renderLoot(s);
     });
@@ -84,7 +85,13 @@ export class TopBar {
 
   private renderStats(s: GameState): void {
     const m = s.empire.materials;
-    const items: Array<[string, number]> = [['Credits', m.credits], ['Influence', m.influence], ['Faith', m.faith], ['Metals', m.metals], ['Volatiles', m.volatiles], ['Crystals', m.crystals], ['Exotics', m.exotics]];
-    this.stats.replaceChildren(...items.map(([label, v]) => h('div', { class: 'stat' }, h('span', { class: 'stat-label' }, label), h('span', { class: 'stat-value' }, fmt(v)))));
+    const caps = this.caps();
+    const items: Array<[string, Resource]> = [['Credits', 'credits'], ['Influence', 'influence'], ['Food', 'food'], ['Metals', 'metals'], ['Volatiles', 'volatiles'], ['Crystals', 'crystals'], ['Exotics', 'exotics']];
+    this.stats.replaceChildren(...items.map(([label, r]) => {
+      const cap = caps[r];
+      const full = cap !== undefined && m[r] >= cap;
+      return h('div', { class: `stat ${full ? 'full' : ''}`, title: cap !== undefined ? `${label}: ${fmt(m[r])} of ${fmt(cap)} storage${full ? ' (full: income is lost)' : ''}` : label },
+        h('span', { class: 'stat-label' }, label), h('span', { class: 'stat-value' }, fmt(m[r])));
+    }));
   }
 }

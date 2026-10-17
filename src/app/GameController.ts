@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import { ALIEN_TARGETS } from '../content/aliens';
 import { RESOURCES, Resource } from '../content/resources';
 import { BELT_MINERALS, BUILDINGS, slotsOf } from '../content/buildings';
-import { isSurveyClass, isWarship, specOf } from '../content/logistics';
+import { buildYears, isSurveyClass, isWarship, specOf } from '../content/logistics';
 import { BIOME_YIELDS } from '../content/resources';
 import { SHIP_CLASSES, ShipClassDef } from '../content/shipClasses';
 import type { TradePartner } from '../content/society';
 import { CombatBonuses, resolveAssault, resolveBattle, Squadron } from '../core/combat/Combat';
-import { bonusOf, canAfford, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn } from '../core/economy/Economy';
+import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn } from '../core/economy/Economy';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
 import { addHaul, Haul, planetCache } from '../core/encounters/PlanetCache';
 import { arrivalTurn, hexAt, planMovement, travelTurns } from '../core/fleet/Fleet';
@@ -15,7 +15,8 @@ import { catchUpTicks, formatDuration } from '../core/time/WorldTime';
 import { CLOCK, WorldClock } from './WorldClock';
 import type { SaveGame } from './SaveGame';
 import { capacity, clampStores, exploreCost, firepower, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
-import { adjustShips, countOf, dockedShips, hasShips, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
+import { adjustShips, countOf, dockedShips, FleetOrders, hasShips, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
+import { due, enqueue, Job } from '../core/construction/Construction';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
 import { planetsOf, Planet } from '../core/galaxy/Planets';
@@ -89,6 +90,7 @@ export class GameController implements GameActions, GameQueries {
       if (s.contact !== prev.contact) view.hud.setContact(s.contact);
     });
     for (const [id, panel] of Object.entries(view.panels)) panel.onChange(() => view.topBar.setActivePanel(this.openPanelId() ?? (panel.opened ? (id as PanelId) : null)));
+    view.fleets.setTime(this.state.turn + this.deps.clock.fraction());
     view.fleets.setFleets(this.fleetViews());
     this.updateContact();
   }
@@ -140,12 +142,16 @@ export class GameController implements GameActions, GameQueries {
 
   describe = (star: StarSystem): StarDetails => {
     const dist = hexDistance(this.deps.world.home.hex, star.hex);
+    // Fleets travel at their slowest ship's speed: show the range for the hulls you own.
+    const owned = Object.entries(this.state.economy.roster).filter(([, n]) => n > 0).map(([id]) => this.speedOf([{ classId: id, count: 1 }]));
+    const fastest = Math.max(this.fleetSpeed(), ...owned);
     const speed = this.fleetSpeed();
     const owner = this.deps.world.claims.find((c) => c.colonies.some((col) => hexDistance(col.hex, star.hex) <= col.radius));
     return {
       address: formatAddress(addressOf(star.hex)),
       distanceFromHome: dist,
-      travel: dist === 0 ? '—' : formatDuration(travelTurns(dist, speed), CLOCK),
+      travel: dist === 0 ? '—' : fastest > speed ? `${formatDuration(travelTurns(dist, fastest), CLOCK)}–${formatDuration(travelTurns(dist, speed), CLOCK)}` : formatDuration(travelTurns(dist, speed), CLOCK),
+      fastest,
       speed,
       planets: this.planets(star),
       owner: owner?.name ?? null,
@@ -209,7 +215,7 @@ export class GameController implements GameActions, GameQueries {
       const stationed = isStationed(f.movement, s.turn);
       out.push({
         id: f.id, name: f.name, ships: l.ships, stores: { supply: l.supply, ammo: l.ammo }, capacity: capacity(l.ships, specOf),
-        star: this.deps.galaxy.starAt(dest), stationed, eta: Math.max(0, arrivalTurn(f.movement) - s.turn), friendly: stationed && this.isFriendlyHex(dest),
+        star: this.deps.galaxy.starAt(dest), stationed, eta: Math.max(0, arrivalTurn(f.movement) - s.turn), friendly: stationed && this.isFriendlyHex(dest), orders: l.orders,
       });
     }
     return out;
@@ -366,11 +372,13 @@ export class GameController implements GameActions, GameQueries {
     const speed = this.speedOf(wanted);
     const fleet = { id, name: label, owner: s.playerName, color: '#e6b450', movement: planMovement(s.home.hex, to.hex, s.turn, speed), design: this.designOf(wanted) };
     // Ships leave with full holds: the dock's spending this turn stays with the dock.
-    this.deps.store.update({ fleets: [...s.fleets, fleet], loadouts: { ...s.loadouts, [id]: { ships: wanted, ...fullStores(wanted, specOf) } } });
+    // Survey groups explore and come home for supply on their own by default.
+    const orders = kind === 'Survey Group' ? { autoExplore: true, autoReturn: true } : undefined;
+    this.deps.store.update({ fleets: [...s.fleets, fleet], loadouts: { ...s.loadouts, [id]: { ships: wanted, ...fullStores(wanted, specOf), orders } } });
     this.dispatch(`${label} departs for ${to.name} (${formatDuration(travelTurns(hexDistance(s.home.hex, to.hex), speed), CLOCK)})`);
   }
 
-  moveFleet(fleetId: string, to: StarSystem): void {
+  moveFleet(fleetId: string, to: StarSystem, quiet = false): void {
     const s = this.state;
     const f = s.fleets.find((x) => x.id === fleetId);
     const l = s.loadouts[fleetId];
@@ -380,7 +388,12 @@ export class GameController implements GameActions, GameQueries {
     const speed = this.speedOf(l.ships);
     const moved = { ...f, movement: planMovement(from, to.hex, s.turn, speed) };
     this.deps.store.update({ fleets: s.fleets.map((x) => (x.id === fleetId ? moved : x)) });
-    this.dispatch(`${f.name} sets course for ${to.name} (${formatDuration(travelTurns(hexDistance(from, to.hex), speed), CLOCK)})`);
+    if (!quiet) this.dispatch(`${f.name} sets course for ${to.name} (${formatDuration(travelTurns(hexDistance(from, to.hex), speed), CLOCK)})`);
+  }
+
+  setOrders(fleetId: string, orders: FleetOrders): void {
+    const l = this.state.loadouts[fleetId];
+    if (l) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders } } }));
   }
 
   returnHome(fleetId: string): void {
@@ -432,7 +445,7 @@ export class GameController implements GameActions, GameQueries {
       return;
     }
     const next = clampStores(rescaleStores({ supply: stores?.supply ?? l.supply, ammo: stores?.ammo ?? l.ammo }, l.ships, ships, specOf), ships, specOf);
-    this.deps.store.update({ economy: { ...s.economy, roster }, loadouts: { ...s.loadouts, [groupId]: { ships, ...next } }, empire: { ...s.empire, fleetPower: this.fleetPower(roster) } });
+    this.deps.store.update({ economy: { ...s.economy, roster }, loadouts: { ...s.loadouts, [groupId]: { ...l, ships, ...next } }, empire: { ...s.empire, fleetPower: this.fleetPower(roster) } });
   }
 
   // ── Commands: exploration ──────────────────────────────────────────
@@ -574,29 +587,36 @@ export class GameController implements GameActions, GameQueries {
     const c = this.classById.get(classId);
     if (!c || !this.isClassUnlocked(c)) return;
     const yard = this.yards().find((y) => y.planetId === yardPlanetId) ?? this.yards().find((y) => y.capital) ?? this.yards()[0];
-    if (!yard) return this.dispatch('No shipyard: build an Orbital Shipyard on a colony first', 'bad');
+    if (!yard?.planetId) return this.dispatch('No shipyard: build an Orbital Shipyard on a colony first', 'bad');
     const discount = Math.min(40, this.bonus('build'));
     if (!canAfford(s.empire.materials, c.cost, discount)) return;
-    const materials = pay(s.empire.materials, c.cost, discount);
+    // Paid up front; the hull takes years (minutes) at the yard, one at a time.
+    const construction = enqueue(s.construction, { kind: 'ship', item: classId, site: yard.planetId }, buildYears(c), s.turn);
+    const job = construction[construction.length - 1];
+    this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, c.cost, discount) }, construction });
+    this.dispatch(`${c.name} laid down at ${yard.name}: ready in ${formatDuration(job.doneTurn - s.turn, CLOCK)}`);
+  }
+
+  /** A finished hull joins the home dock, or a group in the yard's system. */
+  private launchShip(classId: string, yard: Colony): void {
+    const s = this.state;
     const one = [{ classId, count: 1 }];
-    this.deps.store.update({ empire: { ...s.empire, materials } });
     if (!yard.starId || yard.starId === s.home.id) {
       this.adjustGroup('dock', one);
-      this.dispatch(`${c.name} launched at ${yard.name}`, 'good');
       return;
     }
-    // Ships built away from home join (or form) the yard's group in that system.
     const star = this.starById(yard.starId)!;
     const here = this.groupsAt(star).find((g) => g.id !== 'dock');
-    if (here) this.adjustGroup(here.id, one);
-    else {
-      const id = `yard-${yard.starId}-t${s.turn}`;
-      const fleet = { id, name: `${star.name} Yard Group`, owner: s.playerName, color: '#e6b450', movement: planMovement(star.hex, star.hex, s.turn, 1), design: this.designOf(one) };
-      const roster = { ...s.economy.roster, [classId]: (s.economy.roster[classId] ?? 0) + 1 };
-      this.deps.store.update({ fleets: [...s.fleets, fleet], loadouts: { ...s.loadouts, [id]: { ships: one, ...fullStores(one, specOf) } }, economy: { ...this.state.economy, roster } });
-    }
-    this.dispatch(`${c.name} launched at ${yard.name}`, 'good');
+    if (here) return this.adjustGroup(here.id, one);
+    const id = `yard-${yard.starId}-t${s.turn}`;
+    const fleet = { id, name: `${star.name} Yard Group`, owner: s.playerName, color: '#e6b450', movement: planMovement(star.hex, star.hex, s.turn, 1), design: this.designOf(one) };
+    const roster = { ...s.economy.roster, [classId]: (s.economy.roster[classId] ?? 0) + 1 };
+    this.deps.store.update({ fleets: [...s.fleets, fleet], loadouts: { ...s.loadouts, [id]: { ships: one, ...fullStores(one, specOf) } }, economy: { ...s.economy, roster } });
   }
+
+  caps = () => capsOf(this.state.economy, this.deps.economy);
+
+  jobs = (site?: string): Job[] => this.state.construction.filter((j) => !site || j.site === site);
 
   // ── Commands: colonies ─────────────────────────────────────────────
 
@@ -631,12 +651,63 @@ export class GameController implements GameActions, GameQueries {
     const b = BUILDINGS.find((x) => x.id === buildingId);
     if (!colony || !b) return;
     const have = colony.buildings ?? [];
-    if (have.length >= slotsOf(colony.size ?? 3, colony.capital)) return this.dispatch(`${colony.name} has no free building slots`, 'bad');
-    if (b.unique && have.includes(b.id)) return;
+    const queued = this.jobs(planetId).filter((j) => j.kind === 'building').map((j) => j.item);
+    if (have.length + queued.length >= slotsOf(colony.size ?? 3, colony.capital)) return this.dispatch(`${colony.name} has no free building slots`, 'bad');
+    if (b.unique && (have.includes(b.id) || queued.includes(b.id))) return;
     if (!canAfford(s.empire.materials, b.cost)) return this.dispatch(`Not enough resources for a ${b.name}`, 'bad');
-    const colonies = s.economy.colonies.map((c) => (c === colony ? { ...c, buildings: [...have, b.id] } : c));
-    this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, b.cost) }, economy: { ...s.economy, colonies } });
-    this.dispatch(`${b.name} built on ${colony.name}`, 'good');
+    const construction = enqueue(s.construction, { kind: 'building', item: b.id, site: planetId }, b.years, s.turn);
+    const job = construction[construction.length - 1];
+    this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, b.cost) }, construction });
+    this.dispatch(`${b.name} under construction on ${colony.name}: ready in ${formatDuration(job.doneTurn - s.turn, CLOCK)}`);
+  }
+
+  /** Finish construction due by this year; returns what was completed. */
+  private completeConstruction(): string[] {
+    const { done, pending } = due(this.state.construction, this.state.turn);
+    if (!done.length) return [];
+    this.deps.store.update({ construction: pending });
+    const news: string[] = [];
+    for (const j of done) {
+      const colony = this.colonyAt(j.site);
+      if (!colony) continue;
+      if (j.kind === 'ship') {
+        this.launchShip(j.item, colony);
+        news.push(`${this.classById.get(j.item)?.name ?? j.item} launched at ${colony.name}`);
+      } else {
+        const colonies = this.state.economy.colonies.map((c) => (c.planetId === j.site ? { ...c, buildings: [...(c.buildings ?? []), j.item] } : c));
+        this.deps.store.update((st) => ({ economy: { ...st.economy, colonies } }));
+        news.push(`${BUILDINGS.find((b) => b.id === j.item)?.name ?? j.item} completed on ${colony.name}`);
+      }
+    }
+    return news;
+  }
+
+  /** Standing orders: fleets explore and head home for supply on their own. */
+  private followOrders(): string[] {
+    const s = this.state;
+    const news: string[] = [];
+    for (const f of s.fleets) {
+      const l = s.loadouts[f.id];
+      if (!l?.orders || !isStationed(f.movement, s.turn)) continue;
+      const star = this.deps.galaxy.starAt(hexAt(f.movement, s.turn));
+      if (!star) continue;
+      const left = () => this.planets(star).filter((p) => !this.state.explored[p.id] && !this.colonyAt(p.id));
+      if (l.orders.autoExplore) {
+        const before = left().length;
+        for (const p of left()) this.explore(p, true);
+        const n = before - left().length;
+        if (n) news.push(`${f.name} surveyed ${n} planet${n > 1 ? 's' : ''} in ${star.name}`);
+      }
+      const now = this.state.loadouts[f.id];
+      const atHome = star.id === s.home.id;
+      const cap = capacity(now?.ships ?? [], specOf).supply;
+      const stuck = now && !atHome && !this.isFriendly(star) && now.supply < cap && !left().some((p) => exploreCost(p) <= now.supply);
+      if (l.orders.autoReturn && stuck) {
+        this.moveFleet(f.id, s.home, true);
+        news.push(`${f.name} is heading home to resupply`);
+      }
+    }
+    return news;
   }
 
   toggleTrait(traitId: string): void {
@@ -780,6 +851,8 @@ export class GameController implements GameActions, GameQueries {
 
   /** Abandon this empire and found a new one in the current year. */
   resetEmpire(): void {
+    // Stop first: the reload fires pagehide, which would otherwise save the old empire again.
+    this.deps.save.stop();
     this.deps.save.clear();
     location.reload();
   }
@@ -802,7 +875,7 @@ export class GameController implements GameActions, GameQueries {
       if (!l) continue;
       const here = hexAt(f.movement, next);
       const friendly = isStationed(f.movement, next) && this.isFriendlyHex(here);
-      loadouts[f.id] = { ships: l.ships, ...resupply(l, l.ships, specOf, friendly) };
+      loadouts[f.id] = { ...l, ...resupply(l, l.ships, specOf, friendly) };
       if (arrivalTurn(f.movement) === next && f.movement.route.length > 1) {
         const star = this.deps.galaxy.starAt(here);
         arrivals.push(`${f.name} arrived at ${star?.name ?? 'deep space'}${friendly ? ' and resupplied' : ''}`);
@@ -825,8 +898,11 @@ export class GameController implements GameActions, GameQueries {
       engaged: [],
       dispatches: news.length ? [...news, ...s.dispatches].slice(0, 40) : s.dispatches,
     });
+    // Construction finishing this year, then fleets acting on standing orders.
+    const done = [...this.completeConstruction(), ...this.followOrders()];
+    if (!quiet && done.length) this.deps.store.update((st) => ({ dispatches: [...done.map((text) => ({ turn: next, text, tone: 'good' as const })), ...st.dispatches].slice(0, 40) }));
     if (!quiet) this.updateContact();
-    return { income: report.income, arrivals };
+    return { income: report.income, arrivals: [...arrivals, ...done] };
   }
 
   private dispatch(text: string, tone?: 'good' | 'bad'): void {

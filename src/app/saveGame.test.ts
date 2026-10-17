@@ -33,6 +33,18 @@ describe('save game', () => {
   });
 });
 
+describe('abandoning an empire', () => {
+  it('writes nothing after stop, so a reset cannot be undone by a late save', () => {
+    const storage = new MemoryStorage() as unknown as Storage;
+    const save = new SaveGame(7, storage);
+    save.save(state);
+    save.stop();
+    save.clear();
+    save.save(state);
+    expect(save.load()).toBeNull();
+  });
+});
+
 describe('store batching', () => {
   it('notifies once for many updates', () => {
     const store = new Store({ n: 0 });

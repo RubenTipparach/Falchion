@@ -22,7 +22,7 @@ export class FleetsPanel extends Drawer {
   constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries) {
     super('fleets', 'Fleets', 'Ships act only where they are. Supply is spent exploring, ammunition in battle; both refill in friendly systems, and ammunition slowly regenerates away from home.');
     store.subscribe((s, prev) => {
-      if (this.opened && (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts || s.turn !== prev.turn || s.selected !== prev.selected || s.economy.roster !== prev.economy.roster || s.dockSpent !== prev.dockSpent)) this.render();
+      if (this.opened && (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts || s.turn !== prev.turn || s.selected !== prev.selected || s.economy.roster !== prev.economy.roster || s.dockSpent !== prev.dockSpent || s.construction !== prev.construction)) this.render();
     });
   }
 
@@ -58,10 +58,18 @@ export class FleetsPanel extends Drawer {
       h('div', { class: 'small' }, shipsText(g.ships)),
       storesView(g),
       g.capacity.supply && g.stores.supply === 0 ? h('div', { class: 'notice warn' }, 'Out of supply: cannot explore. Return home or reach a friendly system to resupply.') : null,
+      h('div', { class: 'row orders' }, h('span', { class: 'small muted' }, 'Standing orders:'),
+        this.order(g, 'autoExplore', 'Auto-explore', 'Survey unexplored planets wherever it is on station'),
+        this.order(g, 'autoReturn', 'Return to resupply', 'Head home when it can explore nothing more here')),
       h('div', { class: 'row' },
         target && target.id !== g.star?.id ? h('button', { class: 'btn primary', onclick: () => this.actions.moveFleet(g.id, target) }, icon('fleet'), ` Send to ${target.name}`) : null,
         !atHome ? h('button', { class: 'btn', onclick: () => this.actions.returnHome(g.id) }, icon('home'), ' Return home') : null,
         atHome ? h('button', { class: 'btn', onclick: () => this.actions.dockFleet(g.id) }, 'Dock (merge into home dock)') : null));
+  }
+
+  private order(g: FleetGroup, key: 'autoExplore' | 'autoReturn', label: string, title: string): HTMLElement {
+    const on = !!g.orders?.[key];
+    return h('button', { class: `chip ${on ? 'active' : ''}`, title, 'aria-pressed': String(on), onclick: () => this.actions.setOrders(g.id, { ...g.orders, [key]: !on }) }, on ? `✓ ${label}` : label);
   }
 
   private formFleet(dock: FleetGroup, target: StarSystem | null): HTMLElement {

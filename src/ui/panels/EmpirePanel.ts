@@ -3,7 +3,7 @@ import type { Store } from '../../app/Store';
 import { RESOURCES } from '../../content/resources';
 import { FACTIONS, GOVERNMENTS, POLICIES, TENETS } from '../../content/society';
 import {
-  bonusOf, EconomyTables, factionApproval, hasGrant, maxPolicies, maxRoutes, maxSpies, routeValue, sciencePerTurn, stabilityOf, tradePctOf,
+  bonusOf, EconomyTables, factionApproval, upkeepOf, hasGrant, maxPolicies, maxRoutes, maxSpies, routeValue, sciencePerTurn, stabilityOf, tradePctOf,
 } from '../../core/economy/Economy';
 import { Drawer } from '../Drawer';
 import type { GameActions, GameQueries } from '../GameActions';
@@ -23,7 +23,7 @@ export class EmpirePanel extends Drawer {
   constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly t: EconomyTables, private readonly empires: string[]) {
     super('empire', 'Empire', 'Colonies and their buildings, trade, politics, religion and espionage. Income arrives every year: one minute.', true);
     this.body.append(this.tabsEl, this.content);
-    store.subscribe((s, prev) => { if (this.opened && (s.economy !== prev.economy || s.empire !== prev.empire || s.lastReport !== prev.lastReport || s.fleets !== prev.fleets || s.turn !== prev.turn)) this.render(); });
+    store.subscribe((s, prev) => { if (this.opened && (s.economy !== prev.economy || s.empire !== prev.empire || s.lastReport !== prev.lastReport || s.fleets !== prev.fleets || s.turn !== prev.turn || s.construction !== prev.construction)) this.render(); });
   }
 
   protected onOpen(): void {
@@ -52,7 +52,7 @@ export class EmpirePanel extends Drawer {
               const planet = c.planetId ? this.q.planetById(c.planetId) : null;
               if (planet) this.actions.focusPlanet(star, planet); else this.actions.flyTo(star, true);
             }) : ''),
-          c.planetId ? colonyView(c, s.empire.materials, (b) => this.actions.build(c.planetId!, b), this.t) : h('p', { class: 'small muted' }, 'Captured world: no building slots yet.'));
+          c.planetId ? colonyView(c, s.empire.materials, (b) => this.actions.build(c.planetId!, b), this.t, this.q.jobs(c.planetId), s.turn) : h('p', { class: 'small muted' }, 'Captured world: no building slots yet.'));
       }),
     ];
   }
@@ -66,11 +66,12 @@ export class EmpirePanel extends Drawer {
     const s = this.store.state;
     const r = s.lastReport;
     const approval = factionApproval(this.econ, this.t, s.empire.research);
+    const caps = this.q.caps();
     return [
       h('div', { class: 'stock-grid' }, ...RESOURCES.map((res) => h('div', { class: 'stock' },
         h('span', { class: 'swatch-dot', style: `background:${res.color}` }),
         h('span', { class: 'stock-name' }, res.name),
-        h('b', { class: 'mono' }, fmt(s.empire.materials[res.id])),
+        h('b', { class: `mono ${caps[res.id] !== undefined && s.empire.materials[res.id] >= caps[res.id]! ? 'red' : ''}`, title: caps[res.id] !== undefined ? `Storage ${fmt(caps[res.id]!)}` : '' }, fmt(s.empire.materials[res.id]), caps[res.id] !== undefined ? h('span', { class: 'muted small' }, ` / ${fmt(caps[res.id]!)}`) : ''),
         r && r.income[res.id] ? h('span', { class: `delta ${r.income[res.id]! > 0 ? 'up' : 'down'}` }, `${r.income[res.id]! > 0 ? '+' : ''}${r.income[res.id]}`) : h('span', { class: 'delta' }, ''),
         h('small', {}, res.source)))),
       h('div', { class: 'two-col' },
@@ -82,7 +83,8 @@ export class EmpirePanel extends Drawer {
             h('li', {}, `Stability ${stabilityOf(approval)}%`),
             h('li', {}, `Science +${sciencePerTurn(this.econ, this.t, s.empire.research)} shards per year`),
             h('li', {}, `Trade bonus +${tradePctOf(this.econ, this.t, s.empire.research)}%`),
-            h('li', {}, `Ships in service ${Object.values(s.economy.roster).reduce((a, b) => a + b, 0)}`)))),
+            h('li', {}, `Ships in service ${Object.values(s.economy.roster).reduce((a, b) => a + b, 0)} · upkeep ${upkeepOf(s.economy, this.t)} credits a year`),
+            h('li', {}, `Under construction: ${s.construction.length || 'nothing'}`)))),
       h('section', { class: 'card' }, h('h4', {}, r ? 'Last year' : 'Your first yearly report arrives within a minute'),
         r ? h('ul', { class: 'plain' }, ...r.lines.map((l) => h('li', {}, l))) : null),
       h('section', { class: 'card' }, h('h4', {}, 'Your empire is saved'),

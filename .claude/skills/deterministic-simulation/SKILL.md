@@ -1,19 +1,19 @@
 ---
 name: deterministic-simulation
-description: Rules for deterministic, seed-driven code in Falchion (procedural generation, combat, encounters, loot, lockstep turns). Use whenever code involves randomness, game time, ordering of entities, or anything that must match between server and client.
+description: Rules for deterministic, seed-driven code in Falchion (procedural generation, combat, encounters, loot, world ticks). Use whenever code involves randomness, game time, ordering of entities, or anything that must match between server and client.
 ---
 
 # Deterministic simulation
 
 Falchion's galaxy is 70,000 ly across and is never stored in full: stars, ships
-and encounters are regenerated from seeds. Combat is automated and lockstep
-encounters must replay identically on every client. Therefore:
+and encounters are regenerated from seeds. Combat is automated and every
+world tick must replay identically on the server and every client. Therefore:
 
 1. **No ambient randomness.** Never `Math.random()`. Use `Rng` from
    `src/core/rng` seeded from a stable key, e.g. `hashSeed(galaxySeed, q, r)`.
 2. **Derive, don't share.** Give each sub-system its own derived seed
    (`rng.fork('engines')`) so adding a feature doesn't shift every later roll.
-3. **No ambient time.** The game is turn-based: pass the turn number as a parameter; nothing advances between turns.
+3. **No ambient time.** The world advances one tick (one game year) per minute, driven by the server clock. `src/core` never reads the clock: pass the tick (or wall-clock ms, for `WorldTime`) in as a parameter; nothing in the core advances on its own.
 4. **Stable ordering.** Sort by id before iterating sets/maps that affect results.
 5. **Integers for authoritative state.** Shard counts, resources, HP are integers;
    floats are fine for visuals only.

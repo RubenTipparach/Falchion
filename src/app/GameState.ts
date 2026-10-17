@@ -5,6 +5,7 @@ import type { StarSystem } from '../core/galaxy/GalaxyModel';
 import type { Planet } from '../core/galaxy/Planets';
 import type { Stores } from '../core/fleet/Logistics';
 import type { Loadout } from '../core/fleet/Presence';
+import type { Job } from '../core/construction/Construction';
 import type { ShipDesign } from '../core/ships/ShipDesign';
 import type { FleetView } from '../render/map/FleetLayer';
 
@@ -35,6 +36,8 @@ export interface GameState {
   readonly loadouts: Readonly<Record<string, Loadout>>;
   /** Supply and ammunition the home dock has used this turn (it refills every turn). */
   readonly dockSpent: Stores;
+  /** Ships and buildings under construction. */
+  readonly construction: readonly Job[];
   /** Stars with a supply depot: friendly ports for resupply. */
   readonly depots: readonly string[];
   readonly contact: string | null;

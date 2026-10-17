@@ -12,13 +12,15 @@ npm test         # core unit tests
 
 ## How to play
 
+- **Found your empire**: name it, its ruler and capital, pick its colour and design its flag. Every player sees them on the map; change them later by clicking your empire in the top bar. Every empire starts with one star system and ships that move 1 light year per minute; drive research makes them faster.
 - **Scroll**: exponential zoom from a single planet to the whole galaxy; **drag**: pan; **right-drag**: tilt/rotate; **G**: hex / galaxy view
-- **Realtime**: the server advances the world one tick per minute, and each tick is one year. At base speed a ship crosses one light year per minute, in a straight line. The top bar shows the year and the countdown to the next. Your empire is saved in the browser and keeps running while you are away (up to a week of years is simulated when you return).
+- **Fleets**: click a ship to select it (double-click to zoom in on it), then right-click near a star to send it there.
+- **Realtime**: the server advances the world one tick per minute, and each tick is one year. At base speed a ship crosses one light year per minute, in a straight line. The top bar shows the year and the countdown to the next. Signed in, your empire is saved on the server and follows you to any device; it keeps running while you are away (up to a week of years is simulated when you return).
 - **Ships act where they are.** Exploring, fighting, mining, settling, building depots, missionaries and spies all need a ship on location.
 - **Supply** is spent exploring (Survey Cutters carry the most); **ammunition** is spent in battle and sets firepower. Both refill in friendly systems; ammunition slowly regenerates elsewhere. Fleets can return home and dock.
 - **Colonies** are planets with building slots: farms (food), mines, trade hubs, research labs, temples and shipyards. Ships are built at a shipyard and start in that system. **Colony Arks** settle explored worlds; **Construction Tenders** build forward supply depots.
 - **Explore** newly found planets for loot crates and a one-time resource cache, then press **Collect resources**.
-- Panels: **Fleets**, **Explore**, **War Room** (deterministic combat and planetary assault), **Shipyard** (procedural ship designer), **Research** (branching tree with shards), **Empire** (colonies, trade, politics, religion, espionage). The locate buttons zoom to a planet, star or fleet.
+- Panels: **Fleets**, **Explore**, **War Room** (deterministic combat and planetary assault), **Shipyard** (procedural ship designer), **Research** (branching tree with shards), **Empire** (colonies, trade, politics, religion, espionage). Locate buttons centre on a planet, star or fleet; double-click them to zoom all the way in.
 
 ## Play with friends
 

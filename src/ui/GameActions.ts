@@ -91,6 +91,8 @@ export interface GameActions {
   dockFleet(fleetId: string): void;
   /** Select and centre on a fleet; closeUp also zooms in to the ship. */
   focusFleet(fleetId: string, closeUp?: boolean): void;
+  /** Open the founding screen to change the empire's name, colours and flag. */
+  editEmpire(): void;
   /** Select a fleet and follow its ship with the camera; null clears. */
   selectFleet(fleetId: string | null): void;
   /** Standing orders a fleet follows on its own. */

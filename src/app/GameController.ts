@@ -24,6 +24,7 @@ import { Hex, hexDistance, hexEquals, worldToHex } from '../core/hex/Hex';
 import { hashSeed } from '../core/rng/Rng';
 import type { TechTree } from '../core/research/TechTree';
 import { normalizeDesign, ShipDesign } from '../core/ships/ShipDesign';
+import type { EmpireIdentity } from '../core/empire/Identity';
 import type { FleetLayer, FleetView } from '../render/map/FleetLayer';
 import type { HexGridLayer } from '../render/map/HexGridLayer';
 import type { ViewState } from '../render/map/MapLayer';
@@ -74,6 +75,8 @@ const LOCATE_ALTITUDE = 48;
 /** Two clicks on the same thing within this many ms are a double-click. */
 const DOUBLE_CLICK_MS = 400;
 const BASE_SPEED = 1; // ly per year (one year = one minute)
+/** Map colour of an empire that has not been founded yet. */
+const DEFAULT_EMPIRE_COLOR = '#e6b450';
 /** At most a week of missed years is simulated on return; older years only move fleets. */
 const MAX_CATCH_UP = 7 * 24 * 60;
 /** Per-year report lines that would repeat every minute. */
@@ -168,7 +171,7 @@ export class GameController implements GameActions, GameQueries {
       travel: dist === 0 ? '—' : formatDuration(travelTurns(dist, speed), CLOCK),
       speed,
       planets: this.planets(star),
-      owner: owner?.name ?? null,
+      owner: owner?.kind === 'player' ? this.state.identity?.name ?? owner.name : owner?.name ?? null,
     };
   };
 
@@ -331,6 +334,33 @@ export class GameController implements GameActions, GameQueries {
     cam.flyTo(star.position.x, star.position.z, closeUp ? SYSTEM_ALTITUDE : cam.zoom.targetAltitude > LOCATE_ALTITUDE ? LOCATE_ALTITUDE : undefined);
   }
 
+  /** The empire's map colour: territory, fleets, routes and the selection outline. */
+  empireColor(): string {
+    return this.state.identity?.color ?? DEFAULT_EMPIRE_COLOR;
+  }
+
+  /** Opens the founding screen to edit the empire's name, colours and flag (set by main). */
+  onEditEmpire: () => void = () => {};
+
+  editEmpire(): void {
+    this.onEditEmpire();
+  }
+
+  /**
+   * Found the empire, or change its identity later: your fleets and ships take the new colour,
+   * the capital colony takes its new name.
+   */
+  setIdentity(id: EmpireIdentity, founding: boolean): void {
+    const s = this.state;
+    const livery = (d: ShipDesign): ShipDesign => ({ ...d, colors: { ...d.colors, accent: id.color } });
+    const fleets = s.fleets.map((f) => (s.loadouts[f.id] ? { ...f, color: id.color, design: livery(f.design) } : f));
+    const designs = Object.fromEntries(Object.entries(s.designs).map(([k, d]) => [k, livery(d)]));
+    const colonies = s.economy.colonies.map((c) => (c.capital ? { ...c, name: id.capital } : c));
+    this.deps.store.update({ identity: id, fleets, designs, economy: { ...s.economy, colonies } });
+    if (founding) this.dispatch(`The ${id.name} is founded. ${id.title} ${id.ruler} rules from ${id.capital}.`, 'good');
+    else this.dispatch(`The empire is now known as the ${id.name}.`);
+  }
+
   /** Every fleet moves at its empire's speed (1 ly a year to start): re-time saved journeys made at other speeds. */
   retimeFleets(): void {
     const s = this.state;
@@ -400,7 +430,7 @@ export class GameController implements GameActions, GameQueries {
     const id = `player-${n}-t${s.turn}`;
     const label = name ?? `${kind} ${n}`;
     const speed = this.fleetSpeed();
-    const fleet = { id, name: label, owner: s.playerName, color: '#e6b450', movement: planMovement(s.home.hex, to.hex, s.turn, speed), design: this.designOf(wanted) };
+    const fleet = { id, name: label, owner: s.playerName, color: this.empireColor(), movement: planMovement(s.home.hex, to.hex, s.turn, speed), design: this.designOf(wanted) };
     // Ships leave with full holds: the dock's spending this turn stays with the dock.
     // Survey groups explore and come home for supply on their own by default.
     const orders = kind === 'Survey Group' ? { autoExplore: true, autoReturn: true } : undefined;
@@ -669,7 +699,7 @@ export class GameController implements GameActions, GameQueries {
     const here = this.groupsAt(star).find((g) => g.id !== 'dock');
     if (here) return this.adjustGroup(here.id, one);
     const id = `yard-${yard.starId}-t${s.turn}`;
-    const fleet = { id, name: `${star.name} Yard Group`, owner: s.playerName, color: '#e6b450', movement: planMovement(star.hex, star.hex, s.turn, 1), design: this.designOf(one) };
+    const fleet = { id, name: `${star.name} Yard Group`, owner: s.playerName, color: this.empireColor(), movement: planMovement(star.hex, star.hex, s.turn, 1), design: this.designOf(one) };
     const roster = { ...s.economy.roster, [classId]: (s.economy.roster[classId] ?? 0) + 1 };
     this.deps.store.update({ fleets: [...s.fleets, fleet], loadouts: { ...s.loadouts, [id]: { ships: one, ...fullStores(one, specOf) } }, economy: { ...s.economy, roster } });
   }

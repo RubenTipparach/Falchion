@@ -52,7 +52,10 @@ import type { PanelId } from '../ui/GameActions';
 import { GameController, tradePartners } from './GameController';
 import type { GameState } from './GameState';
 import { GUEST, probeSession } from './identity';
-import { colorFor, othersOnMap, publicEmpire, ServerSaves } from './ServerSync';
+import { colorFor, othersOnMap, ownClaim, publicEmpire, ServerSaves } from './ServerSync';
+import { cleanIdentity, suggestIdentity } from '../core/empire/Identity';
+import { HERALDRY } from '../content/heraldry';
+import { showFounding } from '../ui/Founding';
 import { showSignIn } from '../ui/SignIn';
 import { Store } from './Store';
 import { createWorld } from './World';
@@ -84,7 +87,7 @@ async function bootstrap(): Promise<void> {
   research = tree.grantShards(research, 'a-diplomacy', 'observation', 3);
   const empire = { ...newEmpire(identity.displayName), research };
 
-  // Colonies are real planets: three in the home system (the capital has a shipyard) and one in each claimed system.
+  // Colonies are real planets: an empire starts with one star system, settled on three of its worlds (the capital has a shipyard).
   const homePlanets = planetsOf(world.home, galaxy.params.seed);
   const colonyOf = (p: Planet, buildings: string[], capital = false): Colony =>
     ({ name: capital ? `${p.name} (capital)` : p.name, biome: p.biome, planetId: p.id, starId: p.starId, size: p.size, capital, buildings });
@@ -96,12 +99,6 @@ async function bootstrap(): Promise<void> {
     ...settleable.slice(0, 1).map((p) => colonyOf(p, ['shipyard', 'farm', 'trade-hub'], true)),
     ...settleable.slice(1, 3).map((p) => colonyOf(p, ['mine'])),
   ];
-  const claim = world.claims.find((c) => c.kind === 'player')!;
-  for (const c of claim.colonies.slice(1)) {
-    const star = galaxy.starAt(c.hex);
-    const p = star && star.id !== world.home.id ? planetsOf(star, galaxy.params.seed).find((x) => x.biome !== 'gas') : undefined;
-    if (p && !colonies.some((x) => x.planetId === p.id)) colonies.push(colonyOf(p, ['farm']));
-  }
   const clock = await connectWorldClock();
   const saveGame = new SaveGame(galaxy.params.seed, undefined, signedIn ? identity.id : undefined);
   const serverSaves = signedIn ? new ServerSaves() : null;
@@ -124,11 +121,11 @@ async function bootstrap(): Promise<void> {
     designs: { prospector: { ...houseDesign, name: 'Prospector Skiff', style: 'utilitarian', seed: 4, length: 0.8, bulk: 0.8, engines: 2, weapons: 0 } },
     shipyardClass: 'prospector', hiddenTraits: [], home: world.home,
     selected: null, selectedFleet: null, selectedPlanet: null, explored: {}, openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0, ammo: 0 }, depots: [], construction: [], playerName: identity.displayName,
-    lastReport: null, engaged: [],
+    lastReport: null, engaged: [], identity: null,
     dispatches: [{ turn: t0, text: 'Welcome, Commander. One year passes every minute. Survey Group Alpha is on station nearby: explore its planets and collect what you find. Ships need supply to explore and ammunition to fight; both refill in friendly systems.' }],
   };
   // A saved empire carries on where it left off; the missed years are caught up below.
-  const store = new Store<GameState>(saved ? { ...fresh, ...saved } : fresh);
+  const store = new Store<GameState>(saved ? { ...fresh, ...saved, identity: cleanIdentity(saved.identity, HERALDRY) } : fresh);
 
   const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame,
     // Signed-in players' notable news goes to the Discord channel (the server rate-limits it).
@@ -148,7 +145,10 @@ async function bootstrap(): Promise<void> {
   map.layers.add(new GalaxyCloudLayer(galaxy));
   map.layers.add(new MidStarLayer(galaxy));
   const sectors = map.layers.add(new SectorOverlayLayer(galaxy.params.radius, DEFAULT_ADDRESS_SCHEME));
-  const territory = map.layers.add(new TerritoryLayer(world.claims));
+  // Neighbours are fixed; your own territory follows your colonies and identity.
+  const territory = map.layers.add(new TerritoryLayer(world.claims.filter((c) => c.kind !== 'player')));
+  territory.setOwn(ownClaim(store.state));
+  store.subscribe((s, prev) => { if (s.identity !== prev.identity || s.economy.colonies !== prev.economy.colonies) territory.setOwn(ownClaim(s)); });
   const hexGrid = map.layers.add(new HexGridLayer(galaxy.params.radius));
   map.layers.add(new NearStarLayer(galaxy));
   const system = map.layers.add(new SystemLayer(galaxy, { isHome: (s) => s.id === world.home.id, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet) }));
@@ -213,7 +213,9 @@ async function bootstrap(): Promise<void> {
   let saveTimer = 0;
   const persist = () => {
     saveGame.save(store.state);
-    if (serverSaves && !saveGame.stoppedSaving) serverSaves.push(saveGame.snapshot(store.state), publicEmpire(store.state, colorFor(identity.id)));
+    // The server copy starts once the empire is founded, so the galaxy (and the Discord channel)
+    // first hears of a new player with their chosen name and flag.
+    if (serverSaves && store.state.identity && !saveGame.stoppedSaving) serverSaves.push(saveGame.snapshot(store.state), publicEmpire(store.state, colorFor(identity.id)));
   };
   store.subscribe(() => { clearTimeout(saveTimer); saveTimer = window.setTimeout(persist, 1500); });
   // Leaving or reloading: write the local save and send the server copy now, so another device
@@ -248,6 +250,25 @@ async function bootstrap(): Promise<void> {
   });
   persist();
   map.start();
+
+  // Founding screen: a new empire (or one saved before identities existed) chooses its name,
+  // ruler, capital, colour and flag; the Empire panel and top bar reopen it to edit.
+  const capitalName = () => store.state.economy.colonies.find((c) => c.capital)?.name.replace(/ \(capital\)$/, '') ?? world.home.name;
+  const found = async () => {
+    const chosen = await showFounding(suggestIdentity(galaxy.params.seed, identity.displayName, capitalName(), HERALDRY), HERALDRY, 'found');
+    if (!chosen) return;
+    controller.setIdentity(chosen, true);
+    persistNow();
+  };
+  controller.onEditEmpire = async () => {
+    const current = store.state.identity;
+    if (!current) return void found();
+    const chosen = await showFounding(current, HERALDRY, 'edit');
+    if (!chosen) return;
+    controller.setIdentity(chosen, false);
+    persistNow();
+  };
+  if (!store.state.identity) void found();
   if (import.meta.env.DEV) Object.assign(window, { falchion: controller });
 }
 

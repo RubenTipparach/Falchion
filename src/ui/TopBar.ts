@@ -6,6 +6,7 @@ import { icon, IconName, resourceIcon } from './icons';
 import type { WorldClock } from '../app/WorldClock';
 import type { PlayerIdentity } from '../app/identity';
 import type { Resource } from '../content/resources';
+import { flagEl } from '../render/flag';
 
 export class TopBar {
   readonly el: HTMLElement;
@@ -19,6 +20,7 @@ export class TopBar {
   private readonly viewLabel = h('span', {}, 'Galaxy');
   private readonly tabs: Record<PanelId, HTMLButtonElement>;
   private readonly lootBadge = h('span', { class: 'badge', hidden: true });
+  private readonly empireBtn: HTMLButtonElement;
 
   constructor(store: Store<GameState>, actions: GameActions, identity: PlayerIdentity, private readonly clock: WorldClock, private readonly caps: () => Partial<Record<Resource, number>>) {
     const skip = import.meta.env.DEV ? h('button', { class: 'chip', title: 'Development only: advance one year now', onclick: () => actions.skipYear() }, '+1 yr') : '';
@@ -29,8 +31,10 @@ export class TopBar {
       h('button', { class: 'tab', onclick: () => actions.openPanel(id) }, icon(ic), h('span', {}, label));
     this.tabs = { shipyard: tab('shipyard', 'Shipyard', 'shipyard'), research: tab('research', 'Research', 'research'), empire: tab('empire', 'Empire', 'empire'), war: tab('war', 'War Room', 'battle'), explore: tab('explore', 'Explore', 'explore'), fleets: tab('fleets', 'Fleets', 'fleet') };
     this.tabs.explore.append(this.lootBadge);
+    this.empireBtn = h('button', { class: 'empire-chip', title: 'Your empire: click to change its name, colours and flag', onclick: () => actions.editEmpire() });
     this.el = h('header', { class: 'topbar' },
       h('div', { class: 'brand' }, icon('logo'), h('span', { class: 'wordmark' }, 'Falchion')),
+      this.empireBtn,
       this.stats,
       h('div', { class: 'turn' },
         h('div', { class: 'turn-dial' }, h('span', { class: 'turn-label' }, 'Year'), this.turnNum),
@@ -46,7 +50,9 @@ export class TopBar {
       if (s.empire !== prev.empire || s.economy.colonies !== prev.economy.colonies) this.renderStats(s);
       if (s.turn !== prev.turn) this.renderTurn(s.turn);
       if (s.explored !== prev.explored || s.openedCrates !== prev.openedCrates) this.renderLoot(s);
+      if (s.identity !== prev.identity) this.renderEmpire(s);
     });
+    this.renderEmpire(store.state);
     this.renderStats(store.state);
     this.renderTurn(store.state.turn);
     const tickClock = () => this.renderClock();
@@ -61,6 +67,14 @@ export class TopBar {
 
   setActivePanel(id: PanelId | null): void {
     (Object.keys(this.tabs) as PanelId[]).forEach((k) => this.tabs[k].classList.toggle('active', k === id));
+  }
+
+  private renderEmpire(s: GameState): void {
+    const id = s.identity;
+    this.empireBtn.hidden = !id;
+    if (!id) return;
+    this.empireBtn.style.setProperty('--empire', id.color);
+    this.empireBtn.replaceChildren(flagEl(id.flag, 30), h('span', { class: 'empire-name' }, id.name));
   }
 
   private renderLoot(s: GameState): void {

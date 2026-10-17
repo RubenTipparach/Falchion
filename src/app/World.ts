@@ -10,6 +10,10 @@ export interface Neighbour {
   readonly kind: TerritoryClaim['kind'];
 }
 
+/** Territory (hex radius) around a home system; settled systems add COLONY_RADIUS around themselves. */
+export const HOME_RADIUS = 5;
+export const COLONY_RADIUS = 3;
+
 /** The player's home and the nearby empires, all derived from the galaxy seed. */
 export interface World {
   readonly home: StarSystem;
@@ -55,16 +59,10 @@ export function createWorld(galaxy: GalaxyModel, playerKey?: string): World {
     { name: 'Lumen Accord', color: '#ffd166', home: around(9_000), kind: 'other-player' },
   ];
 
-  const colonies = (center: StarSystem, n: number, spread: number, radius: number) => [
-    { hex: center.hex, radius: radius + 2 },
-    ...Array.from({ length: n }, () => ({ hex: starNear(hexAdd(center.hex, offset(spread)))?.hex ?? center.hex, radius })),
-  ];
+  // Every empire starts with exactly one star system: its home.
   const claims: TerritoryClaim[] = [
-    { name: 'Your Empire', color: '#e6b450', kind: 'player', home: home.hex, colonies: colonies(home, 3, 14, 4) },
-    ...neighbours.map((n) => ({
-      name: n.name, color: n.color, kind: n.kind, home: n.home.hex,
-      colonies: colonies(n.home, n.kind === 'alien' ? 4 : 2, 16, 3),
-    })),
+    { name: 'Your Empire', color: '#e6b450', kind: 'player', home: home.hex, colonies: [{ hex: home.hex, radius: HOME_RADIUS }] },
+    ...neighbours.map((n) => ({ name: n.name, color: n.color, kind: n.kind, home: n.home.hex, colonies: [{ hex: n.home.hex, radius: HOME_RADIUS }] })),
   ];
   return { home, claims, neighbours };
 }

@@ -36,6 +36,8 @@ export class StarInfoPanel {
   }
 
   private render(s: GameState): void {
+    // The planet card is wider: the planet preview and its colony details need the room.
+    this.el.classList.toggle('planet-view', !s.selectedFleet && !!s.selectedPlanet && s.selectedPlanet.starId === s.selected?.id);
     if (s.selectedFleet) {
       const info = this.q.fleetInfo(s.selectedFleet);
       if (info) return this.renderFleet(info);

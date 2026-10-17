@@ -60,11 +60,26 @@ async function readJson(req, limit) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-/** Only what other players may see: home, colony stars and fleets (no stockpiles or research). */
-function publicView(p) {
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+const text = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '');
+
+/** An empire's chosen name, ruler and flag, bounded; clients validate flag parts against their tables. */
+function publicIdentity(e) {
+  if (!e || typeof e !== 'object' || !text(e.name, 40)) return undefined;
+  const part = (x) => (typeof x === 'string' && /^[a-z][a-z-]{0,23}$/.test(x) ? x : 'none');
+  const colors = Array.isArray(e.flag?.colors) ? e.flag.colors.slice(0, 3).map((c) => (typeof c === 'string' && HEX_COLOR.test(c) ? c : '#0b1220')) : [];
+  return {
+    name: text(e.name, 40), ruler: text(e.ruler, 40), title: text(e.title, 24), capital: text(e.capital, 40),
+    flag: { field: part(e.flag?.field), emblem: part(e.flag?.emblem), colors },
+  };
+}
+
+/** Only what other players may see: identity, home, colony stars and fleets (no stockpiles or research). */
+export function publicView(p) {
   const fleets = Array.isArray(p?.fleets) ? p.fleets.slice(0, 50) : [];
   return {
-    color: typeof p?.color === 'string' ? p.color.slice(0, 16) : '#e6b450',
+    color: typeof p?.color === 'string' && HEX_COLOR.test(p.color) ? p.color : '#e6b450',
+    empire: publicIdentity(p?.empire),
     home: p?.home && Number.isInteger(p.home.q) && Number.isInteger(p.home.r) ? { q: p.home.q, r: p.home.r } : null,
     colonies: Array.isArray(p?.colonies) ? p.colonies.filter((h) => Number.isInteger(h?.q) && Number.isInteger(h?.r)).slice(0, 200).map((h) => ({ q: h.q, r: h.r })) : [],
     fleets: fleets.map((f) => ({ id: String(f.id).slice(0, 64), name: String(f.name).slice(0, 64), movement: f.movement, design: f.design })),
@@ -85,7 +100,7 @@ async function api(req, res, pathname) {
       if (!body || typeof body.save !== 'object' || !Number.isInteger(body.save?.turn)) return json(res, 400, { error: 'bad save' });
       const isNew = !(await store.load(user.id));
       await store.save(user.id, { player: user, save: body.save, public: publicView(body.public), updatedAt: Date.now() });
-      if (isNew) void notifier.joined(user.name);
+      if (isNew) void notifier.joined(user.name, body.public?.empire?.name);
       return json(res, 200, { ok: true });
     } catch (err) {
       return json(res, err.status ?? 400, { error: err.status === 413 ? 'save too large' : 'bad save' });

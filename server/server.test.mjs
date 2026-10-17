@@ -205,3 +205,17 @@ describe('discord channel notifications', async () => {
     expect(JSON.parse(res.body).error).toContain('Send Messages');
   });
 });
+
+describe('public empire view', async () => {
+  const { publicView } = await import('./index.mjs');
+  it('keeps a bounded, validated identity and drops bad colours', () => {
+    const v = publicView({
+      color: 'url(evil)', home: { q: 1, r: 2 },
+      empire: { name: '<img src=x>Solar Dominion', ruler: 'Ruben', title: 'Emperor', capital: 'Zarsen', flag: { field: 'cross', emblem: 'x"><script>', colors: ['#e6b450', 'red', '#000000', '#ffffff'] } },
+    });
+    expect(v.color).toBe('#e6b450');
+    expect(v.empire.name).toBe('img src=x Solar Dominion');
+    expect(v.empire.flag).toEqual({ field: 'cross', emblem: 'none', colors: ['#e6b450', '#0b1220', '#000000'] });
+    expect(publicView({ empire: { name: '' } }).empire).toBeUndefined();
+  });
+});

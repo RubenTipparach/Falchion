@@ -74,7 +74,9 @@ export function createNotifier(opts) {
     mode,
     problem,
     post,
-    joined: (name) => post(`🚀 **${clean(name, 64)}** founded an empire in the galaxy.`),
+    joined: (name, empire) => post(empire
+      ? `🚀 **${clean(name, 64)}** founded the **${clean(empire, 40)}** in the galaxy.`
+      : `🚀 **${clean(name, 64)}** founded an empire in the galaxy.`),
     announcement: (text, by) => post(`📣 **Announcement** (${clean(by, 64)}): ${clean(text, 280)}`),
     /** A player's own news (battle, colony, depot). Returns false when unknown or rate-limited. */
     async report(player, kind, text) {

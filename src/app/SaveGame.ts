@@ -3,7 +3,7 @@ import type { GameState } from './GameState';
 /** Fields that persist between sessions; the rest is view state or derived from the world. */
 const SAVED = [
   'turn', 'empire', 'economy', 'designs', 'shipyardClass', 'hiddenTraits', 'explored', 'openedCrates', 'collectedCaches',
-  'fleets', 'loadouts', 'dockSpent', 'depots', 'construction', 'lastReport', 'dispatches', 'engaged',
+  'fleets', 'loadouts', 'dockSpent', 'depots', 'construction', 'lastReport', 'dispatches', 'engaged', 'identity',
 ] as const satisfies ReadonlyArray<keyof GameState>;
 
 export type SavedGame = Pick<GameState, (typeof SAVED)[number]> & { readonly version: number; readonly seed: number };

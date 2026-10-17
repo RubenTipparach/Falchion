@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { HEX_SIZE, Hex, hexKey, hexSpiral, hexToWorld } from '../../core/hex/Hex';
+import type { Flag } from '../../core/empire/Identity';
+import { flagSvg } from '../flag';
 import type { MapLayer, ViewState } from './MapLayer';
 import { fade, fadeIn } from './ZoomModel';
 
@@ -10,6 +12,8 @@ export interface TerritoryClaim {
   readonly kind: 'player' | 'other-player' | 'alien';
   readonly home: Hex;
   readonly colonies: ReadonlyArray<{ readonly hex: Hex; readonly radius: number }>;
+  /** Shown on the name marker instead of the colour dot (validated flag parts only). */
+  readonly flag?: Flag;
 }
 
 /** One set of claims drawn as hex fills and name markers. */
@@ -24,13 +28,14 @@ const HEX_GEO = new THREE.CircleGeometry(HEX_SIZE * 0.96, 6).rotateX(-Math.PI / 
 
 /**
  * Filled hex territory for each empire, plus an always-visible name marker.
- * Fixed claims (your empire, the generated neighbours) are drawn once; other
- * players' claims can be replaced at any time with setDynamic.
+ * Fixed claims (the generated neighbours) are drawn once; your own empire (setOwn)
+ * and other players' claims (setDynamic) are replaced whenever they change.
  */
 export class TerritoryLayer implements MapLayer {
   readonly object3d = new THREE.Group();
   private readonly fixed: ClaimSet;
   private dynamic: ClaimSet | null = null;
+  private own: ClaimSet | null = null;
 
   constructor(claims: readonly TerritoryClaim[]) {
     this.fixed = this.build(claims);
@@ -39,12 +44,22 @@ export class TerritoryLayer implements MapLayer {
 
   /** Replace the live claims (other players in the shared galaxy). */
   setDynamic(claims: readonly TerritoryClaim[]): void {
-    if (this.dynamic) {
-      this.object3d.remove(this.dynamic.group);
-      this.release(this.dynamic);
+    this.dynamic = this.replace(this.dynamic, claims);
+  }
+
+  /** Replace your own empire's claim (it grows with colonies and takes your colours). */
+  setOwn(claim: TerritoryClaim): void {
+    this.own = this.replace(this.own, [claim]);
+  }
+
+  private replace(old: ClaimSet | null, claims: readonly TerritoryClaim[]): ClaimSet {
+    if (old) {
+      this.object3d.remove(old.group);
+      this.release(old);
     }
-    this.dynamic = this.build(claims);
-    this.object3d.add(this.dynamic.group);
+    const set = this.build(claims);
+    this.object3d.add(set.group);
+    return set;
   }
 
   private build(claims: readonly TerritoryClaim[]): ClaimSet {
@@ -66,8 +81,13 @@ export class TerritoryLayer implements MapLayer {
       const el = document.createElement('div');
       el.className = `empire-marker ${claim.kind}`;
       const dot = document.createElement('span');
-      dot.className = 'dot';
-      dot.style.background = claim.color;
+      if (claim.flag) {
+        dot.className = 'flag-wrap';
+        dot.innerHTML = flagSvg(claim.flag, 18); // built only from validated parts and #rrggbb colours
+      } else {
+        dot.className = 'dot';
+        dot.style.background = claim.color;
+      }
       el.append(dot, document.createTextNode(claim.name)); // player names are untrusted: no innerHTML
       const marker = new CSS2DObject(el);
       const hp = hexToWorld(claim.home);
@@ -87,7 +107,8 @@ export class TerritoryLayer implements MapLayer {
   update(view: ViewState): void {
     const opacity = fade(view.visibleWidth, 600, 1_500) * fadeIn(view.visibleWidth, 4, 9);
     const showMarkers = view.visibleWidth > 80;
-    for (const set of this.dynamic ? [this.fixed, this.dynamic] : [this.fixed]) {
+    for (const set of [this.fixed, this.own, this.dynamic]) {
+      if (!set) continue;
       set.fills.visible = opacity > 0.01;
       set.materials.forEach((mat) => (mat.opacity = 0.2 * opacity));
       set.markers.forEach((mk) => (mk.visible = showMarkers));
@@ -97,5 +118,6 @@ export class TerritoryLayer implements MapLayer {
   dispose(): void {
     this.release(this.fixed);
     if (this.dynamic) this.release(this.dynamic);
+    if (this.own) this.release(this.own);
   }
 }

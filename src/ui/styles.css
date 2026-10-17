@@ -144,6 +144,7 @@ ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 /* ── Star card ── */
 .star-card { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); top: calc(72px + env(safe-area-inset-top, 0px)); z-index: 6; width: 320px; max-width: calc(100vw - 32px);
   background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 14px 16px; backdrop-filter: blur(8px); }
+.star-card.planet-view { width: 440px; }
 .star-card header { display: flex; gap: 12px; align-items: flex-start; }
 .star-card header > div { flex: 1; min-width: 0; }
 .star-card h3 { font-size: 20px; letter-spacing: 0.04em; }
@@ -480,3 +481,42 @@ td.heat { background: rgba(127, 211, 230, calc(var(--v) * 0.35)); }
 .identity img.avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
 .identity a.signout { color: var(--muted); font-size: 10px; text-decoration: none; }
 .identity a.signout:hover { color: var(--chart); }
+
+/* Founding screen: name the empire, its colours and its flag. */
+.founding { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: radial-gradient(ellipse at 50% 40%, rgba(40, 30, 90, 0.6), rgba(4, 6, 14, 0.9)); overflow: auto; }
+.founding-card { width: min(860px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 22px 24px; display: grid; gap: 14px; background: rgba(8, 12, 24, 0.95); }
+.founding-card header h2 { font-size: 24px; letter-spacing: 0.06em; margin: 2px 0; }
+.founding-card header p { margin: 0; font-size: 13px; }
+.founding-grid { display: grid; grid-template-columns: 220px 1fr; gap: 22px; align-items: start; }
+.founding-preview { position: sticky; top: 0; display: grid; gap: 6px; justify-items: center; text-align: center; padding: 16px 10px; border: 1px solid var(--line); border-radius: 6px; background: rgba(12, 19, 38, 0.7); }
+.founding-preview h3 { font-size: 18px; letter-spacing: 0.04em; margin: 8px 0 0; overflow-wrap: anywhere; }
+.founding-preview p { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.founding-form { display: grid; gap: 12px; min-width: 0; }
+.founding-field { display: grid; gap: 6px; }
+.founding-field .row { display: flex; gap: 8px; align-items: center; }
+.founding .input { flex: 1; min-width: 0; background: #050a14; border: 1px solid var(--line); color: var(--text); padding: 8px 10px; border-radius: 4px; font: 14px var(--font-body, inherit); }
+.founding select.input { flex: 0 0 auto; }
+.founding .input:focus { outline: 1px solid var(--brass); }
+.founding footer { display: flex; justify-content: flex-end; gap: 8px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.15); padding: 0; cursor: pointer; }
+.swatches.small .swatch { width: 20px; height: 20px; }
+.swatch.active { border-color: #fff; box-shadow: 0 0 0 2px var(--brass); }
+.flag-tiles { display: flex; flex-wrap: wrap; gap: 6px; }
+.flag-tile { padding: 3px; border: 1px solid var(--line); border-radius: 4px; background: transparent; cursor: pointer; line-height: 0; }
+.flag-tile.active { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass); }
+.flag-colors { display: grid; grid-template-columns: 56px 1fr; gap: 6px 10px; align-items: center; }
+.flag-wrap { display: inline-flex; line-height: 0; }
+.flag-wrap svg { border-radius: 2px; }
+@media (max-width: 640px) {
+  .founding-grid { grid-template-columns: 1fr; }
+  .founding-preview { position: static; }
+}
+.empire-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; margin-left: 8px; background: transparent; border: 1px solid var(--line); border-radius: 4px; border-left: 3px solid var(--empire, var(--brass)); color: var(--text); cursor: pointer; max-width: 220px; }
+.empire-chip:hover { background: var(--raise); }
+.empire-chip .empire-name { font: 600 12px var(--font-display); letter-spacing: 0.06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.empire-banner { display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 6px; background: rgba(12, 19, 38, 0.7); }
+.empire-banner > div { flex: 1; min-width: 0; }
+.empire-banner b { font: 600 15px var(--font-display); letter-spacing: 0.05em; }
+.empire-marker .flag-wrap { margin-right: 6px; vertical-align: middle; }
+@media (max-width: 900px) { .empire-chip .empire-name { display: none; } }

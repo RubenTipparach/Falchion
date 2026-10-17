@@ -1,5 +1,6 @@
 import type { EconomyState, TurnReport } from '../core/economy/Economy';
 import type { EmpireState } from '../core/empire/Empire';
+import type { EmpireIdentity } from '../core/empire/Identity';
 import type { EncounterResult } from '../core/encounters/types';
 import type { StarSystem } from '../core/galaxy/GalaxyModel';
 import type { Planet } from '../core/galaxy/Planets';
@@ -43,6 +44,8 @@ export interface GameState {
   /** Stars with a supply depot: friendly ports for resupply. */
   readonly depots: readonly string[];
   readonly playerName: string;
+  /** Name, ruler, capital, colour and flag; null until the empire is founded on the founding screen. */
+  readonly identity: EmpireIdentity | null;
   readonly lastReport: TurnReport | null;
   /** Newest first. */
   readonly dispatches: ReadonlyArray<{ readonly turn: number; readonly text: string; readonly tone?: 'good' | 'bad' }>;

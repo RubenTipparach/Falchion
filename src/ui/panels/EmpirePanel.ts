@@ -1,4 +1,5 @@
 import type { GameState } from '../../app/GameState';
+import { flagEl } from '../../render/flag';
 import type { Store } from '../../app/Store';
 import { RESOURCES } from '../../content/resources';
 import { FACTIONS, GOVERNMENTS, POLICIES, TENETS } from '../../content/society';
@@ -21,11 +22,13 @@ export class EmpirePanel extends Drawer {
   private tab: Tab = 'overview';
   private readonly tabsEl = h('div', { class: 'seg' });
   private readonly content = h('div', { class: 'empire-content' });
+  /** Flag, name and ruler, with Edit to reopen the founding screen. */
+  private readonly banner = h('div', { class: 'empire-banner' });
 
   constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly t: EconomyTables, private readonly empires: string[], private readonly thumb: (p: Planet) => string) {
     super('empire', 'Empire', 'Colonies, trade, politics, religion and espionage. Income arrives every year: one minute.');
-    this.body.append(this.tabsEl, this.content);
-    store.subscribe((s, prev) => { if (this.opened && (s.economy !== prev.economy || s.empire !== prev.empire || s.lastReport !== prev.lastReport || s.fleets !== prev.fleets || s.turn !== prev.turn || s.construction !== prev.construction)) this.render(); });
+    this.body.append(this.banner, this.tabsEl, this.content);
+    store.subscribe((s, prev) => { if (this.opened && (s.identity !== prev.identity || s.economy !== prev.economy || s.empire !== prev.empire || s.lastReport !== prev.lastReport || s.fleets !== prev.fleets || s.turn !== prev.turn || s.construction !== prev.construction)) this.render(); });
   }
 
   protected onOpen(): void {
@@ -33,6 +36,11 @@ export class EmpirePanel extends Drawer {
   }
 
   private render(): void {
+    const id = this.store.state.identity;
+    this.banner.hidden = !id;
+    if (id) this.banner.replaceChildren(flagEl(id.flag, 54),
+      h('div', {}, h('b', { style: `color:${id.color}` }, id.name), h('div', { class: 'small muted' }, `${id.title} ${id.ruler} · capital ${id.capital}`)),
+      h('button', { class: 'chip', onclick: () => this.actions.editEmpire() }, 'Edit'));
     this.tabsEl.replaceChildren(...TABS.map(([id, label]) => h('button', { class: `seg-btn ${this.tab === id ? 'active' : ''}`, onclick: () => { this.tab = id; this.render(); } }, label)));
     clear(this.content);
     const views: Record<Tab, () => HTMLElement[]> = {

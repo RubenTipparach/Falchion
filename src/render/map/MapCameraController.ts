@@ -2,6 +2,13 @@ import * as THREE from 'three';
 import { hexToWorld, worldToHex } from '../../core/hex/Hex';
 import { ZoomModel } from './ZoomModel';
 
+/** Where zooming in close pulls the view: a point, or a moving target to follow (a ship). */
+export interface Magnet {
+  readonly x: number;
+  readonly z: number;
+  readonly follow?: () => THREE.Vector3 | null;
+}
+
 /** Rebase once the focus drifts this far (ly) from the render origin. */
 const REBASE_DISTANCE = 256;
 /** A finger may wander this far (px) and still count as a tap or a long press. */
@@ -43,7 +50,7 @@ export class MapCameraController {
    * Optional magnet for zooming in close: returns a point (e.g. the nearest star) to
    * centre on instead of the cursor, given the ground point and the target view width.
    */
-  attractor: ((ground: THREE.Vector3, viewWidth: number) => { x: number; z: number } | null) | null = null;
+  attractor: ((ground: THREE.Vector3, viewWidth: number, touch?: boolean) => Magnet | null) | null = null;
   /** Right-click without dragging: an RTS-style command at that ground point. Right-drag still rotates. */
   onRightClick: ((world: THREE.Vector3, ray: THREE.Raycaster) => void) | null = null;
   private follow: (() => THREE.Vector3 | null) | null = null;
@@ -218,7 +225,8 @@ export class MapCameraController {
     const magnet = delta < 0 ? this.attractor?.(ground, targetWidth) : null;
     if (magnet) {
       this.zoomAnchor = null;
-      this.flyTarget = new THREE.Vector2(magnet.x, magnet.z);
+      if (magnet.follow) this.followTarget(magnet.follow);
+      else this.flyTarget = new THREE.Vector2(magnet.x, magnet.z);
       return;
     }
     // Otherwise zoom toward the cursor, easing, with the point under it held fixed.
@@ -286,6 +294,16 @@ export class MapCameraController {
     const before = this.groundAt(m0.x, m0.y);
     this.zoom.setAltitude(this.zoom.altitude * (d0 / d1) ** PINCH_POWER);
     this.place();
+    // Pinching in close: glide onto the nearest star system or ship (and keep following a ship).
+    if (d1 > d0 && before && !this.follow) {
+      const magnet = this.attractor?.(before, this.visibleWidth(), true);
+      if (magnet) {
+        if (magnet.follow) this.followTarget(magnet.follow);
+        else this.flyTarget = new THREE.Vector2(magnet.x, magnet.z);
+        return;
+      }
+    }
+    if (this.flyTarget) return; // already gliding onto a star: the fingers only zoom
     // Keep the ground that was under the fingers under them (unless following a ship: then just zoom).
     const after = this.groundAt(m1.x, m1.y);
     if (before && after && !this.follow) {

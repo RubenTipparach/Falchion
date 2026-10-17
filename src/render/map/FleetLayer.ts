@@ -184,6 +184,17 @@ export class FleetLayer implements MapLayer {
     return v.root.position.clone();
   }
 
+  /** The visible fleet nearest a galaxy point (x, z) within `maxDist` ly, and its distance. */
+  nearest(x: number, z: number, maxDist: number): { id: string; dist: number } | null {
+    let best: { id: string; dist: number } | null = null;
+    for (const [id, v] of this.visuals) {
+      if (!v.root.visible) continue;
+      const d = Math.hypot(v.root.position.x - x, v.root.position.z - z);
+      if (d <= maxDist && (!best || d < best.dist)) best = { id, dist: d };
+    }
+    return best;
+  }
+
   /** Fleet whose ship lies within `maxAngle` (radians) of a pointer ray, closest in angle. */
   pick(ray: THREE.Raycaster, maxAngle = 0.02): string | null {
     let best: string | null = null, bestA = maxAngle;

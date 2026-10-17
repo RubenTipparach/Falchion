@@ -81,9 +81,17 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     view.fleets.setTime(this.fleetTime());
     view.fleets.setFleets(this.fleetViews());
     // Zooming in close pulls the view onto the nearest star, so you land in its system.
-    view.map.controller.attractor = (ground, width) => {
+    view.map.controller.attractor = (ground, width, touch) => {
       if (width > 25) return null;
-      const star = this.deps.galaxy.nearestStar(worldToHex(ground.x, ground.z), Math.max(1, Math.round(width * 0.15)));
+      const reach = Math.max(1, Math.round(width * 0.15));
+      const star = this.deps.galaxy.nearestStar(worldToHex(ground.x, ground.z), reach);
+      // Pinch zoom (touch) also snaps to ships: whichever, star or ship, is closer to the fingers.
+      const ship = touch ? view.fleets.nearest(ground.x, ground.z, reach) : null;
+      const starDist = star ? Math.hypot(star.position.x - ground.x, star.position.z - ground.z) : Infinity;
+      if (ship && ship.dist < starDist) {
+        const at = view.fleets.positionOf(ship.id)!;
+        return { x: at.x, z: at.z, follow: () => view.fleets.positionOf(ship.id) };
+      }
       return star ? star.position : null;
     };
   }

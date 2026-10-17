@@ -1,6 +1,5 @@
-// Posts game news to one Discord channel. Zero dependencies. Two ways in (docs/discord.md):
-// a channel webhook (DISCORD_WEBHOOK_URL, no bot token needed) or the bot
-// (DISCORD_BOT_TOKEN + DISCORD_CHANNEL_ID). Inert until one is set; the webhook wins.
+// Posts game news to one Discord channel through a channel webhook. Zero dependencies.
+// Inert until DISCORD_WEBHOOK_URL is set (docs/discord.md).
 
 /** What players may report, and how it reads in the channel. */
 export const EVENT_KINDS = {
@@ -13,31 +12,22 @@ export const EVENT_KINDS = {
 export const WEBHOOK_URL = /^https:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/api(?:\/v\d+)?\/webhooks\/\d{5,25}\/[\w-]+$/;
 
 /**
- * @param {{ webhookUrl?: string, token?: string, channelId?: string, api?: string, fetchImpl?: typeof fetch, now?: () => number, perHour?: number }} opts
+ * @param {{ webhookUrl?: string, fetchImpl?: typeof fetch, now?: () => number, perHour?: number }} opts
  */
 export function createNotifier(opts) {
-  const { webhookUrl, token, channelId, api = 'https://discord.com/api/v10', fetchImpl = fetch, now = () => Date.now(), perHour = 12 } = opts;
-  const mode = webhookUrl && WEBHOOK_URL.test(webhookUrl) ? 'webhook'
-    : token && channelId && /^\d{5,25}$/.test(channelId) ? 'bot' : null;
-  const enabled = mode !== null;
+  const { webhookUrl, fetchImpl = fetch, now = () => Date.now(), perHour = 12 } = opts;
+  const enabled = Boolean(webhookUrl && WEBHOOK_URL.test(webhookUrl));
   const recent = new Map(); // player id -> timestamps of their reports this hour
 
   /** Post a message; never pings anyone. Returns { ok, status }. */
   async function post(content) {
     if (!enabled) return { ok: false, status: 0 };
     try {
-      const body = { content: String(content).slice(0, 1900), allowed_mentions: { parse: [] } };
-      const res = mode === 'webhook'
-        ? await fetchImpl(`${webhookUrl}?wait=true`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...body, username: 'Falchion' }),
-        })
-        : await fetchImpl(`${api}/channels/${channelId}/messages`, {
-          method: 'POST',
-          headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
+      const res = await fetchImpl(`${webhookUrl}?wait=true`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: String(content).slice(0, 1900), username: 'Falchion', allowed_mentions: { parse: [] } }),
+      });
       if (!res.ok) console.error(`discord notify failed: ${res.status}`);
       return { ok: res.ok, status: res.status };
     } catch (err) {
@@ -61,8 +51,6 @@ export function createNotifier(opts) {
 
   return {
     enabled,
-    /** 'webhook', 'bot', or null when off. */
-    mode,
     post,
     joined: (name) => post(`🚀 **${clean(name, 64)}** founded an empire in the galaxy.`),
     announcement: (text, by) => post(`📣 **Announcement** (${clean(by, 64)}): ${clean(text, 280)}`),

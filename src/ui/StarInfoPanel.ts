@@ -11,7 +11,8 @@ import { CLOCK } from '../app/WorldClock';
 import type { EconomyTables } from '../core/economy/Economy';
 import { exploreCost } from '../core/fleet/Logistics';
 import { countOf } from '../core/fleet/Presence';
-import { colonyView, shipsText, storesView } from './widgets';
+import { colonyView, crateLine, haulView, shipsText, storesView } from './widgets';
+import { collectWithFx } from './collectFx';
 import { clear, fmt, h } from './dom';
 import { icon } from './icons';
 
@@ -79,7 +80,7 @@ export class StarInfoPanel {
         h('button', { class: 'btn', onclick: () => this.actions.flyTo(star, true) }, icon('focus'), ' Focus'),
         !isHome ? h('button', { class: 'btn', onclick: () => this.actions.openPanel('fleets') }, icon('fleet'), ' Send fleet') : null,
         d.planets.length ? h('button', { class: 'btn primary', onclick: () => this.actions.openPanel('explore') }, icon('explore'), ' Explore') : null,
-        caches ? h('button', { class: 'btn primary collect', onclick: () => this.actions.collectResources(star) }, icon('crate'), ` Collect (${caches})`) : null,
+        caches ? h('button', { class: 'btn primary collect', onclick: (e: Event) => collectWithFx(e.currentTarget as Element, () => this.actions.collectResources(star)) }, icon('crate'), ` Collect (${caches})`) : null,
         tender ? h('button', { class: 'btn', title: 'Uses the Construction Tender: 60 CR, 40 MET', onclick: () => this.actions.buildDepot(star) }, icon('build'), ' Build supply depot') : null),
     );
   }
@@ -95,23 +96,25 @@ export class StarInfoPanel {
     const canExplore = here.some((g) => g.stores.supply >= cost);
     const ark = here.some((g) => countOf(g.ships, 'colony-ark') > 0);
     const cache = this.q.pendingCaches(star).find((c) => c.planet.id === p.id);
+    const portrait = h('img', { class: 'planet-portrait', src: this.thumb(p), alt: `${p.name}, ${biome?.name}` });
     this.el.append(
       h('header', {},
         h('div', {}, h('span', { class: 'eyebrow' }, `${star.name} · planet ${p.index + 1} of ${star.planetCount}`), h('h3', {}, p.name),
           h('p', { class: 'muted' }, `${biome?.name ?? p.biome} world · size ${p.size}`)),
         h('button', { class: 'icon-btn', 'aria-label': 'Back to system', title: 'Back to system (Esc)', onclick: () => this.actions.focusPlanet(star, null) }, icon('close'))),
-      h('img', { class: 'planet-portrait', src: this.thumb(p), alt: `${p.name}, ${biome?.name}` }),
+      portrait,
       h('dl', {},
         !colony ? h('dt', {}, 'If colonised') : '', !colony ? h('dd', {}, yields.length ? yields.map(([r, n]) => `+${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`).join('  ') + ' / yr' : '—') : '',
-        h('dt', {}, 'Survey'), h('dd', {}, colony ? 'Settled' : done ? `${done.kind} · ${done.success ? 'success' : 'failed'}` : 'Unexplored')),
+        h('dt', {}, 'Survey'), h('dd', {}, colony ? 'Settled' : done ? `${done.kind} · ${done.success ? 'success' : 'failed'}` : 'Unexplored'),
+        ...(done?.success && !colony ? [h('dt', {}, 'Resources'), h('dd', {}, haulView(this.q.cacheOf(p)), s.collectedCaches.includes(p.id) ? h('span', { class: 'muted' }, ' · collected') : '')] : []),
+        ...(done?.crate ? [h('dt', {}, 'Loot crate'), h('dd', {}, crateLine(done.crate, s.openedCrates.includes(p.id)))] : [])),
       done ? h('p', { class: 'small muted' }, done.narrative) : '',
       colony ? h('div', {}, h('span', { class: 'eyebrow' }, colony.capital ? 'Capital' : 'Your colony'), colonyView(colony, s.empire.materials, (b) => this.actions.build(p.id, b), this.tables, this.q.jobs(p.id), s.turn)) : '',
       !done && !colony && !canExplore ? h('p', { class: 'small red' }, `Exploring needs a ship on station here with ${cost} supply.`) : '',
       h('div', { class: 'actions' },
         !done && !colony ? h('button', { class: 'btn primary', disabled: !canExplore, onclick: () => this.actions.explore(p) }, icon('explore'), ` Explore · ${cost} supply`) : '',
-        cache ? h('button', { class: 'btn primary collect', onclick: () => this.actions.collectResources(star) }, icon('crate'), ' Collect resources') : '',
+        cache || crateWaiting ? h('button', { class: 'btn primary collect', title: 'Gather what this world holds', onclick: () => collectWithFx(portrait, () => this.actions.collectPlanet(p)) }, icon('crate'), ' Collect') : '',
         done && !colony && p.biome !== 'gas' ? h('button', { class: 'btn', disabled: !ark, title: ark ? 'Uses one Colony Ark' : 'Needs a Colony Ark on station here', onclick: () => this.actions.settle(p) }, icon('build'), ' Settle') : '',
-        crateWaiting ? h('button', { class: 'btn primary', onclick: () => this.actions.collectCrate(p.id) }, icon('crate'), ' Open crate') : '',
         h('button', { class: 'btn', onclick: () => this.actions.focusPlanet(star, null) }, 'Back to system')),
     );
   }

@@ -7,8 +7,9 @@ import type { Job } from '../core/construction/Construction';
 import { formatDuration } from '../core/time/WorldTime';
 import { CLOCK } from '../app/WorldClock';
 import type { FleetGroup } from './GameActions';
-import { h } from './dom';
-import { icon } from './icons';
+import { fmt, h } from './dom';
+import { icon, resourceIcon } from './icons';
+import type { Card, LootCrate } from '../core/encounters/types';
 
 const nameOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)?.name ?? id;
 
@@ -54,4 +55,25 @@ export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>,
       ...Array.from({ length: Math.max(0, free) }, () => h('span', { class: 'building empty' }, 'Empty slot'))),
     free > 0 ? h('div', { class: 'build-menu' }, ...BUILDINGS.filter((b) => !(b.unique && (have.includes(b.id) || pending.some((j) => j.item === b.id)))).map((b) =>
       h('button', { class: 'btn', disabled: !affordable(b), title: b.blurb, onclick: () => build(b.id) }, icon('build'), ` ${b.name}`, h('small', {}, `${costText(b)} · ${formatDuration(b.years, CLOCK)} · ${b.blurb}`)))) : h('p', { class: 'small muted' }, 'All building slots used.'));
+}
+
+/** Resources as icon + amount chips, e.g. what a planet's cache holds. */
+export function haulView(haul: Partial<Record<Resource, number>>): HTMLElement {
+  const items = Object.entries(haul).filter(([, n]) => n) as Array<[Resource, number]>;
+  return h('span', { class: 'haul-chips' }, ...(items.length
+    ? items.map(([r, n]) => h('span', { class: 'haul-chip', title: RESOURCES.find((x) => x.id === r)?.name ?? r }, resourceIcon(r, 14), `+${fmt(n)} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`))
+    : ['—']));
+}
+
+/** A loot crate in one line: its tier and size until opened, then what it gave. */
+export function crateLine(crate: LootCrate, opened: boolean): string {
+  if (!opened) return `${crate.tier} crate · ${crate.cards.length} card${crate.cards.length === 1 ? '' : 's'} · Collect to open`;
+  const count = (t: Card['type']) => crate.cards.filter((c) => c.type === t).length;
+  const parts = [
+    count('shards') ? `${count('shards')} research shard card${count('shards') > 1 ? 's' : ''}` : '',
+    count('chassis') ? `${count('chassis')} ship blueprint${count('chassis') > 1 ? 's' : ''}` : '',
+    count('part') ? `${count('part')} part${count('part') > 1 ? 's' : ''}` : '',
+    count('materials') ? `${count('materials')} material card${count('materials') > 1 ? 's' : ''}` : '',
+  ].filter(Boolean);
+  return `${crate.tier} crate opened · ${parts.join(', ')}`;
 }

@@ -1,6 +1,6 @@
 import type { AssaultResult, BattleResult, Squadron } from '../core/combat/Combat';
 import type { Planet } from '../core/galaxy/Planets';
-import type { Haul } from '../core/encounters/PlanetCache';
+import type { Collected, Haul } from '../core/encounters/PlanetCache';
 import type { StarSystem } from '../core/galaxy/GalaxyModel';
 import type { ShipDesign } from '../core/ships/ShipDesign';
 
@@ -110,15 +110,15 @@ export interface GameActions {
   /** Construct a building on one of your colonies. */
   build(planetId: string, buildingId: string): void;
   explore(planet: Planet): void;
-  collectCrate(planetId: string): void;
+  collectCrate(planetId: string): Collected | null;
   /** Explore every unexplored planet in a system. */
   exploreAll(star: StarSystem): void;
   /** Open every unopened loot crate. */
   collectAllLoot(): void;
   /** Open every crate and collect the resource caches of newly explored planets in a system. */
   /** Collect one explored planet's resource cache and loot crate. */
-  collectPlanet(planet: Planet): void;
-  collectResources(star: StarSystem): Haul | null;
+  collectPlanet(planet: Planet): Collected | null;
+  collectResources(star: StarSystem): Collected | null;
   research(nodeId: string): void;
   setFocus(nodeId: string | null): void;
   grantShards(nodeId: string, sourceId: string, amount: number): void;

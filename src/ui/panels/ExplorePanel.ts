@@ -14,6 +14,7 @@ import { exploreCost } from '../../core/fleet/Logistics';
 import { countOf } from '../../core/fleet/Presence';
 import { locateButton, storesView } from '../widgets';
 import { clear, fmt, h } from '../dom';
+import { collectWithFx } from '../collectFx';
 import { icon, IconName } from '../icons';
 
 
@@ -56,7 +57,7 @@ export class ExplorePanel extends Drawer {
         h('button', { class: 'btn', disabled: !unexplored.length || !supply, title: `Needs ${need} supply in total`, onclick: () => this.actions.exploreAll(star) }, icon('explore'),
           unexplored.length ? ` Explore all ${unexplored.length} (${need} supply)` : ' All planets explored'),
         // Collecting happens on each planet below; this gathers every world here at once.
-        caches.length + unopened > 1 ? h('button', { class: 'btn', title: haulText, onclick: () => this.actions.collectResources(star) }, icon('crate'), ' Collect all') : ''),
+        caches.length + unopened > 1 ? h('button', { class: 'btn', title: haulText, onclick: (e: Event) => collectWithFx(e.currentTarget as Element, () => this.actions.collectResources(star)) }, icon('crate'), ' Collect all') : ''),
       caches.length ? h('p', { class: 'small haul' }, 'Waiting: ', haulText, unopened ? ` · ${unopened} crate${unopened > 1 ? 's' : ''}` : '') : '',
     );
     if (!planets.length) this.body.append(h('p', {}, 'No planets in this system.'));
@@ -104,7 +105,7 @@ export class ExplorePanel extends Drawer {
       ...Object.entries(cache ?? {}).map(([r, n]) => `+${fmt(n!)} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`),
       ...(crate ? [`${s.explored[p.id].crate!.tier} crate`] : []),
     ].join(' · ');
-    return h('button', { class: 'btn primary collect', title: `Collect ${what}`, onclick: () => this.actions.collectPlanet(p) }, icon('crate'), ' Collect');
+    return h('button', { class: 'btn primary collect', title: `Collect ${what}`, onclick: (e: Event) => collectWithFx(e.currentTarget as Element, () => this.actions.collectPlanet(p)) }, icon('crate'), ' Collect');
   }
 
   private crateView(planetId: string, tier: string, cards: readonly Card[]): HTMLElement {

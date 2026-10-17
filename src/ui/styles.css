@@ -583,3 +583,15 @@ button.chat-mention:hover { filter: brightness(1.25); }
 .survey-row:hover { background: var(--raise); }
 .survey-row small { justify-self: end; }
 .survey-num { width: 18px; height: 18px; border-radius: 9px; border: 1px solid var(--brass); font: 600 10px/16px var(--font-mono); text-align: center; }
+
+/* Collect: loot bursts out of the planet and is sucked up into the top bar. */
+.loot-fly { position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 70%); filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 2px #fff); will-change: transform, opacity; }
+.loot-fly svg { width: 20px; height: 20px; }
+.loot-gain { animation: loot-gain 0.35s ease-out; }
+@keyframes loot-gain { 0% { transform: scale(1.18); background: rgba(230, 180, 80, 0.28); box-shadow: 0 0 18px rgba(230, 180, 80, 0.55); } 100% { transform: none; background: transparent; box-shadow: none; } }
+.loot-plus { position: fixed; z-index: 1000; pointer-events: none; transform: translateX(-50%); font: 600 12px var(--font-mono); color: var(--good); text-shadow: 0 0 8px rgba(110, 231, 168, 0.6); animation: loot-plus 1.4s ease-out forwards; }
+@keyframes loot-plus { 0% { opacity: 0; transform: translate(-50%, 6px); } 15% { opacity: 1; transform: translate(-50%, 0); } 70% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, 14px); } }
+.haul-chips { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }
+.haul-chip { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); }
+@media (prefers-reduced-motion: reduce) { .loot-gain, .loot-plus { animation-duration: 0.01s; } }

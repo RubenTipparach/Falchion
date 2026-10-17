@@ -29,7 +29,7 @@ export class TopBar {
     this.viewLabel.className = 'tab-label';
     this.viewBtn = h('button', { class: 'tab', title: 'Toggle hex / galaxy view (G)', onclick: () => actions.toggleView() }, icon('galaxy'), this.viewLabel);
     const tab = (id: PanelId, label: string, ic: IconName) =>
-      h('button', { class: 'tab', title: label, 'aria-label': label, onclick: () => actions.openPanel(id) }, icon(ic), h('span', { class: 'tab-label' }, label));
+      h('button', { class: 'tab', 'data-tab': id, title: label, 'aria-label': label, onclick: () => actions.openPanel(id) }, icon(ic), h('span', { class: 'tab-label' }, label));
     this.tabs = { shipyard: tab('shipyard', 'Shipyard', 'shipyard'), research: tab('research', 'Research', 'research'), empire: tab('empire', 'Empire', 'empire'), war: tab('war', 'War Room', 'battle'), explore: tab('explore', 'Explore', 'explore'), fleets: tab('fleets', 'Fleets', 'fleet') };
     this.tabs.explore.append(this.lootBadge);
     this.empireBtn = h('button', { class: 'empire-chip', title: 'Your empire: click to change its name, colours and flag', onclick: () => actions.editEmpire() });
@@ -114,7 +114,7 @@ export class TopBar {
     this.stats.replaceChildren(...items.map(([label, r]) => {
       const cap = caps[r];
       const full = cap !== undefined && m[r] >= cap;
-      return h('div', { class: `stat ${full ? 'full' : ''}`, title: cap !== undefined ? `${label}: ${fmt(m[r])} of ${fmt(cap)} storage${full ? ' (full: income is lost)' : ''}` : label, 'aria-label': `${label} ${fmt(m[r])}` },
+      return h('div', { class: `stat ${full ? 'full' : ''}`, 'data-resource': r, 'data-value': m[r], title: cap !== undefined ? `${label}: ${fmt(m[r])} of ${fmt(cap)} storage${full ? ' (full: income is lost)' : ''}` : label, 'aria-label': `${label} ${fmt(m[r])}` },
         resourceIcon(r, 18), h('span', { class: 'stat-value' }, fmt(m[r])));
     }));
   }

@@ -7,7 +7,8 @@ import { SHIP_CLASSES, ShipClassDef } from '../content/shipClasses';
 import { CombatBonuses, resolveAssault, resolveBattle, Squadron } from '../core/combat/Combat';
 import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn } from '../core/economy/Economy';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
-import { addHaul, Haul, planetCache } from '../core/encounters/PlanetCache';
+import { addHaul, Collected, crateMaterials, Haul, planetCache } from '../core/encounters/PlanetCache';
+import type { Card } from '../core/encounters/types';
 import { arrivalTurn, hexAt, planMovement, retime, travelTurns } from '../core/fleet/Fleet';
 import { catchUpTicks, formatDuration } from '../core/time/WorldTime';
 import { capacity, clampStores, exploreCost, firepower, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
@@ -404,11 +405,12 @@ export class EmpireSim {
     if (n < pending.length) this.dispatch(`Explored ${n} of ${pending.length} planets in ${star.name}: out of supply. Return home to resupply, or bring survey ships.`, n ? undefined : 'bad');
   }
 
-  collectCrate(planetId: string): void {
+  collectCrate(planetId: string): Collected | null {
     const s = this.state;
     const crate = s.explored[planetId]?.crate;
-    if (!crate || s.openedCrates.includes(planetId)) return;
+    if (!crate || s.openedCrates.includes(planetId)) return null;
     this.deps.store.update({ empire: applyCrate(s.empire, crate, this.deps.tree), openedCrates: [...s.openedCrates, planetId] });
+    return { haul: crateMaterials(crate.cards), cards: crate.cards };
   }
 
   unopenedCrates = (): string[] =>
@@ -428,7 +430,7 @@ export class EmpireSim {
 
   cacheOf = (planet: Planet): Haul => planetCache(planet, this.deps.galaxy.params.seed);
 
-  collectResources(star: StarSystem): Haul | null {
+  collectResources(star: StarSystem): Collected | null {
     const caches = this.pendingCaches(star);
     const crates = this.unopenedCrates();
     if (!caches.length && !crates.length) return null;
@@ -439,9 +441,11 @@ export class EmpireSim {
     const materials = { ...empire.materials };
     for (const [r, n] of Object.entries(haul)) materials[r as Resource] += n!;
     empire = { ...empire, materials };
+    const cards: Card[] = [];
     for (const id of crates) {
       const crate = s.explored[id].crate!;
-      for (const c of crate.cards) if (c.type === 'materials') haul = addHaul(haul, { [c.material]: c.amount });
+      haul = addHaul(haul, crateMaterials(crate.cards));
+      cards.push(...crate.cards);
       empire = applyCrate(empire, crate, this.deps.tree);
     }
     this.deps.store.update({
@@ -451,25 +455,25 @@ export class EmpireSim {
     });
     const text = Object.entries(haul).map(([r, n]) => `+${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`).join('  ');
     this.dispatch(`Collected from ${star.name}: ${text || 'cards'}${crates.length ? ` · ${crates.length} crate${crates.length > 1 ? 's' : ''} opened` : ''}`, 'good');
-    return haul;
+    return { haul, cards };
   }
 
   /**
    * Collect what one explored planet holds: its one-time resource cache and its loot crate.
    * The player's acknowledgement that they got it.
    */
-  collectPlanet(planet: Planet): void {
+  collectPlanet(planet: Planet): Collected | null {
     const s = this.state;
     const star = this.starById(planet.starId);
     const cache = star ? this.pendingCaches(star).find((c) => c.planet.id === planet.id)?.cache : undefined;
     const crate = s.explored[planet.id]?.crate && !s.openedCrates.includes(planet.id) ? s.explored[planet.id].crate! : null;
-    if (!cache && !crate) return;
+    if (!cache && !crate) return null;
     let haul: Haul = cache ?? {};
     const materials = { ...s.empire.materials };
     for (const [r, n] of Object.entries(haul)) materials[r as Resource] += n!;
     let empire = { ...s.empire, materials };
     if (crate) {
-      for (const c of crate.cards) if (c.type === 'materials') haul = addHaul(haul, { [c.material]: c.amount });
+      haul = addHaul(haul, crateMaterials(crate.cards));
       empire = applyCrate(empire, crate, this.deps.tree);
     }
     this.deps.store.update({
@@ -479,6 +483,7 @@ export class EmpireSim {
     });
     const text = Object.entries(haul).map(([r, n]) => `+${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`).join('  ');
     this.dispatch(`Collected from ${planet.name}: ${text || 'cards'}${crate ? ' · crate opened' : ''}`, 'good');
+    return { haul, cards: crate?.cards ?? [] };
   }
 
   collectAllLoot(): void {

@@ -1,8 +1,15 @@
+import type { Card } from './types';
 import { BIOME_YIELDS, Resource } from '../../content/resources';
 import type { Planet } from '../galaxy/Planets';
 import { Rng, hashSeed } from '../rng/Rng';
 
 export type Haul = Partial<Record<Resource, number>>;
+
+/** What one collection gathered: materials (cache plus material cards) and every crate card. */
+export interface Collected {
+  readonly haul: Haul;
+  readonly cards: readonly Card[];
+}
 
 /**
  * One-time resource cache found on a newly explored planet. Deterministic per
@@ -23,5 +30,12 @@ export function planetCache(planet: Planet, galaxySeed: number): Haul {
 export function addHaul(a: Haul, b: Haul): Haul {
   const out: Haul = { ...a };
   for (const [r, n] of Object.entries(b)) out[r as Resource] = (out[r as Resource] ?? 0) + n!;
+  return out;
+}
+
+/** The materials a crate's cards add. */
+export function crateMaterials(cards: readonly Card[]): Haul {
+  let out: Haul = {};
+  for (const c of cards) if (c.type === 'materials') out = addHaul(out, { [c.material]: c.amount });
   return out;
 }

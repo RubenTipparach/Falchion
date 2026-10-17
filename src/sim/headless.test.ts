@@ -12,7 +12,7 @@ import { TechTree } from '../core/research/TechTree';
 import type { GameState } from '../app/GameState';
 import { SaveGame } from '../app/SaveGame';
 import { Store } from '../app/Store';
-import { createWorld, tradePartners } from '../app/World';
+import { createWorld } from '../app/World';
 import { EmpireSim } from './EmpireSim';
 import { advanceSave } from './headless';
 import { newEmpireState } from './newEmpireState';
@@ -21,10 +21,9 @@ const ID = '123456789012345678';
 const galaxy = new GalaxyModel();
 const tree = new TechTree(TECH_NODES, SHARD_SOURCES);
 const world = createWorld(galaxy, ID);
-const partners = tradePartners(world, world.home);
 
 function freshSave(t0: number, patch: Partial<GameState> = {}) {
-  const state = { ...newEmpireState({ galaxy, tree, world, partners, playerName: 'Ruben', t0 }), ...patch };
+  const state = { ...newEmpireState({ galaxy, tree, world, playerName: 'Ruben', t0 }), ...patch };
   const save = new SaveGame(galaxy.params.seed, null).snapshot(state);
   delete save.tab;
   return { state, save };
@@ -58,7 +57,7 @@ describe('the server plays empires forward while their owners are away', () => {
     expect(advanceSave(save, { id: ID, name: 'Ruben' }, 3_025)!.save).toEqual(server.save);
     // The client: the same state in a Store, advanced by EmpireSim directly.
     const store = new Store<GameState>(state);
-    const economy = { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, partners, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf };
+    const economy = { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf };
     new EmpireSim({ store, galaxy, tree, encounters: new EncounterResolver(DEFAULT_LOOT_TABLES, tree), world, economy }).advanceTo(3_025);
     const client = new SaveGame(galaxy.params.seed, null).snapshot(store.state);
     delete client.tab;

@@ -1,17 +1,14 @@
 import { BIOME_YIELDS, RESOURCES, Resource } from '../../content/resources';
 import type { BuildingDef } from '../../content/buildings';
 import type { ShipClassDef } from '../../content/shipClasses';
-import type { Effects, FactionId, GovernmentDef, PolicyDef, TradePartner } from '../../content/society';
+import type { Effects, FactionId, GovernmentDef, PolicyDef } from '../../content/society';
 import { FACTIONS } from '../../content/society';
 import { Rng, hashSeed } from '../rng/Rng';
+import { FREIGHTER } from './Trade';
 import type { TechTree } from '../research/TechTree';
 import type { ResearchState } from '../research/types';
 
 export type Stockpile = Readonly<Record<Resource, number>>;
-
-export interface TradeRoute {
-  readonly partnerId: string;
-}
 
 export interface Faith {
   readonly name: string;
@@ -27,7 +24,6 @@ export interface EconomyState {
   readonly roster: Readonly<Record<string, number>>;
   readonly government: string;
   readonly policies: readonly string[];
-  readonly routes: readonly TradeRoute[];
   readonly faith: Faith | null;
   readonly spyNetworks: readonly string[];
   /** Node that science shards go to each turn. */
@@ -55,7 +51,6 @@ export interface EconomyTables {
   readonly governments: readonly GovernmentDef[];
   readonly policies: readonly PolicyDef[];
   readonly tenets: ReadonlyArray<{ id: string; effects: Effects }>;
-  readonly partners: readonly TradePartner[];
   readonly alienTech: Readonly<Record<string, readonly string[]>>;
   readonly buildings?: readonly BuildingDef[];
   /** Storage caps; omit for unlimited storage. */
@@ -77,7 +72,7 @@ export function capsOf(e: Pick<EconomyState, 'colonies'>, t: EconomyTables): Par
   const caps: Partial<Record<Resource, number>> = { ...s.base };
   const extra = e.colonies.reduce((n, c) => n + (c.buildings ?? []).reduce((m, id) => m + (t.buildings?.find((b) => b.id === id)?.storage ?? 0), 0), 0);
   for (const r of Object.keys(caps) as Resource[]) {
-    if (MINERALS.has(r) || r === 'food') caps[r] = caps[r]! + e.colonies.length * s.perColony + extra;
+    if (MINERALS.has(r) || r === 'food' || r === 'goods') caps[r] = caps[r]! + e.colonies.length * s.perColony + extra;
   }
   if (caps.credits !== undefined) caps.credits += e.colonies.length * s.creditsPerColony;
   return caps;
@@ -100,8 +95,13 @@ export function upkeepOf(e: Pick<EconomyState, 'roster' | 'policies'>, t: Econom
  * work with a ship on location. Omit to assume every ship is in place.
  */
 export interface Presence {
-  /** Mining crews and the minerals present where each one is stationed. */
-  readonly miners: ReadonlyArray<{ readonly classId: string; readonly count: number; readonly deposits: readonly Resource[] }>;
+  /**
+   * Mining crews. With `pools`, each mines the asteroid pool it is at (`pool`: a system's fields
+   * of its resource); without, `deposits` lists what it can mine there (no limit).
+   */
+  readonly miners: ReadonlyArray<{ readonly classId: string; readonly count: number; readonly deposits?: readonly Resource[]; readonly pool?: string }>;
+  /** What each asteroid pool holds this year: mining draws it down. */
+  readonly pools?: Readonly<Record<string, number>>;
   /** Empires with at least one of our ships inside their territory. */
   readonly reached: readonly string[];
 }
@@ -139,7 +139,7 @@ export function factionApproval(e: EconomyState, t: EconomyTables, research: Res
     let v = 50 + stability + sumEff(effs, (x) => x.approval?.[f.id]);
     if (f.id === 'militarists') v += Math.min(20, combatShips(e, t) * 2);
     if (f.id === 'industrialists') v += Math.min(20, miningShips(e, t) * 2);
-    if (f.id === 'merchants') v += Math.min(20, e.routes.length * 5);
+    if (f.id === 'merchants') v += Math.min(20, (e.roster[FREIGHTER] ?? 0) * 5);
     if (f.id === 'faithful' && e.faith) v += 10;
     out[f.id] = Math.max(0, Math.min(100, Math.round(v)));
   }
@@ -158,22 +158,12 @@ function combatShips(e: EconomyState, t: EconomyTables): number {
   return t.classes.filter((c) => c.role === 'combat' || c.role === 'capital').reduce((s, c) => s + (e.roster[c.id] ?? 0), 0);
 }
 
-export function maxRoutes(e: EconomyState, t: EconomyTables, research: ResearchState): number {
-  return Math.min(e.roster['bulk-freighter'] ?? 0, 2 + bonusOf(t.tree, research, 'routes'));
-}
-
 export function maxPolicies(t: EconomyTables, research: ResearchState): number {
   return 2 + bonusOf(t.tree, research, 'policies');
 }
 
 export function maxSpies(t: EconomyTables, research: ResearchState): number {
   return 1 + bonusOf(t.tree, research, 'spies');
-}
-
-/** Credits per turn for one route. Falls off with distance in light years. */
-export function routeValue(p: TradePartner, tradePct: number): number {
-  const base = p.kind === 'player' ? 40 : p.kind === 'alien' ? 30 : 18;
-  return Math.round((base / (1 + p.distance / 300)) * (1 + tradePct / 100));
 }
 
 /** Output of one colony per turn: biome yields plus its buildings. */
@@ -194,7 +184,7 @@ export function colonyYield(c: Colony, t: EconomyTables): { income: Partial<Reco
   return { income, science };
 }
 
-const MINERALS = new Set<Resource>(['metals', 'volatiles', 'ice', 'crystals', 'rareEarths', 'exotics', 'darkMatter']);
+const MINERALS = new Set<Resource>(['metals', 'gases', 'crystals']);
 
 export function sciencePerTurn(e: EconomyState, t: EconomyTables, research: ResearchState): number {
   const labs = e.colonies.reduce((s, c) => s + colonyYield(c, t).science, 0);
@@ -209,7 +199,10 @@ export function tradePctOf(e: EconomyState, t: EconomyTables, research: Research
  * Resolve one turn of the economy. Pure: returns the new state, updated research
  * and a report. Deterministic given (state, research, turn).
  */
-export function resolveTurn(e: EconomyState, research: ResearchState, turn: number, t: EconomyTables, presence?: Presence): { economy: EconomyState; research: ResearchState; report: TurnReport } {
+/** Asteroids give this many times the old planet rate per mining ship. */
+export const ASTEROID_RATE = 3;
+
+export function resolveTurn(e: EconomyState, research: ResearchState, turn: number, t: EconomyTables, presence?: Presence): { economy: EconomyState; research: ResearchState; report: TurnReport; mined: Record<string, number> } {
   const effs = activeEffects(e, t);
   const income: Partial<Record<Resource, number>> = {};
   const add = (r: Resource, n: number) => (income[r] = (income[r] ?? 0) + n);
@@ -229,30 +222,30 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   // Mining ships
   const miningPct = sumEff(effs, (x) => x.miningPct);
   const perShip = 3 + bonusOf(t.tree, research, 'mining');
-  const crews = presence?.miners ?? t.classes.filter((c) => c.mines).map((c) => ({ classId: c.id, count: e.roster[c.id] ?? 0, deposits: [c.mines!] }));
+  const crews: Presence['miners'] = presence?.miners ?? t.classes.filter((c) => c.mines).map((c) => ({ classId: c.id, count: e.roster[c.id] ?? 0, deposits: [c.mines!] }));
   let idleMiners = 0;
+  const pools = presence?.pools ? { ...presence.pools } : null;
+  const mined: Record<string, number> = {};
   for (const crew of crews) {
     const c = t.classes.find((x) => x.id === crew.classId);
     if (!c?.mines || !crew.count) continue;
-    if (!crew.deposits.includes(c.mines)) { idleMiners += crew.count; continue; }
-    add(c.mines, Math.round(crew.count * perShip * (1 + miningPct / 100)));
+    if (pools) {
+      // Asteroids: faster than planets were, but never more than the fields hold.
+      const left = crew.pool ? pools[crew.pool] ?? 0 : 0;
+      if (left <= 0) { idleMiners += crew.count; continue; }
+      const take = Math.min(left, Math.round(crew.count * perShip * (c.rate ?? 1) * ASTEROID_RATE * (1 + miningPct / 100)));
+      pools[crew.pool!] = left - take;
+      mined[crew.pool!] = (mined[crew.pool!] ?? 0) + take;
+      add(c.mines, take);
+      continue;
+    }
+    if (!crew.deposits?.includes(c.mines)) { idleMiners += crew.count; continue; }
+    add(c.mines, Math.round(crew.count * perShip * (c.rate ?? 1) * (1 + miningPct / 100)));
   }
-  if (idleMiners) lines.push(`${idleMiners} mining ship${idleMiners === 1 ? '' : 's'} idle: nothing they can mine where they are`);
+  if (idleMiners) lines.push(pools
+    ? `${idleMiners} mining ship${idleMiners === 1 ? '' : 's'} idle: no asteroid field of their kind where they are, or it is mined out`
+    : `${idleMiners} mining ship${idleMiners === 1 ? '' : 's'} idle: nothing they can mine where they are`);
   const reached = (empire: string) => !presence || presence.reached.includes(empire);
-
-  // Trade
-  const tradePct = tradePctOf(e, t, research);
-  const active = e.routes.slice(0, maxRoutes(e, t, research));
-  let tradeTotal = 0;
-  for (const r of active) {
-    const p = t.partners.find((x) => x.id === r.partnerId);
-    if (p) tradeTotal += routeValue(p, tradePct);
-  }
-  if (tradeTotal) {
-    add('credits', tradeTotal);
-    lines.push(`Trade: ${active.length} route${active.length === 1 ? '' : 's'} earned ${tradeTotal} credits`);
-  }
-  if (e.routes.length > active.length) lines.push(`${e.routes.length - active.length} trade route(s) idle: build more Bulk Freighters`);
 
   // Government, policies, tenets
   for (const x of effs) for (const [r, n] of Object.entries(x.income ?? {})) add(r as Resource, n!);
@@ -322,7 +315,7 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
     lines.push(`Spies in ${target} stole ${espionage} shards of ${t.tree.node(nodeId).name}`);
   }
 
-  return { economy: { ...e, stock, faith }, research: res, report: { income, lines, science } };
+  return { economy: { ...e, stock, faith }, research: res, report: { income, lines, science }, mined };
 }
 
 /** Can the empire pay a cost? */

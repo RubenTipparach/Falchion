@@ -14,7 +14,8 @@ import { countOf } from '../core/fleet/Presence';
 import { colonyView, crateLine, haulView, shipsText, storesView } from './widgets';
 import { collectWithFx } from './collectFx';
 import { clear, fmt, h, touchFirst } from './dom';
-import { icon } from './icons';
+import { icon, resourceIcon } from './icons';
+import { FREIGHTER } from '../core/economy/Trade';
 
 export interface StarDetails {
   readonly address: string;
@@ -82,8 +83,19 @@ export class StarInfoPanel {
         !isHome ? h('button', { class: 'btn', onclick: () => this.actions.openPanel('fleets') }, icon('fleet'), ' Send fleet') : null,
         d.planets.length ? h('button', { class: 'btn primary', onclick: () => this.actions.openPanel('explore') }, icon('explore'), ' Explore') : null,
         caches ? h('button', { class: 'btn primary collect', onclick: (e: Event) => collectWithFx(e.currentTarget as Element, () => this.actions.collectResources(star)) }, icon('crate'), ` Collect (${caches})`) : null,
-        tender ? h('button', { class: 'btn', title: 'Uses the Construction Tender: 60 CR, 40 MET', onclick: () => this.actions.buildDepot(star) }, icon('build'), ' Build supply depot') : null),
+        tender ? h('button', { class: 'btn', title: 'Uses the Construction Tender: 60 CR, 40 MET', onclick: () => this.actions.buildDepot(star) }, icon('build'), ' Build supply depot') : null,
+        this.tradeButton(star)),
     );
+  }
+
+  /** At a market: send free freighters (docked first) on a trade run here. */
+  private tradeButton(star: StarSystem): HTMLElement | null {
+    const market = this.q.marketAt(star);
+    if (!market) return null;
+    const free = this.q.groups().find((g) => g.ships.some((x) => x.classId === FREIGHTER && x.count > 0) && !g.orders?.trade);
+    if (!free) return null;
+    return h('button', { class: 'btn', title: `Freighters load trade goods at your nearest colony and sell them at ${star.name}, again and again`, onclick: () => this.actions.tradeRun(free.id, star) },
+      resourceIcon('goods', 16), free.id === 'dock' ? ' Trade run (dock freighters)' : ` Trade run (${free.name})`);
   }
 
   private renderPlanet(s: GameState, star: StarSystem, p: Planet): void {
@@ -154,6 +166,7 @@ export class StarInfoPanel {
         h('div', { class: 'row orders' },
           this.orderChip(group, 'autoExplore', 'Auto-explore'),
           this.orderChip(group, 'autoReturn', 'Return to resupply')),
+        this.cargoView(group, info.at),
         info.surveying ? h('p', { class: 'small' }, `Surveying ${info.surveying.name} this year`) : '',
         info.plan.length ? h('div', { class: 'survey-plan' }, h('span', { class: 'eyebrow' }, 'Survey route'),
           ...info.plan.map((st, i) => {
@@ -172,6 +185,26 @@ export class StarInfoPanel {
         info.mine && !(info.at && info.at.id === this.store.state.home.id) ? h('button', { class: 'btn', onclick: () => this.actions.returnHome(fleet.id) }, icon('home'), ' Return home') : '',
         info.mine ? h('button', { class: 'btn', onclick: () => this.actions.openPanel('fleets') }, icon('fleet'), ' Fleets') : ''),
     );
+  }
+
+  /** Freighters: goods aboard, the trade run, and loading or selling where the fleet is. */
+  private cargoView(g: FleetGroup, at: StarSystem | null): HTMLElement | string {
+    const cap = this.q.cargoCapacity(g.ships);
+    if (!cap) return '';
+    const run = g.orders?.trade;
+    const to = run && this.q.starById(run.to), from = run && this.q.starById(run.from);
+    const loadedAt = g.cargoFrom ? this.q.starById(g.cargoFrom) : null;
+    const market = at && this.q.marketAt(at);
+    const canLoad = !!at && this.q.isOwned(at) && (g.cargo ?? 0) < cap && this.store.state.empire.materials.goods > 0;
+    const sale = market && loadedAt && g.cargo && loadedAt.id !== at!.id ? this.q.saleValue(g.cargo, loadedAt, market) : 0;
+    return h('div', { class: 'cargo' },
+      h('p', { class: 'small' }, resourceIcon('goods', 14), ` ${fmt(g.cargo ?? 0)} / ${fmt(cap)} trade goods${loadedAt && g.cargo ? ` from ${loadedAt.name}` : ''}`),
+      to && from ? h('p', { class: 'small green' }, `Trade run: ${from.name} → ${to.name}, repeating`) : '',
+      h('div', { class: 'row orders' },
+        to ? h('button', { class: 'chip active', onclick: () => this.actions.tradeRun(g.id, null) }, '✓ Trade run · stop') : null,
+        !to && canLoad ? h('button', { class: 'chip', onclick: () => this.actions.loadGoods(g.id) }, 'Load goods') : null,
+        !to && sale ? h('button', { class: 'chip', onclick: () => this.actions.sellGoods(g.id) }, `Sell here · ${fmt(sale)} cr`) : null,
+        !to && market && !sale ? h('button', { class: 'chip', title: `Load goods at your nearest colony and sell them at ${market.name}, again and again`, onclick: () => this.actions.tradeRun(g.id, at) }, `Trade run to ${market.name}`) : null));
   }
 
   private orderChip(g: FleetGroup, key: 'autoExplore' | 'autoReturn', label: string): HTMLElement {

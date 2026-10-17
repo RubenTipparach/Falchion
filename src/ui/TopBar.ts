@@ -110,7 +110,7 @@ export class TopBar {
   private renderStats(s: GameState): void {
     const m = s.empire.materials;
     const caps = this.caps();
-    const items: Array<[string, Resource]> = [['Credits', 'credits'], ['Influence', 'influence'], ['Food', 'food'], ['Metals', 'metals'], ['Volatiles', 'volatiles'], ['Crystals', 'crystals'], ['Exotics', 'exotics']];
+    const items: Array<[string, Resource]> = [['Credits', 'credits'], ['Influence', 'influence'], ['Food', 'food'], ['Trade goods', 'goods'], ['Metals', 'metals'], ['Gases', 'gases'], ['Crystals', 'crystals']];
     this.stats.replaceChildren(...items.map(([label, r]) => {
       const cap = caps[r];
       const full = cap !== undefined && m[r] >= cap;

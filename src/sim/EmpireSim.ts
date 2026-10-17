@@ -5,7 +5,8 @@ import { buildYears, isSurveyClass, isWarship, specOf } from '../content/logisti
 import { BIOME_YIELDS } from '../content/resources';
 import { SHIP_CLASSES, ShipClassDef } from '../content/shipClasses';
 import { CombatBonuses, resolveAssault, resolveBattle, Squadron } from '../core/combat/Combat';
-import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn } from '../core/economy/Economy';
+import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf } from '../core/economy/Economy';
+import { cargoCapacity, FREIGHTER, saleValue, type Market } from '../core/economy/Trade';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
 import { addHaul, Collected, crateMaterials, Haul, planetCache } from '../core/encounters/PlanetCache';
 import type { Card } from '../core/encounters/types';
@@ -41,6 +42,8 @@ export interface SimDeps {
   readonly economy: EconomyTables;
   /** Share notable news (founding, battles, colonies, depots, surveyed systems) with the galaxy feed and Discord. */
   readonly report?: (kind: ReportKind, text: string, place?: ActivityPlace) => void;
+  /** Markets beyond your own colonies and the neighbours (other players' worlds). */
+  readonly markets?: () => readonly Market[];
 }
 
 const BASE_SPEED = 1; // ly per year (one year = one minute)
@@ -204,6 +207,7 @@ export class EmpireSim {
       out.push({
         id: f.id, name: f.name, ships: l.ships, stores: { supply: l.supply, ammo: l.ammo }, capacity: capacity(l.ships, specOf),
         star: this.deps.galaxy.starAt(dest), stationed, eta: Math.max(0, arrivalTurn(f.movement) - s.turn), friendly: stationed && this.isFriendlyHex(dest), orders: l.orders,
+        cargo: l.cargo, cargoFrom: l.cargoFrom,
       });
     }
     return out;
@@ -309,7 +313,7 @@ export class EmpireSim {
     return this.effectiveDesign(lead?.classId ?? this.state.shipyardClass);
   }
 
-  formFleet(ships: Squadron[], to: StarSystem, name?: string): void {
+  formFleet(ships: Squadron[], to: StarSystem, name?: string, quiet = false): void {
     const s = this.state;
     const wanted = ships.filter((x) => x.count > 0);
     if (!wanted.length || !hasShips(this.docked(), wanted)) return;
@@ -323,7 +327,7 @@ export class EmpireSim {
     // Survey groups explore and come home for supply on their own by default.
     const orders = kind === 'Survey Group' ? { autoExplore: true, autoReturn: true } : undefined;
     this.deps.store.update({ fleets: [...s.fleets, fleet], loadouts: { ...s.loadouts, [id]: { ships: wanted, ...fullStores(wanted, specOf), orders } } });
-    this.dispatch(`${label} departs for ${to.name} (${formatDuration(travelTurns(hexDistance(s.home.hex, to.hex), speed), CLOCK)})`);
+    if (!quiet) this.dispatch(`${label} departs for ${to.name} (${formatDuration(travelTurns(hexDistance(s.home.hex, to.hex), speed), CLOCK)})`);
   }
 
   /**
@@ -351,7 +355,7 @@ export class EmpireSim {
     const time = Math.max(s.turn, this.now());
     const at = positionAt(f.movement, time, this.pointOf);
     const from = worldToHex(at.x, at.z);
-    if (hexEquals(from, to) && hexEquals(hexAt(f.movement, s.turn), to)) return;
+    if (hexEquals(from, to) && hexEquals(f.movement.route[f.movement.route.length - 1], to)) return;
     const speed = this.fleetSpeed();
     const moved = { ...f, movement: planMovement(from, to, time, speed, at) };
     this.deps.store.update({ fleets: s.fleets.map((x) => (x.id === fleetId ? moved : x)) });
@@ -360,7 +364,9 @@ export class EmpireSim {
 
   setOrders(fleetId: string, orders: FleetOrders): void {
     const l = this.state.loadouts[fleetId];
-    if (l) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders } } }));
+    // A trade run carries on unless the fleet is sent exploring.
+    const trade = orders.autoExplore ? undefined : orders.trade ?? l?.orders?.trade;
+    if (l) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { ...orders, trade } } } }));
   }
 
   returnHome(fleetId: string): void {
@@ -372,8 +378,10 @@ export class EmpireSim {
     const f = s.fleets.find((x) => x.id === fleetId);
     if (!f || !s.loadouts[fleetId]) return;
     if (!isStationed(f.movement, s.turn) || !hexEquals(hexAt(f.movement, s.turn), s.home.hex)) return;
-    const { [fleetId]: _gone, ...loadouts } = s.loadouts;
-    this.deps.store.update({ fleets: s.fleets.filter((x) => x.id !== fleetId), loadouts });
+    const { [fleetId]: gone, ...loadouts } = s.loadouts;
+    // Goods still aboard go back into the stockpile.
+    const materials = gone.cargo ? { ...s.empire.materials, goods: s.empire.materials.goods + gone.cargo } : s.empire.materials;
+    this.deps.store.update({ fleets: s.fleets.filter((x) => x.id !== fleetId), loadouts, empire: { ...s.empire, materials } });
     this.dispatch(`${f.name} docks at ${s.home.name}`);
   }
 
@@ -723,6 +731,11 @@ export class EmpireSim {
     for (const f of s.fleets) {
       const l = s.loadouts[f.id];
       if (!l?.orders || !isStationed(f.movement, s.turn)) continue;
+      if (l.orders.trade) {
+        const sold = this.runTrade(f.id);
+        if (sold) news.push(sold);
+        continue;
+      }
       const star = this.deps.galaxy.starAt(hexAt(f.movement, s.turn));
       const left = () => (star ? this.unsurveyed(star) : []);
       if (l.orders.autoExplore) {
@@ -798,11 +811,126 @@ export class EmpireSim {
     this.deps.store.update({ economy: { ...s.economy, policies: has ? s.economy.policies.filter((p) => p !== id) : [...s.economy.policies, id] } });
   }
 
-  toggleRoute(partnerId: string): void {
+  // ── Commands: trade ────────────────────────────────────────────────
+
+  /** Worlds that buy trade goods: your colonies and the worlds of other empires. */
+  markets = (): Market[] => {
+    const out = new Map<string, Market>();
+    for (const id of this.colonyStars()) {
+      const star = this.starById(id);
+      if (star) out.set(id, { starId: id, name: star.name, kind: 'own' });
+    }
+    for (const n of this.deps.world.neighbours) {
+      if (!out.has(n.home.id)) out.set(n.home.id, { starId: n.home.id, name: n.home.name, kind: n.kind === 'alien' ? 'npc' : 'player' });
+    }
+    for (const m of this.deps.markets?.() ?? []) if (!out.has(m.starId)) out.set(m.starId, m);
+    return [...out.values()];
+  };
+
+  marketAt = (star: StarSystem): Market | null => this.markets().find((m) => m.starId === star.id) ?? null;
+
+  /** Goods a group can carry, with research. */
+  cargoCapacity = (ships: readonly Squadron[]): number => cargoCapacity(ships, bonusOf(this.tree, this.state.empire.research, 'cargo'));
+
+  /** What a cargo loaded at `from` sells for at a market. */
+  saleValue = (goods: number, from: StarSystem, market: Market): number => {
     const s = this.state;
-    const has = s.economy.routes.some((r) => r.partnerId === partnerId);
-    const routes = has ? s.economy.routes.filter((r) => r.partnerId !== partnerId) : [...s.economy.routes, { partnerId }];
-    this.deps.store.update({ economy: { ...s.economy, routes } });
+    const at = this.starById(market.starId);
+    const tradePct = tradePctOf({ ...s.economy, stock: s.empire.materials }, this.deps.economy, s.empire.research);
+    return at ? saleValue(goods, hexDistance(from.hex, at.hex), market.kind, tradePct) : 0;
+  };
+
+  /** Where a fleet is on station, if it is. */
+  protected stationedAt(fleetId: string): StarSystem | null {
+    const f = this.state.fleets.find((x) => x.id === fleetId);
+    return f && isStationed(f.movement, this.state.turn) ? this.deps.galaxy.starAt(hexAt(f.movement, this.state.turn)) : null;
+  }
+
+  /** Fill a fleet's freighters with trade goods at one of your colony systems. */
+  loadGoods(fleetId: string, quiet = false): number {
+    const s = this.state;
+    const l = s.loadouts[fleetId];
+    const star = this.stationedAt(fleetId);
+    if (!l || !star || !this.colonyStars().has(star.id)) return 0;
+    const room = this.cargoCapacity(l.ships) - (l.cargo ?? 0);
+    const take = Math.max(0, Math.min(room, Math.floor(s.empire.materials.goods ?? 0)));
+    if (!take) return 0;
+    this.deps.store.update({
+      empire: { ...s.empire, materials: { ...s.empire.materials, goods: s.empire.materials.goods - take } },
+      loadouts: { ...s.loadouts, [fleetId]: { ...l, cargo: (l.cargo ?? 0) + take, cargoFrom: l.cargo ? l.cargoFrom : star.id } },
+    });
+    if (!quiet) this.dispatch(`${this.fleetName(fleetId)} loads ${take} trade goods at ${star.name}`);
+    return take;
+  }
+
+  /** Sell a fleet's goods at the market it is at (not where they were loaded). Returns the credits. */
+  sellGoods(fleetId: string, quiet = false): number {
+    const s = this.state;
+    const l = s.loadouts[fleetId];
+    const star = this.stationedAt(fleetId);
+    const market = star && this.marketAt(star);
+    const from = l?.cargoFrom ? this.starById(l.cargoFrom) : null;
+    if (!l?.cargo || !star || !market || !from || from.id === star.id) return 0;
+    const credits = this.saleValue(l.cargo, from, market);
+    this.deps.store.update({
+      empire: { ...s.empire, materials: { ...s.empire.materials, credits: s.empire.materials.credits + credits } },
+      loadouts: { ...s.loadouts, [fleetId]: { ...l, cargo: 0, cargoFrom: undefined } },
+    });
+    if (!quiet) this.dispatch(`${this.fleetName(fleetId)} sold ${l.cargo} trade goods at ${star.name} for ${credits} credits`, 'good');
+    return credits;
+  }
+
+  /**
+   * Start (or stop, with null) a trade run: the fleet loads goods at your colony system nearest the
+   * market, sells them there, and repeats. From the dock, the docked freighters set out as a new fleet.
+   */
+  tradeRun(groupId: string, to: StarSystem | null): void {
+    const s = this.state;
+    if (!to) {
+      const l = s.loadouts[groupId];
+      if (l?.orders?.trade) this.deps.store.update({ loadouts: { ...s.loadouts, [groupId]: { ...l, orders: { ...l.orders, trade: undefined } } } });
+      return;
+    }
+    if (!this.marketAt(to)) return this.dispatch(`${to.name} has no market for trade goods`, 'bad');
+    const from = [...this.colonyStars()].map((id) => this.starById(id)).filter((x): x is StarSystem => !!x && x.id !== to.id)
+      .sort((a, b) => hexDistance(a.hex, to.hex) - hexDistance(b.hex, to.hex) || (a.id < b.id ? -1 : 1))[0];
+    if (!from) return this.dispatch('A trade run needs a colony of yours to load goods at, other than the market', 'bad');
+    let fleetId = groupId;
+    if (groupId === 'dock') {
+      const n = countOf(this.docked(), FREIGHTER);
+      if (!n) return this.dispatch('No Bulk Freighters in the dock', 'bad');
+      const before = new Set(s.fleets.map((f) => f.id));
+      this.formFleet([{ classId: FREIGHTER, count: n }], from, `Trade Run to ${to.name}`, true);
+      fleetId = this.state.fleets.find((f) => !before.has(f.id))?.id ?? '';
+    }
+    const l = this.state.loadouts[fleetId];
+    if (!l || !countOf(l.ships, FREIGHTER)) return this.dispatch('A trade run needs Bulk Freighters', 'bad');
+    this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { trade: { from: from.id, to: to.id } } } } }));
+    this.dispatch(`${this.fleetName(fleetId)} starts a trade run: goods from ${from.name} to ${to.name}`);
+    this.runTrade(fleetId);
+  }
+
+  protected fleetName = (fleetId: string): string => this.state.fleets.find((f) => f.id === fleetId)?.name ?? 'Fleet';
+
+  /** One step of a trade run: sell at the market, load at the colony, and head for the other end. */
+  protected runTrade(fleetId: string): string | null {
+    const l = this.state.loadouts[fleetId];
+    const trade = l?.orders?.trade;
+    const at = this.stationedAt(fleetId);
+    if (!trade || !at) return null;
+    const from = this.starById(trade.from), to = this.starById(trade.to);
+    if (!from || !to) return null;
+    let news: string | null = null;
+    if (at.id === to.id && l.cargo) {
+      const n = l.cargo;
+      const credits = this.sellGoods(fleetId, true);
+      if (credits) news = `${this.fleetName(fleetId)} sold ${n} trade goods at ${to.name} for ${credits} credits`;
+    }
+    if (at.id === from.id) this.loadGoods(fleetId, true);
+    const cargo = this.state.loadouts[fleetId]?.cargo ?? 0;
+    const next = cargo > 0 ? to : from;
+    if (next.id !== at.id) this.moveFleet(fleetId, next, true);
+    return news;
   }
 
   foundFaith(name: string, tenets: string[]): void {

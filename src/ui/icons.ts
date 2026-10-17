@@ -54,18 +54,12 @@ const RESOURCE_ICONS: Readonly<Record<Resource, string>> = {
   food: svg('<path d="M12 21V8"/><path d="M12 9c-2.6-.4-3.6-2.4-3.6-4.6 2.4.2 3.6 2 3.6 4.6zM12 9c2.6-.4 3.6-2.4 3.6-4.6-2.4.2-3.6 2-3.6 4.6z"/><path d="M12 14c-2.6-.4-3.8-2.4-3.8-4.4 2.4.2 3.8 1.9 3.8 4.4zM12 14c2.6-.4 3.8-2.4 3.8-4.4-2.4.2-3.8 1.9-3.8 4.4z"/><path d="M12 19c-2.6-.4-3.8-2.4-3.8-4.4 2.4.2 3.8 1.9 3.8 4.4zM12 19c2.6-.4 3.8-2.4 3.8-4.4-2.4.2-3.8 1.9-3.8 4.4z"/>'),
   // Metals: stacked ingots.
   metals: svg('<path d="M4 18l2-4h6l2 4z"/><path d="M10 18l2-4h6l2 4z"/><path d="M7 14l2-4h6l2 4"/>'),
-  // Volatiles: a gas canister venting.
-  volatiles: svg('<rect x="7" y="8" width="10" height="13" rx="3"/><path d="M10 8V6h4v2"/><path d="M15 4c1-.8 2.4-.8 3.4 0M16.5 2.2c.8-.4 1.8-.4 2.6 0"/><path d="M7 13h10"/>'),
-  // Ice: a snowflake.
-  ice: svg('<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M10 5l2 2 2-2M10 19l2-2 2 2M5 10.3l2.7.4-.9 2.6M19 13.7l-2.7-.4.9-2.6"/>'),
+  // Gases: a gas canister venting.
+  gases: svg('<rect x="7" y="8" width="10" height="13" rx="3"/><path d="M10 8V6h4v2"/><path d="M15 4c1-.8 2.4-.8 3.4 0M16.5 2.2c.8-.4 1.8-.4 2.6 0"/><path d="M7 13h10"/>'),
   // Crystals: a faceted gem cluster.
   crystals: svg('<path d="M9 21l-3-7 3-9 3 9z"/><path d="M15 21l-3-6 3-7 3 7z"/><path d="M6 14h6M12 15h6"/>'),
-  // Rare earths: sifted grains in a pan.
-  rareEarths: svg('<path d="M3 13h18l-2 5H5z"/><circle cx="8" cy="10" r="1.2"/><circle cx="12" cy="8.5" r="1.4"/><circle cx="16" cy="10" r="1.1"/><circle cx="10" cy="5.5" r=".9"/><circle cx="14.5" cy="5.8" r=".8"/>'),
-  // Exotic matter: an unstable atom.
-  exotics: svg('<circle cx="12" cy="12" r="1.8" fill="currentColor"/><ellipse cx="12" cy="12" rx="9" ry="3.6"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(120 12 12)"/>'),
-  // Dark matter: a void with an accretion swirl.
-  darkMatter: svg('<circle cx="12" cy="12" r="3" fill="currentColor"/><path d="M12 4a8 8 0 0 1 8 8M20 12a8 8 0 0 1-8 8M12 20a8 8 0 0 1-8-8M4 12a8 8 0 0 1 8-8" stroke-dasharray="3 3"/>'),
+  // Trade goods: a strapped crate.
+  goods: svg('<path d="M4 8l8-4 8 4v9l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v9"/><path d="M8 6l8 4"/>'),
 };
 
 /** Resource glyph in the resource's own colour. */

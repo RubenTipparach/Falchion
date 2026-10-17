@@ -13,7 +13,7 @@ export interface LootTables {
   readonly parts: readonly string[];
 }
 
-const MATERIALS: readonly Material[] = ['metals', 'crystals', 'volatiles', 'ice', 'rareEarths', 'exotics', 'credits'];
+const MATERIALS: readonly Material[] = ['metals', 'crystals', 'gases', 'goods', 'credits'];
 const RARITY_ORDER: readonly Rarity[] = ['common', 'rare', 'epic', 'legendary'];
 
 /** Deterministic encounter resolution: (seed, planet, empire) -> result. Pure. */

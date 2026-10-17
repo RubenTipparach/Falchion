@@ -21,9 +21,8 @@ export function planetCache(planet: Planet, galaxySeed: number): Haul {
   for (const [r, n] of Object.entries(BIOME_YIELDS[planet.biome] ?? {})) {
     out[r as Resource] = Math.round(n! * (4 + planet.size * 2) * rng.range(0.8, 1.4));
   }
-  if (rng.chance(0.3)) out.rareEarths = (out.rareEarths ?? 0) + rng.int(5, 20);
-  if (rng.chance(0.15)) out.exotics = (out.exotics ?? 0) + rng.int(2, 8);
-  if (rng.chance(0.08)) out.darkMatter = (out.darkMatter ?? 0) + rng.int(1, 4);
+  if (rng.chance(0.35)) out.crystals = (out.crystals ?? 0) + rng.int(5, 25);
+  if (rng.chance(0.2)) out.goods = (out.goods ?? 0) + rng.int(10, 40);
   return out;
 }
 

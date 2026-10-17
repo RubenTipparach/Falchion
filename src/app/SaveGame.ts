@@ -1,5 +1,6 @@
 import type { GameState } from './GameState';
 import type { Hex } from '../core/hex/Hex';
+import { LEGACY_MATERIALS, RESOURCES } from '../content/resources';
 
 /** Fields that persist between sessions; the rest is view state or derived from the world. */
 export const SAVED = [
@@ -9,6 +10,7 @@ export const SAVED = [
 
 /** The persistent fields of a save, as a patch for the game state (view state untouched). */
 export function savedFields(save: SavedGame): Partial<GameState> {
+  save = upgradeSave(save);
   const out: Record<string, unknown> = {};
   for (const k of SAVED) if (k in save) out[k] = (save as unknown as Record<string, unknown>)[k];
   return out as Partial<GameState>;
@@ -26,6 +28,22 @@ export function savedHome(save: SavedGame | null): Hex | null {
   const id = save?.economy?.colonies?.find((c) => c.capital)?.starId;
   const [q, r] = (id ?? '').split(',').map(Number);
   return Number.isInteger(q) && Number.isInteger(r) ? { q, r } : null;
+}
+
+/**
+ * A save in today's terms. Saves from before the three raw materials have their old minerals
+ * folded into metals, gases and crystals (and gain trade goods); abstract trade routes, which
+ * freighters replaced, are dropped. Idempotent: an up-to-date save comes back unchanged.
+ */
+export function upgradeSave<T extends SavedGame>(save: T): T {
+  const old = save.empire?.materials as Record<string, number> | undefined;
+  const routes = 'routes' in (save.economy ?? {});
+  if (!old || (!routes && 'goods' in old && !Object.keys(old).some((k) => k in LEGACY_MATERIALS))) return save;
+  const materials: Record<string, number> = {};
+  for (const r of RESOURCES) materials[r.id] = Number(old[r.id]) || 0;
+  for (const [k, [to, rate]] of Object.entries(LEGACY_MATERIALS)) materials[to] += Math.round((Number(old[k]) || 0) * rate);
+  const { routes: _routes, ...economy } = save.economy as typeof save.economy & { routes?: unknown };
+  return { ...save, economy, empire: { ...save.empire, materials } };
 }
 
 const VERSION = 1;
@@ -63,7 +81,7 @@ export class SaveGame {
       const raw = this.storage?.getItem(this.key);
       if (!raw) return null;
       const save = JSON.parse(raw) as SavedGame;
-      return this.valid(save) ? save : null;
+      return this.valid(save) ? upgradeSave(save) : null;
     } catch {
       return null;
     }

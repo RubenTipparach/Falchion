@@ -1,5 +1,4 @@
 import { specOf } from '../content/logistics';
-import type { TradePartner } from '../content/society';
 import type { Squadron } from '../core/combat/Combat';
 import type { Colony } from '../core/economy/Economy';
 import { newEmpire } from '../core/empire/Empire';
@@ -19,7 +18,6 @@ export interface NewEmpireDeps {
   readonly galaxy: GalaxyModel;
   readonly tree: TechTree;
   readonly world: World;
-  readonly partners: readonly TradePartner[];
   readonly playerName: string;
   /** World year the empire starts in. */
   readonly t0: number;
@@ -30,7 +28,7 @@ export interface NewEmpireDeps {
  * capital with a shipyard), and a small fleet. Pure: the client starts players with it and lays
  * saves over it; the server and tests build empires the same way.
  */
-export function newEmpireState({ galaxy, tree, world, partners, playerName, t0 }: NewEmpireDeps): GameState {
+export function newEmpireState({ galaxy, tree, world, playerName, t0 }: NewEmpireDeps): GameState {
   // Starting position: a young empire with a few roots researched and a small fleet.
   let research = newEmpire(playerName).research;
   for (const id of ['t-alloys', 'u-modular', 'a-heritage', 'a-duelist-tradition', 'o-grown-hulls', 'u-logistics']) {
@@ -59,7 +57,7 @@ export function newEmpireState({ galaxy, tree, world, partners, playerName, t0 }
   return {
     turn: t0, empire,
     economy: {
-      roster: start.roster, government: 'council', policies: [], routes: [{ partnerId: partners[0].id }],
+      roster: start.roster, government: 'council', policies: [],
       faith: null, spyNetworks: [], focus: 't-fusion', colonies,
     },
     designs: { prospector: { ...houseDesign, name: 'Prospector Skiff', style: 'utilitarian', seed: 4, length: 0.8, bulk: 0.8, engines: 2, weapons: 0 } },

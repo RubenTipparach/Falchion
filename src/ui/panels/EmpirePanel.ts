@@ -4,8 +4,11 @@ import type { Store } from '../../app/Store';
 import { RESOURCES } from '../../content/resources';
 import { FACTIONS, GOVERNMENTS, POLICIES, TENETS } from '../../content/society';
 import {
-  bonusOf, Colony, colonyYield, EconomyTables, factionApproval, upkeepOf, hasGrant, maxPolicies, maxRoutes, maxSpies, routeValue, sciencePerTurn, stabilityOf, tradePctOf,
+  bonusOf, Colony, colonyYield, EconomyTables, factionApproval, upkeepOf, hasGrant, maxPolicies, maxSpies, sciencePerTurn, stabilityOf, tradePctOf,
 } from '../../core/economy/Economy';
+import { FREIGHTER } from '../../core/economy/Trade';
+import { hexDistance } from '../../core/hex/Hex';
+import type { StarSystem } from '../../core/galaxy/GalaxyModel';
 import { Drawer } from '../Drawer';
 import type { GameActions, GameQueries } from '../GameActions';
 import { icon, resourceIcon } from '../icons';
@@ -17,7 +20,7 @@ import { clear, fmt, h } from '../dom';
 type Tab = 'overview' | 'colonies' | 'trade' | 'politics' | 'religion' | 'intel';
 const TABS: Array<[Tab, string]> = [['overview', 'Overview'], ['colonies', 'Colonies'], ['trade', 'Trade'], ['politics', 'Politics'], ['religion', 'Religion'], ['intel', 'Espionage']];
 
-/** Exploitation: stockpile, trade routes, government and factions, faith, spy networks. */
+/** Exploitation: stockpile, trade goods, government and factions, faith, spy networks. */
 export class EmpirePanel extends Drawer {
   private tab: Tab = 'overview';
   private readonly tabsEl = h('div', { class: 'seg' });
@@ -117,21 +120,38 @@ export class EmpirePanel extends Drawer {
   private trade(): HTMLElement[] {
     const s = this.store.state;
     const pct = tradePctOf(this.econ, this.t, s.empire.research);
-    const slots = maxRoutes(this.econ, this.t, s.empire.research);
-    const freighters = s.economy.roster['bulk-freighter'] ?? 0;
+    const made = s.economy.colonies.reduce((n, c) => n + (colonyYield(c, this.t).income.goods ?? 0), 0);
+    const groups = this.q.groups().filter((g) => g.ships.some((x) => x.classId === FREIGHTER && x.count > 0));
+    const dock = groups.find((g) => g.id === 'dock');
+    const docked = dock?.ships.find((x) => x.classId === FREIGHTER)?.count ?? 0;
+    const perHold = this.q.cargoCapacity([{ classId: FREIGHTER, count: 1 }]);
+    const colonies = s.economy.colonies.map((c) => (c.starId ? this.q.starById(c.starId) : null)).filter((x): x is StarSystem => !!x);
+    const fleets = groups.filter((g) => g.id !== 'dock');
     return [
-      h('p', { class: 'muted' }, `Each route needs a Bulk Freighter and earns credits that fall off with distance. Routes: ${s.economy.routes.length} of ${slots} active (${freighters} freighter${freighters === 1 ? '' : 's'}, route limit ${2 + bonusOf(this.t.tree, s.empire.research, 'routes')}).`),
+      h('p', { class: 'muted' }, `Colonies make trade goods (${fmt(s.empire.materials.goods)} in store, +${made} a year; Manufactories make more). Bulk Freighters carry ${perHold} each to another world and sell them: the farther from where they were loaded, the better the price, and foreign markets pay more than your own colonies.${pct ? ` Your traders get +${pct}%.` : ''}`),
+      h('section', { class: 'card' }, h('h4', {}, 'Freighters'),
+        groups.length ? h('ul', { class: 'plain' },
+          dock && docked ? h('li', {}, h('b', {}, `${docked} in the dock`), h('span', { class: 'muted' }, ' · pick a market below to start a trade run')) : null,
+          ...fleets.map((g) => {
+            const run = g.orders?.trade;
+            const to = run && this.q.starById(run.to);
+            return h('li', {}, h('b', {}, g.name),
+              h('span', { class: 'muted' }, ` · ${fmt(g.cargo ?? 0)} / ${fmt(this.q.cargoCapacity(g.ships))} goods · ${to ? `trade run to ${to.name}` : g.star ? `at ${g.star.name}` : 'in space'}`),
+              ' ', to ? h('button', { class: 'chip', onclick: () => this.actions.tradeRun(g.id, null) }, 'Stop run') : h('button', { class: 'chip', onclick: () => this.actions.focusFleet(g.id) }, 'Show'));
+          })) : h('p', { class: 'muted' }, 'No Bulk Freighters yet: build them at a shipyard (Container Logistics research).')),
       h('table', { class: 'data' },
-        h('thead', {}, h('tr', {}, h('th', {}, 'Partner'), h('th', {}, 'Type'), h('th', { class: 'num' }, 'Distance'), h('th', { class: 'num' }, 'Credits / yr'), h('th', {}, ''))),
-        h('tbody', {}, ...this.t.partners.map((p) => {
-          const on = s.economy.routes.some((r) => r.partnerId === p.id);
-          const idx = s.economy.routes.findIndex((r) => r.partnerId === p.id);
-          const idle = on && idx >= slots;
-          return h('tr', { class: on ? 'on' : '' },
-            h('td', {}, p.name), h('td', { class: 'muted' }, p.kind),
-            h('td', { class: 'num mono' }, `${fmt(p.distance)} ly`),
-            h('td', { class: 'num mono' }, `${routeValue(p, pct)}`),
-            h('td', {}, h('button', { class: `chip ${on ? 'active' : ''}`, onclick: () => this.actions.toggleRoute(p.id) }, idle ? 'Idle — need freighter' : on ? 'Cancel route' : 'Open route')));
+        h('thead', {}, h('tr', {}, h('th', {}, 'Market'), h('th', {}, 'Owner'), h('th', { class: 'num' }, 'Run'), h('th', { class: 'num' }, 'Full hold sells for'), h('th', {}, ''))),
+        h('tbody', {}, ...this.q.markets().map((m) => {
+          const star = this.q.starById(m.starId);
+          const from = star && colonies.filter((c) => c.id !== star.id).sort((a, b) => hexDistance(a.hex, star.hex) - hexDistance(b.hex, star.hex))[0];
+          const running = fleets.filter((g) => g.orders?.trade?.to === m.starId).length;
+          const idle = fleets.find((g) => !g.orders?.trade);
+          const by = docked ? 'dock' : idle?.id;
+          return h('tr', { class: running ? 'on' : '' },
+            h('td', {}, m.name), h('td', { class: 'muted' }, m.kind === 'own' ? 'your colony' : m.kind === 'npc' ? 'alien world' : 'other empire'),
+            h('td', { class: 'num mono' }, from && star ? `${fmt(hexDistance(from.hex, star.hex))} ly` : '—'),
+            h('td', { class: 'num mono' }, from ? `${fmt(this.q.saleValue(perHold, from, m))} cr` : '—'),
+            h('td', {}, from && by ? h('button', { class: 'chip', onclick: () => this.actions.tradeRun(by, star) }, running ? `Add freighters (${running} running)` : 'Start trade run') : h('span', { class: 'muted small' }, running ? `${running} running` : from ? 'No free freighters' : 'Needs another colony to load at')));
         }))),
     ];
   }

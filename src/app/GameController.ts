@@ -21,7 +21,6 @@ import type { FleetInfo, GameActions, GameQueries, PanelId } from '../ui/GameAct
 import type { Hud } from '../ui/Hud';
 import type { TopBar } from '../ui/TopBar';
 import type { GameState } from './GameState';
-export { tradePartners } from './World';
 import { routePath, systemRoute } from './Routes';
 import { touchFirst } from '../ui/dom';
 

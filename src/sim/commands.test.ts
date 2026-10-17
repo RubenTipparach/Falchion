@@ -14,7 +14,7 @@ import { TechTree } from '../core/research/TechTree';
 import type { GameState } from '../app/GameState';
 import { SaveGame } from '../app/SaveGame';
 import { Store } from '../app/Store';
-import { createWorld, tradePartners } from '../app/World';
+import { createWorld } from '../app/World';
 import { EmpireSim, type SimDeps } from './EmpireSim';
 import { COMMANDS, encodeCommand, type CommandName } from './commands';
 import { applyCommand } from './headless';
@@ -25,16 +25,15 @@ const PLAYER = { id: ID, name: 'Ruben' };
 const galaxy = new GalaxyModel();
 const tree = new TechTree(TECH_NODES, SHARD_SOURCES);
 const world = createWorld(galaxy, ID);
-const partners = tradePartners(world, world.home);
 const T = 5_000;
 
-const fresh = () => newEmpireState({ galaxy, tree, world, partners, playerName: 'Ruben', t0: T });
+const fresh = () => newEmpireState({ galaxy, tree, world, playerName: 'Ruben', t0: T });
 const snap = (s: GameState) => { const x = new SaveGame(galaxy.params.seed, null).snapshot(s); delete x.tab; return JSON.parse(JSON.stringify(x)); };
 
 /** The client side: the same state in a Store with an EmpireSim fixed at time T. */
 function client(state: GameState) {
   const store = new Store<GameState>(state);
-  const deps: SimDeps = { store, galaxy, tree, encounters: new EncounterResolver(DEFAULT_LOOT_TABLES, tree), world, economy: { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, partners, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf } };
+  const deps: SimDeps = { store, galaxy, tree, encounters: new EncounterResolver(DEFAULT_LOOT_TABLES, tree), world, economy: { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf } };
   return { store, sim: new EmpireSim(deps) };
 }
 

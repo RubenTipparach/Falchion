@@ -10,6 +10,7 @@ import type { Colony } from '../core/economy/Economy';
 import type { Job } from '../core/construction/Construction';
 import type { FleetOrders } from '../core/fleet/Presence';
 import type { Resource } from '../content/resources';
+import type { Market } from '../core/economy/Trade';
 
 export type PanelId = 'shipyard' | 'research' | 'empire' | 'war' | 'explore' | 'fleets';
 
@@ -29,6 +30,9 @@ export interface FleetGroup {
   readonly eta: number;
   readonly friendly: boolean;
   readonly orders?: FleetOrders;
+  /** Trade goods aboard, and where they were loaded. */
+  readonly cargo?: number;
+  readonly cargoFrom?: string;
 }
 
 /** What the fleet card shows about any fleet, yours or not. */
@@ -74,6 +78,13 @@ export interface GameQueries {
   fleetInfo(fleetId: string): FleetInfo | null;
   /** Construction queued at a site (planet id), or everywhere. */
   jobs(site?: string): Job[];
+  /** Worlds that buy trade goods. */
+  markets(): Market[];
+  marketAt(star: StarSystem): Market | null;
+  /** Goods a group of ships can carry. */
+  cargoCapacity(ships: readonly Squadron[]): number;
+  /** What a cargo loaded at `from` sells for at a market. */
+  saleValue(goods: number, from: StarSystem, market: Market): number;
   /** Storage caps for each resource. */
   caps(): Partial<Record<Resource, number>>;
 }
@@ -135,7 +146,12 @@ export interface GameActions {
   toggleTrait(traitId: string): void;
   setGovernment(id: string): void;
   togglePolicy(id: string): void;
-  toggleRoute(partnerId: string): void;
+  /** Fill a fleet's freighters with trade goods (at one of your colony systems). */
+  loadGoods(fleetId: string): void;
+  /** Sell a fleet's trade goods at the market it is at. */
+  sellGoods(fleetId: string): void;
+  /** Start a trade run to a market with a fleet ('dock': the docked freighters), or stop one (null). */
+  tradeRun(groupId: string, to: StarSystem | null): void;
   foundFaith(name: string, tenets: string[]): void;
   toggleMission(empire: string): void;
   toggleSpy(empire: string): void;

@@ -9,7 +9,7 @@ import { GalaxyModel } from '../src/core/galaxy/GalaxyModel.ts';
 import { TechTree } from '../src/core/research/TechTree.ts';
 import { TECH_NODES } from '../src/content/techTree.ts';
 import { SHARD_SOURCES } from '../src/content/shardSources.ts';
-import { createWorld, tradePartners } from '../src/app/World.ts';
+import { createWorld } from '../src/app/World.ts';
 import { SaveGame } from '../src/app/SaveGame.ts';
 
 const galaxy = new GalaxyModel();
@@ -17,7 +17,7 @@ const tree = new TechTree(TECH_NODES, SHARD_SOURCES);
 
 function saveFor(id, t0) {
   const world = createWorld(galaxy, id);
-  const state = newEmpireState({ galaxy, tree, world, partners: tradePartners(world, world.home), playerName: `P${id.slice(-2)}`, t0 });
+  const state = newEmpireState({ galaxy, tree, world, playerName: `P${id.slice(-2)}`, t0 });
   const save = new SaveGame(galaxy.params.seed, null).snapshot(state);
   delete save.tab;
   return save;

@@ -13,6 +13,6 @@ describe('planet cache', () => {
     expect(c.crystals).toBeGreaterThan(0);
   });
   it('adds hauls', () => {
-    expect(addHaul({ metals: 2 }, { metals: 3, ice: 1 })).toEqual({ metals: 5, ice: 1 });
+    expect(addHaul({ metals: 2 }, { metals: 3, gases: 1 })).toEqual({ metals: 5, gases: 1 });
   });
 });

@@ -12,10 +12,10 @@ import { capsOf, colonyYield, EconomyState, EconomyTables, FOOD_PER_COLONY, reso
 
 const tables: EconomyTables = {
   tree: new TechTree(TECH_NODES, SHARD_SOURCES), classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS,
-  partners: [], alienTech: { Vossk: ['t-lasers'] }, buildings: BUILDINGS,
+  alienTech: { Vossk: ['t-lasers'] }, buildings: BUILDINGS,
 };
 const econ = (patch: Partial<EconomyState> = {}): EconomyState => ({
-  stock: START_RESOURCES, roster: {}, government: 'council', policies: [], routes: [], faith: null, spyNetworks: [], focus: null, colonies: [], ...patch,
+  stock: START_RESOURCES, roster: {}, government: 'council', policies: [], faith: null, spyNetworks: [], focus: null, colonies: [], ...patch,
 });
 
 describe('economy', () => {
@@ -38,10 +38,10 @@ describe('economy', () => {
 
   it('mining ships only mine minerals present where they are', () => {
     const e = econ({ roster: { 'ice-cutter': 2 } });
-    const onIce = resolveTurn(e, EMPTY_RESEARCH, 1, tables, { miners: [{ classId: 'ice-cutter', count: 2, deposits: ['ice', 'metals'] }], reached: [] });
+    const onIce = resolveTurn(e, EMPTY_RESEARCH, 1, tables, { miners: [{ classId: 'ice-cutter', count: 2, deposits: ['gases', 'metals'] }], reached: [] });
     const offIce = resolveTurn(e, EMPTY_RESEARCH, 1, tables, { miners: [{ classId: 'ice-cutter', count: 2, deposits: ['metals'] }], reached: [] });
-    expect(onIce.report.income.ice).toBeGreaterThan(0);
-    expect(offIce.report.income.ice ?? 0).toBe(0);
+    expect(onIce.report.income.gases).toBeGreaterThan(0);
+    expect(offIce.report.income.gases ?? 0).toBe(0);
     expect(offIce.report.lines.some((l) => l.includes('idle'))).toBe(true);
   });
 

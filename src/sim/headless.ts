@@ -12,10 +12,10 @@ import { EncounterResolver } from '../core/encounters/Encounters';
 import { GalaxyModel } from '../core/galaxy/GalaxyModel';
 import { TechTree } from '../core/research/TechTree';
 import type { GameState } from '../app/GameState';
-import { SaveGame, savedHome, type SavedGame } from '../app/SaveGame';
+import { SaveGame, savedHome, upgradeSave, type SavedGame } from '../app/SaveGame';
 import { colorFor, publicEmpire, type PublicEmpire } from '../app/ServerSync';
 import { Store } from '../app/Store';
-import { createWorld, tradePartners } from '../app/World';
+import { createWorld } from '../app/World';
 import { EmpireSim, type SimDeps } from './EmpireSim';
 import { CommandError, decodeArgs, type Command } from './commands';
 
@@ -117,12 +117,13 @@ class ServerSim extends EmpireSim {
 }
 
 /** A save as live simulation state, with its world. */
-function runtime(save: SavedGame, player: Player): { deps: SimDeps; store: Store<GameState> } {
+function runtime(saved: SavedGame, player: Player): { deps: SimDeps; store: Store<GameState> } {
+  const save = upgradeSave(saved);
   const { galaxy, tree, encounters } = tables();
   const world = createWorld(galaxy, player.id, savedHome(save));
   const economy: EconomyTables = {
     tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS,
-    partners: tradePartners(world, world.home), alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf,
+    alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf,
   };
   // Fleets belong to the name they were formed under; fall back to the account name.
   const owner = save.fleets.find((f) => save.loadouts[f.id])?.owner ?? player.name;

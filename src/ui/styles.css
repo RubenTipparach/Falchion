@@ -359,6 +359,9 @@ td.heat { background: rgba(127, 211, 230, calc(var(--v) * 0.35)); }
   .who { display: none; }
 }
 @media (max-width: 1500px) {
+  .stats .stat:nth-child(n+8) { display: none; }
+}
+@media (max-width: 1300px) {
   .stats .stat:nth-child(n+6) { display: none; }
 }
 @media (max-width: 1100px) {

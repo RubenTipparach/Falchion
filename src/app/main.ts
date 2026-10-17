@@ -2,7 +2,7 @@ import '../ui/styles.css';
 import { EncounterResolver } from '../core/encounters/Encounters';
 import { formatDuration } from '../core/time/WorldTime';
 import { CLOCK, connectWorldClock } from './WorldClock';
-import { SaveGame, savedHome, type SavedGame } from './SaveGame';
+import { SaveGame, savedHome, type SavedGame, upgradeSave } from './SaveGame';
 import { DEFAULT_ADDRESS_SCHEME } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel } from '../core/galaxy/GalaxyModel';
 import { hexToWorld, worldToHex } from '../core/hex/Hex';
@@ -46,7 +46,7 @@ import { FleetsPanel } from '../ui/panels/FleetsPanel';
 import { ResearchPanel } from '../ui/panels/ResearchPanel';
 import { ShipyardPanel } from '../ui/panels/ShipyardPanel';
 import type { PanelId } from '../ui/GameActions';
-import { GameController, tradePartners } from './GameController';
+import { GameController } from './GameController';
 import type { GameState } from './GameState';
 import { GUEST, probeSession } from './identity';
 import { colorFor, ownClaim, publicEmpire, ServerSaves } from './ServerSync';
@@ -82,16 +82,15 @@ async function bootstrap(): Promise<void> {
   // The server runs signed-in players' empires: its copy is the empire, on every device.
   const remote = serverSaves ? await serverSaves.load() : null;
   const onServer = saveGame.valid(remote);
-  if (onServer) saved = remote;
+  if (onServer) saved = upgradeSave(remote);
   // A saved empire keeps its home system wherever the galaxy puts stars now.
   const world = createWorld(galaxy, signedIn ? identity.id : undefined, savedHome(saved));
   const { factory, styles, traits } = createDefaultShipFactory();
-  const partners = tradePartners(world, world.home);
-  const economyTables: EconomyTables = { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, partners, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf };
+  const economyTables: EconomyTables = { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf };
 
   const clock = await connectWorldClock();
   // A new empire (or the template a save is laid over): see newEmpireState.
-  const fresh = newEmpireState({ galaxy, tree, world, partners, playerName: identity.displayName, t0: clock.tick() });
+  const fresh = newEmpireState({ galaxy, tree, world, playerName: identity.displayName, t0: clock.tick() });
   // A saved empire carries on where it left off; the missed years are caught up below.
   const store = new Store<GameState>(saved ? { ...fresh, ...saved, home: world.home, identity: cleanIdentity(saved.identity, HERALDRY) } : fresh);
 

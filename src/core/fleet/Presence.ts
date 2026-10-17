@@ -8,12 +8,17 @@ export interface FleetOrders {
   readonly autoExplore?: boolean;
   /** Head home to resupply when it can explore nothing more here. */
   readonly autoReturn?: boolean;
+  /** Trade run: load goods at `from` (a colony system), sell them at `to` (a market), repeat. */
+  readonly trade?: { readonly from: string; readonly to: string };
 }
 
 /** A deployed group of ships with its own supply and ammunition. */
 export interface Loadout extends Stores {
   readonly ships: readonly Squadron[];
   readonly orders?: FleetOrders;
+  /** Trade goods aboard, and the system they were loaded at (their price grows with distance from it). */
+  readonly cargo?: number;
+  readonly cargoFrom?: string;
 }
 
 /** A fleet is on station (can explore, fight, mine, settle) once it has arrived. */

@@ -26,5 +26,5 @@ export const RARITY_WEIGHTS: ReadonlyArray<readonly [Rarity, number]> = [
 
 export const RARITY_MULTIPLIER: Readonly<Record<Rarity, number>> = { common: 1, rare: 3, epic: 8, legendary: 25 };
 
-export const LOOT_CHASSIS = ['bio-frigate', 'tech-frigate', 'util-hauler', 'geo-prism', 'classic-cruiser', 'alien-corvette'];
+export const LOOT_CHASSIS = ['interceptor', 'lancer', 'gas-harvester', 'jammer', 'boarding-corvette', 'missile-barge', 'drop-ship', 'crystal-driller', 'flak-picket'];
 export const LOOT_PARTS = ['spore-drive', 'fusion-torch', 'phased-laser', 'acid-spitter', 'fabricator', 'tractor-beam', 'cloak-field'];

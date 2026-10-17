@@ -10,6 +10,8 @@ export interface ViewState {
   readonly galaxyMode: boolean;
   readonly viewportHeight: number;
   readonly time: number;
+  /** Floating origin: absolute galaxy position the scene is rendered relative to. */
+  readonly origin: { readonly x: number; readonly z: number };
 }
 
 /** A self-contained map overlay. Layers choose their own visibility from ViewState. */

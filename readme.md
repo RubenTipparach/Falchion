@@ -6,18 +6,19 @@ An at-scale, hex-based 4X MMO set in a 70,000 light-year galaxy, built with thre
 
 ```bash
 npm install
-npm run dev      # open the mockup
+npm run dev      # play locally
 npm test         # core unit tests
 ```
 
-## Mockup controls
+## How to play
 
-- **Scroll**: exponential zoom from a single hex (1 ly) to the whole galaxy
-- **Drag**: pan; **right-drag**: tilt/rotate
-- **G**: toggle between hex view and galaxy (quadrant / radial cell) view
-- **Enter** or **End Turn**: advance one turn (the game is turn-based; fleets move a whole number of ly per turn)
-- **Click a star**: select it to see its sector address, distance and travel time
-- Panels: **Shipyard** (procgen ship designer), **Research** (branching tech tree with shards), **Explore** (encounters and loot crates)
+- **Scroll**: exponential zoom from a single planet to the whole galaxy; **drag**: pan; **right-drag**: tilt/rotate; **G**: hex / galaxy view
+- **Enter** or **End Turn**: advance one turn. Fleets move a whole number of light years per turn, in straight lines.
+- **Ships act where they are.** Exploring, fighting, mining, settling, building depots, missionaries and spies all need a ship on location.
+- **Supply** is spent exploring (Survey Cutters carry the most); **ammunition** is spent in battle and sets firepower. Both refill in friendly systems; ammunition slowly regenerates elsewhere. Fleets can return home and dock.
+- **Colonies** are planets with building slots: farms (food), mines, trade hubs, research labs, temples and shipyards. Ships are built at a shipyard and start in that system. **Colony Arks** settle explored worlds; **Construction Tenders** build forward supply depots.
+- **Explore** newly found planets for loot crates and a one-time resource cache, then press **Collect resources**.
+- Panels: **Fleets**, **Explore**, **War Room** (deterministic combat and planetary assault), **Shipyard** (procedural ship designer), **Research** (branching tree with shards), **Empire** (colonies, trade, politics, religion, espionage). The locate buttons zoom to a planet, star or fleet.
 
 ## Deployment
 
@@ -49,6 +50,6 @@ src/core      pure deterministic rules (hex, galaxy, fleet, research, encounters
 src/content   data tables (tech tree, biomes, shard sources, encounters/loot)
 src/render    three.js: map layers (LOD), ship generators + traits
 src/ui        DOM panels (top bar, star card, shipyard, research, explore)
-src/app       composition root, store, controller, mock world/identity
+src/app       composition root, store, controller, world and (stand-in) identity
 openspec/     specs and change proposals
 ```

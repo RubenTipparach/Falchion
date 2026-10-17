@@ -5,11 +5,10 @@ import type { MapLayer, ViewState } from './MapLayer';
 import { createStarPointsMaterial, pointScale } from './StarPointsMaterial';
 import { fadeIn } from './ZoomModel';
 
-/** The whole galaxy as ~140k sampled points plus a core glow, for the far view. */
+/** Resolved stars across the whole galaxy (~200k sampled points) for the far view. */
 export class GalaxyCloudLayer implements MapLayer {
   readonly object3d = new THREE.Group();
   private readonly material = createStarPointsMaterial({ worldSize: 70, minPx: 1, maxPx: 7 });
-  private readonly glowMaterial: THREE.MeshBasicMaterial;
 
   constructor(galaxy: GalaxyModel, count = 200_000) {
     const rng = new Rng(hashSeed(galaxy.params.seed, 'cloud'));
@@ -34,26 +33,16 @@ export class GalaxyCloudLayer implements MapLayer {
     geo.setAttribute('size', new THREE.BufferAttribute(size, 1));
     const points = new THREE.Points(geo, this.material);
     points.frustumCulled = false;
-    points.renderOrder = 2;
+    points.renderOrder = -7;
 
-    this.glowMaterial = new THREE.MeshBasicMaterial({
-      map: radialTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: '#ffcf8a',
-    });
-    const glow = new THREE.Mesh(new THREE.PlaneGeometry(R * 0.7, R * 0.7).rotateX(-Math.PI / 2), this.glowMaterial);
-    const disk = new THREE.Mesh(
-      new THREE.PlaneGeometry(R * 2.3, R * 2.3).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ map: radialTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: '#28426e', opacity: 0.5 }),
-    );
-    glow.position.y = disk.position.y = -1;
-    this.object3d.add(disk, glow, points);
+    this.object3d.add(points);
   }
 
   update(view: ViewState): void {
     const opacity = fadeIn(view.visibleWidth, 5_000, 22_000);
     this.object3d.visible = opacity > 0.01;
-    this.material.uniforms.uOpacity.value = opacity;
+    this.material.uniforms.uOpacity.value = opacity * 0.7;
     this.material.uniforms.uScale.value = pointScale(view.camera, view.viewportHeight);
-    this.glowMaterial.opacity = opacity * 0.9;
   }
 
   dispose(): void {
@@ -61,20 +50,5 @@ export class GalaxyCloudLayer implements MapLayer {
       if (o instanceof THREE.Mesh || o instanceof THREE.Points) o.geometry.dispose();
     });
     this.material.dispose();
-    this.glowMaterial.dispose();
   }
-}
-
-function radialTexture(): THREE.Texture {
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.25, 'rgba(255,255,255,0.45)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  return new THREE.CanvasTexture(canvas);
 }

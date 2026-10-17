@@ -7,14 +7,16 @@ import { ZoomModel } from './ZoomModel';
 export interface MapViewOptions {
   readonly container: HTMLElement;
   readonly galaxyRadius: number;
-  readonly onClick: (world: THREE.Vector3) => void;
-  readonly onHover: (world: THREE.Vector3 | null) => void;
+  readonly onClick: (world: THREE.Vector3, ray: THREE.Raycaster) => void;
+  readonly onHover: (world: THREE.Vector3 | null, ray: THREE.Raycaster) => void;
   readonly onFrame?: (view: ViewState, dt: number) => void;
 }
 
 /** Owns the renderer, scene, camera and layer stack; runs the frame loop. */
 export class MapView {
   readonly scene = new THREE.Scene();
+  /** Everything in absolute galaxy coordinates hangs here, offset by -origin (floating origin). */
+  readonly world = new THREE.Group();
   readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
   readonly layers: LayerStack;
   readonly controller: MapCameraController;
@@ -36,12 +38,25 @@ export class MapView {
     sun.position.set(1, 2, 1.5);
     this.scene.add(sun);
 
-    this.layers = new LayerStack(this.scene);
+    this.scene.add(this.world);
+    this.layers = new LayerStack(this.world);
     this.controller = new MapCameraController(
       this.camera, this.renderer.domElement, new ZoomModel(), opts.galaxyRadius, opts.onClick, opts.onHover,
+      (origin) => {
+        this.world.position.set(-origin.x, 0, -origin.z);
+        this.world.updateMatrixWorld(true);
+      },
     );
     window.addEventListener('resize', this.resize);
     this.resize();
+  }
+
+  get canvas(): HTMLCanvasElement {
+    return this.renderer.domElement;
+  }
+
+  viewportWidth(): number {
+    return this.opts.container.clientWidth;
   }
 
   get view(): ViewState | null {
@@ -63,6 +78,7 @@ export class MapView {
       galaxyMode: this.controller.zoom.isGalaxyMode,
       viewportHeight: this.renderer.domElement.clientHeight * this.renderer.getPixelRatio(),
       time: this.clock.elapsedTime,
+      origin: { x: this.controller.origin.x, z: this.controller.origin.z },
     };
     this.lastView = view;
     this.layers.update(view);

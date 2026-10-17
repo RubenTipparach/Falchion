@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { fade } from './ZoomModel';
+import { fade, fadeIn } from './ZoomModel';
+import { worldToHex } from '../../core/hex/Hex';
 import type { MapLayer, ViewState } from './MapLayer';
 
 /**
@@ -22,7 +23,9 @@ export class HexGridLayer implements MapLayer {
         uFocus: { value: new THREE.Vector2() },
         uFadeRadius: { value: 100 },
         uGalaxyRadius: { value: galaxyRadius },
-        uColor: { value: new THREE.Color('#3d6a9e') },
+        uOrigin: { value: new THREE.Vector2() },
+        uOriginHex: { value: new THREE.Vector2() },
+        uColor: { value: new THREE.Color('#2f7d93') },
       },
       vertexShader: /* glsl */ `
         varying vec2 vWorld;
@@ -33,7 +36,7 @@ export class HexGridLayer implements MapLayer {
         }`,
       fragmentShader: /* glsl */ `
         uniform float uOpacity; uniform vec2 uHover; uniform vec2 uSelected; uniform vec2 uHome;
-        uniform vec2 uFocus; uniform float uFadeRadius; uniform float uGalaxyRadius; uniform vec3 uColor;
+        uniform vec2 uFocus; uniform float uFadeRadius; uniform float uGalaxyRadius; uniform vec3 uColor; uniform vec2 uOrigin; uniform vec2 uOriginHex;
         varying vec2 vWorld;
         const float S = 0.57735026919; // hex size: centre spacing = 1 ly
         vec2 hexRound(vec2 qr) {
@@ -48,6 +51,7 @@ export class HexGridLayer implements MapLayer {
           vec2 p = vWorld;
           vec2 qr = vec2((2.0/3.0) * p.x / S, (-p.x / 3.0 + 0.57735026919 * p.y) / S);
           vec2 h = hexRound(qr);
+          vec2 ha = h + uOriginHex; // absolute axial coords
           vec2 local = p - hexCenter(h);
           float sdf = max(abs(local.y), abs(local.x) * 0.8660254 + abs(local.y) * 0.5);
           float edge = 0.5 - sdf;
@@ -55,12 +59,12 @@ export class HexGridLayer implements MapLayer {
           float line = 1.0 - smoothstep(0.0, w * 1.5, edge);
           float dist = length(vWorld - uFocus);
           float radial = 1.0 - smoothstep(uFadeRadius * 0.55, uFadeRadius, dist);
-          float inGalaxy = 1.0 - step(uGalaxyRadius, length(vWorld));
+          float inGalaxy = 1.0 - step(uGalaxyRadius, length(vWorld + uOrigin));
           vec3 col = uColor;
           float fill = 0.0;
-          if (h == uHover) { col = vec3(0.55, 0.85, 1.0); fill = 0.10; line = max(line, 0.0); }
-          if (h == uSelected) { col = vec3(1.0, 0.82, 0.35); fill = 0.16; }
-          if (h == uHome) { col = vec3(0.4, 1.0, 0.6); fill = 0.14; }
+          if (ha == uHover) { col = vec3(0.50, 0.83, 0.90); fill = 0.10; }
+          if (ha == uSelected) { col = vec3(0.90, 0.71, 0.31); fill = 0.18; }
+          if (ha == uHome) { col = vec3(0.95, 0.78, 0.40); fill = 0.16; }
           float a = (line * 0.55 + fill) * radial * uOpacity * inGalaxy;
           if (a < 0.003) discard;
           gl_FragColor = vec4(col, a);
@@ -79,7 +83,7 @@ export class HexGridLayer implements MapLayer {
   setHome(q: number, r: number): void { this.material.uniforms.uHome.value.set(q, r); }
 
   update(view: ViewState): void {
-    const opacity = fade(view.visibleWidth, 120, 420);
+    const opacity = fade(view.visibleWidth, 120, 420) * fadeIn(view.visibleWidth, 2.5, 6);
     this.object3d.visible = opacity > 0.01;
     if (!this.object3d.visible) return;
     const size = view.visibleWidth * 4;
@@ -87,7 +91,10 @@ export class HexGridLayer implements MapLayer {
     this.object3d.scale.set(size, 1, size);
     const u = this.material.uniforms;
     u.uOpacity.value = opacity;
-    u.uFocus.value.set(view.focus.x, view.focus.z);
+    u.uFocus.value.set(view.focus.x - view.origin.x, view.focus.z - view.origin.z);
+    u.uOrigin.value.set(view.origin.x, view.origin.z);
+    const oh = worldToHex(view.origin.x, view.origin.z);
+    u.uOriginHex.value.set(oh.q, oh.r);
     u.uFadeRadius.value = view.visibleWidth * 1.4;
   }
 

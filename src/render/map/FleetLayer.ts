@@ -14,6 +14,8 @@ export interface FleetView {
   readonly color: string;
   readonly movement: FleetMovement;
   readonly design: ShipDesign;
+  /** Extra label line, e.g. supply and ammunition. */
+  readonly status?: string;
 }
 
 interface FleetVisual {
@@ -21,7 +23,7 @@ interface FleetVisual {
   readonly model: ShipModel;
   readonly line: THREE.Line;
   readonly label: CSS2DObject;
-  readonly fleet: FleetView;
+  fleet: FleetView;
   readonly start: THREE.Vector3;
   readonly end: THREE.Vector3;
   /** Displayed progress; eases toward the turn's progress so a turn reads as one glide. */
@@ -50,7 +52,7 @@ export class FleetLayer implements MapLayer {
     for (const [id, v] of this.visuals) if (!ids.has(id)) this.removeVisual(id, v);
     for (const f of fleets) {
       const existing = this.visuals.get(f.id);
-      if (existing && existing.fleet === f) continue;
+      if (existing && existing.fleet.movement === f.movement && existing.fleet.design === f.design) { existing.fleet = f; continue; }
       if (existing) this.removeVisual(f.id, existing);
       this.visuals.set(f.id, this.createVisual(f));
     }
@@ -61,6 +63,8 @@ export class FleetLayer implements MapLayer {
     this.lastTime = view.time;
     const ease = 1 - Math.exp(-4 * dt);
     const scale = Math.max(0.4, view.visibleWidth * 0.03);
+    // Dashes rescale in power-of-two steps so routes read as dashed lines at any zoom.
+    const dash = 2 ** Math.round(Math.log2(Math.max(1e-3, view.visibleWidth * 0.012)));
     for (const v of this.visuals.values()) {
       const target = progressAt(v.fleet.movement, this.turn);
       v.shown += (target - v.shown) * ease;
@@ -69,7 +73,10 @@ export class FleetLayer implements MapLayer {
       v.model.group.scale.setScalar(scale / 4);
       v.model.animate(view.time);
       const remaining = arrivalTurn(v.fleet.movement) - this.turn;
-      v.label.element.innerHTML = `<b>${v.fleet.name}</b><br>${remaining > 0 ? `ETA ${this.formatEta(remaining)}` : 'Arrived'}`;
+      const mat = v.line.material as THREE.LineDashedMaterial;
+      if (mat.dashSize !== dash) { mat.dashSize = dash; mat.gapSize = dash * 0.7; }
+      const html = `<b>${v.fleet.name}</b><br>${remaining > 0 ? `ETA ${this.formatEta(remaining)}` : 'Arrived'}${v.fleet.status ? `<br><small>${v.fleet.status}</small>` : ''}`;
+      if (v.label.element.innerHTML !== html) v.label.element.innerHTML = html;
       v.label.visible = view.visibleWidth < 4_000;
     }
   }

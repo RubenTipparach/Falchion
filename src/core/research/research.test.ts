@@ -33,7 +33,7 @@ describe('research rules', () => {
   });
 
   it('exclusive choice locks the sibling and opens its analog', () => {
-    let s = learn(EMPTY_RESEARCH, 'o-grown-hulls', 'o-regeneration');
+    let s = learn(EMPTY_RESEARCH, 'o-grown-hulls', 'o-acid-spitters', 'o-ramming-carapace');
     expect(tree.availability(s, 'o-parasitic')).toBe('locked');
     s = learn(s, 'o-predator');
     expect(tree.availability(s, 'o-symbiosis')).toBe('locked');
@@ -51,7 +51,7 @@ describe('research rules', () => {
   });
 
   it('Hive Mind is also reachable from the technological side', () => {
-    const s = learn(EMPTY_RESEARCH, 't-alloys', 't-lasers', 't-distributed-ai');
+    const s = learn(EMPTY_RESEARCH, 't-alloys', 't-long-range-sensors', 't-distributed-ai');
     expect(tree.availability(s, 'x-hive-mind')).toBe('available');
   });
 });
@@ -75,7 +75,7 @@ describe('shards', () => {
   });
 
   it('locked nodes keep shards but stay unresearchable', () => {
-    let s = learn(EMPTY_RESEARCH, 't-alloys', 't-fusion');
+    let s = learn(EMPTY_RESEARCH, 't-alloys', 't-point-defense');
     s = tree.grantShards(s, 't-armor', 'reverse-engineering', 100);
     s = learn(s, 't-shields');
     expect(tree.shardsOf(s, 't-armor')).toBe(100);

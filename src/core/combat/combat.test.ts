@@ -1,0 +1,51 @@
+import { describe, expect, it } from 'vitest';
+import { SHIP_CLASSES } from '../../content/shipClasses';
+import { ALIEN_TARGETS } from '../../content/aliens';
+import { resolveAssault, resolveBattle } from './Combat';
+
+const raiders = ALIEN_TARGETS.find((t) => t.id === 'vossk-raiders')!.fleet!;
+
+describe('combat', () => {
+  it('is deterministic', () => {
+    const me = { name: 'Me', ships: [{ classId: 'lancer', count: 6 }] };
+    expect(resolveBattle(me, raiders, SHIP_CLASSES, 7)).toEqual(resolveBattle(me, raiders, SHIP_CLASSES, 7));
+  });
+
+  it('long range wins early rounds, short range wins late ones', () => {
+    const lancers = { name: 'L', ships: [{ classId: 'lancer', count: 5 }] };
+    const brawlers = { name: 'B', ships: [{ classId: 'interceptor', count: 7 }] };
+    const r = resolveBattle(lancers, brawlers, SHIP_CLASSES, 1).rounds;
+    expect(r[0].damage[0]).toBeGreaterThan(r[0].damage[1]);
+    const late = r.find((x) => x.band === 'short');
+    if (late) expect(late.damage[1]).toBeGreaterThan(late.damage[0] * 0.8);
+  });
+
+  it('fights weaker without ammunition', () => {
+    const me = { name: 'Me', ships: [{ classId: 'lancer', count: 6 }] };
+    const full = resolveBattle(me, raiders, SHIP_CLASSES, 7);
+    const dry = resolveBattle({ ...me, firepower: 0.15 }, raiders, SHIP_CLASSES, 7);
+    expect(dry.rounds[0].damage[0]).toBeLessThan(full.rounds[0].damage[0] * 0.3);
+  });
+
+  it('suppression blunts barrage', () => {
+    const barges = { name: 'B', ships: [{ classId: 'missile-barge', count: 6 }] };
+    const plain = resolveBattle(barges, { name: 'T', ships: [{ classId: 'railgun-monitor', count: 4 }] }, SHIP_CLASSES, 3);
+    const flak = resolveBattle(barges, { name: 'T', ships: [{ classId: 'railgun-monitor', count: 4 }, { classId: 'flak-picket', count: 4 }] }, SHIP_CLASSES, 3);
+    expect(flak.rounds[0].damage[0]).toBeLessThan(plain.rounds[0].damage[0]);
+  });
+
+  it('capture ships take crippled hulls', () => {
+    const me = { name: 'Me', ships: [{ classId: 'lancer', count: 6 }, { classId: 'tractor-tender', count: 4 }, { classId: 'boarding-corvette', count: 4 }] };
+    const r = resolveBattle(me, raiders, SHIP_CLASSES, 11);
+    expect(r.captured[0].reduce((s, x) => s + x.count, 0)).toBeGreaterThan(0);
+  });
+
+  it('planet assault needs siege then troops', () => {
+    const outpost = ALIEN_TARGETS.find((t) => t.id === 'vossk-outpost')!.planet!;
+    const noTroops = resolveAssault({ name: 'Me', ships: [{ classId: 'lancer', count: 6 }, { classId: 'bombard', count: 3 }] }, outpost, SHIP_CLASSES, 2);
+    expect(noTroops.captured).toBe(false);
+    const full = resolveAssault({ name: 'Me', ships: [{ classId: 'lancer', count: 6 }, { classId: 'bombard', count: 4 }, { classId: 'drop-ship', count: 4 }] }, outpost, SHIP_CLASSES, 2);
+    expect(full.phaseReached).toBe('ground');
+    expect(full.captured).toBe(true);
+  });
+});

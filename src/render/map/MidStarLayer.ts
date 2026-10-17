@@ -82,7 +82,7 @@ export class MidStarLayer implements MapLayer {
     geo.setAttribute('size', new THREE.Float32BufferAttribute(size, 1));
     geo.computeBoundingSphere();
     const p = new THREE.Points(geo, this.material);
-    p.renderOrder = 2;
+    p.renderOrder = -6;
     return p;
   }
 

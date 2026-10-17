@@ -10,14 +10,14 @@ export interface Neighbour {
   readonly kind: TerritoryClaim['kind'];
 }
 
-/** Mock world for the mockup: the player's home and nearby empires, all derived from the seed. */
-export interface MockWorld {
+/** The player's home and the nearby empires, all derived from the galaxy seed. */
+export interface World {
   readonly home: StarSystem;
   readonly claims: readonly TerritoryClaim[];
   readonly neighbours: readonly Neighbour[];
 }
 
-export function createMockWorld(galaxy: GalaxyModel): MockWorld {
+export function createWorld(galaxy: GalaxyModel): World {
   const rng = new Rng(hashSeed(galaxy.params.seed, 'world'));
   const offset = (dist: number): Hex => {
     const a = rng.next() * Math.PI * 2;
@@ -49,7 +49,7 @@ export function createMockWorld(galaxy: GalaxyModel): MockWorld {
     ...Array.from({ length: n }, () => ({ hex: starNear(hexAdd(center.hex, offset(spread)))?.hex ?? center.hex, radius })),
   ];
   const claims: TerritoryClaim[] = [
-    { name: 'Your Empire', color: '#5dff9b', kind: 'player', home: home.hex, colonies: colonies(home, 3, 14, 4) },
+    { name: 'Your Empire', color: '#e6b450', kind: 'player', home: home.hex, colonies: colonies(home, 3, 14, 4) },
     ...neighbours.map((n) => ({
       name: n.name, color: n.color, kind: n.kind, home: n.home.hex,
       colonies: colonies(n.home, n.kind === 'alien' ? 4 : 2, 16, 3),

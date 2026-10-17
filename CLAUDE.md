@@ -3,7 +3,7 @@
 Hex-based, at-scale 4X MMO (three.js + TypeScript, Discord integration planned).
 
 ## Commands
-- `npm run dev` — Vite dev server for the mockup
+- `npm run dev` — Vite dev server for the game
 - `npm test` — Vitest unit tests (src/core, src/content)
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run build` — production build

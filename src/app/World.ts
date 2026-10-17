@@ -1,6 +1,6 @@
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
 import { Hex, hexAdd, worldToHex } from '../core/hex/Hex';
-import { Rng, hashSeed } from '../core/rng/Rng';
+import { Rng, hash01, hashSeed } from '../core/rng/Rng';
 import type { TerritoryClaim } from '../render/map/TerritoryLayer';
 
 export interface Neighbour {
@@ -17,8 +17,13 @@ export interface World {
   readonly neighbours: readonly Neighbour[];
 }
 
-export function createWorld(galaxy: GalaxyModel): World {
-  const rng = new Rng(hashSeed(galaxy.params.seed, 'world'));
+/**
+ * The world around one player. Signed-in players (`playerKey` = Discord id) get their
+ * own home in a shared starting region 60–260 ly around the original home, so friends
+ * start within an hour or two of each other; guests keep the original home.
+ */
+export function createWorld(galaxy: GalaxyModel, playerKey?: string): World {
+  const rng = new Rng(playerKey ? hashSeed(galaxy.params.seed, 'world', playerKey) : hashSeed(galaxy.params.seed, 'world'));
   const offset = (dist: number): Hex => {
     const a = rng.next() * Math.PI * 2;
     return { q: Math.round(Math.cos(a) * dist), r: Math.round(Math.sin(a) * dist) };
@@ -33,7 +38,13 @@ export function createWorld(galaxy: GalaxyModel): World {
     const d = galaxy.density(x, z);
     if (d > best.d) best = { d, x, z };
   }
-  const home = starNear(worldToHex(best.x, best.z))!;
+  const origin = starNear(worldToHex(best.x, best.z))!;
+  let home = origin;
+  if (playerKey) {
+    const a = hash01(galaxy.params.seed, hashSeed(playerKey), 1) * Math.PI * 2;
+    const d = 60 + hash01(galaxy.params.seed, hashSeed(playerKey), 2) * 200;
+    home = starNear(hexAdd(origin.hex, { q: Math.round(Math.cos(a) * d), r: Math.round(Math.sin(a) * d) })) ?? origin;
+  }
   const around = (dist: number): StarSystem => starNear(hexAdd(home.hex, offset(dist))) ?? home;
 
   const neighbours: Neighbour[] = [

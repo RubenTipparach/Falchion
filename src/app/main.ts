@@ -51,19 +51,25 @@ import { ShipyardPanel } from '../ui/panels/ShipyardPanel';
 import type { PanelId } from '../ui/GameActions';
 import { GameController, tradePartners } from './GameController';
 import type { GameState } from './GameState';
-import { MockDiscordIdentityProvider } from './identity';
+import { GUEST, probeSession } from './identity';
+import { colorFor, othersOnMap, publicEmpire, ServerSaves } from './ServerSync';
+import { showSignIn } from '../ui/SignIn';
 import { Store } from './Store';
 import { createWorld } from './World';
 
 /** Composition root: build the pure services, the views, and wire them together. */
 async function bootstrap(): Promise<void> {
-  const identity = await new MockDiscordIdentityProvider().signIn();
+  // Signed in with Discord (session cookie on the Falchion server), or offer the choice; guests
+  // play in this browser only, and static hosting (no server) goes straight to guest play.
+  const probe = await probeSession();
+  const identity = probe.user ?? (probe.server && probe.authEnabled ? await showSignIn(GUEST) : GUEST);
+  const signedIn = identity.provider === 'discord';
 
   // ── Domain ──
   const galaxy = new GalaxyModel();
   const tree = new TechTree(TECH_NODES, SHARD_SOURCES);
   const encounters = new EncounterResolver(DEFAULT_LOOT_TABLES, tree);
-  const world = createWorld(galaxy);
+  const world = createWorld(galaxy, signedIn ? identity.id : undefined);
   const { factory, styles, traits } = createDefaultShipFactory();
   const partners = tradePartners(world, world.home);
   const economyTables: EconomyTables = { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, partners, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf };
@@ -97,8 +103,14 @@ async function bootstrap(): Promise<void> {
     if (p && !colonies.some((x) => x.planetId === p.id)) colonies.push(colonyOf(p, ['farm']));
   }
   const clock = await connectWorldClock();
-  const saveGame = new SaveGame(galaxy.params.seed);
-  const saved = saveGame.load();
+  const saveGame = new SaveGame(galaxy.params.seed, undefined, signedIn ? identity.id : undefined);
+  const serverSaves = signedIn ? new ServerSaves() : null;
+  let saved = saveGame.load();
+  if (serverSaves) {
+    // The server copy follows the player between devices; use whichever is further along.
+    const remote = await serverSaves.load();
+    if (saveGame.valid(remote) && (!saved || remote.turn >= saved.turn)) saved = remote;
+  }
   const t0 = clock.tick();
   const start = initialFleets(galaxy, world, identity.displayName, t0);
   const houseDesign = { ...DEFAULT_DESIGN, colors: { primary: '#c8d0dc', secondary: '#2b3448', accent: '#ffb547' } };
@@ -133,7 +145,7 @@ async function bootstrap(): Promise<void> {
   map.layers.add(new GalaxyCloudLayer(galaxy));
   map.layers.add(new MidStarLayer(galaxy));
   const sectors = map.layers.add(new SectorOverlayLayer(galaxy.params.radius, DEFAULT_ADDRESS_SCHEME));
-  map.layers.add(new TerritoryLayer(world.claims));
+  const territory = map.layers.add(new TerritoryLayer(world.claims));
   const hexGrid = map.layers.add(new HexGridLayer(galaxy.params.radius));
   map.layers.add(new NearStarLayer(galaxy));
   const system = map.layers.add(new SystemLayer(galaxy, { isHome: (s) => s.id === world.home.id, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet) }));
@@ -141,7 +153,7 @@ async function bootstrap(): Promise<void> {
   const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK), (h) => galaxy.starAt(h)?.position ?? hexToWorld(h), (id) => controller.selectFleet(id)));
 
   const zoomCfg = map.controller.zoom.config;
-  const topBar = new TopBar(store, controller, identity.displayName, clock, controller.caps);
+  const topBar = new TopBar(store, controller, identity, clock, controller.caps);
   const hud = new Hud({ min: zoomCfg.minAltitude, max: zoomCfg.maxAltitude }, (alt) => controller.zoomTo(alt));
   const thumbs = new PlanetThumbnails(80);
   const thumb = (p: Planet) => thumbs.url(p);
@@ -182,18 +194,30 @@ async function bootstrap(): Promise<void> {
     if (import.meta.env.DEV && e.key === 'Enter' && tag !== 'BUTTON') controller.skipYear();
   });
   // The world runs on: one year per minute, pushed by the server when there is one.
-  clock.onTick((tick) => controller.advanceTo(tick));
+  // Other players in the shared galaxy: their territory and fleets, refreshed every year.
+  const refreshOthers = async () => {
+    if (!serverSaves) return;
+    const { fleets, claims } = othersOnMap(await serverSaves.players());
+    controller.setOtherFleets(fleets);
+    territory.setDynamic(claims);
+  };
+  void refreshOthers();
+  clock.onTick((tick) => { controller.advanceTo(tick); void refreshOthers(); });
   controller.advanceTo(clock.tick());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) controller.advanceTo(clock.tick()); });
   let saveTimer = 0;
-  store.subscribe(() => { clearTimeout(saveTimer); saveTimer = window.setTimeout(() => saveGame.save(store.state), 1500); });
+  const persist = () => {
+    saveGame.save(store.state);
+    if (serverSaves && !saveGame.stoppedSaving) serverSaves.push(saveGame.snapshot(store.state), publicEmpire(store.state, colorFor(identity.id)));
+  };
+  store.subscribe(() => { clearTimeout(saveTimer); saveTimer = window.setTimeout(persist, 1500); });
   window.addEventListener('pagehide', () => saveGame.save(store.state));
   // One tab plays the empire: if another tab saves it, this one stops writing and offers to take over.
   saveGame.onOtherTab(() => {
     saveGame.stop();
     hud.setContact('This empire is open in another tab, so this tab stopped saving. Reload here to play in this tab instead.');
   });
-  saveGame.save(store.state);
+  persist();
   map.start();
   if (import.meta.env.DEV) Object.assign(window, { falchion: controller });
 }

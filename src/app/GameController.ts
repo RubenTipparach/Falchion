@@ -24,7 +24,7 @@ import { Hex, hexDistance, hexEquals, worldToHex } from '../core/hex/Hex';
 import { hashSeed } from '../core/rng/Rng';
 import type { TechTree } from '../core/research/TechTree';
 import { normalizeDesign, ShipDesign } from '../core/ships/ShipDesign';
-import type { FleetLayer } from '../render/map/FleetLayer';
+import type { FleetLayer, FleetView } from '../render/map/FleetLayer';
 import type { HexGridLayer } from '../render/map/HexGridLayer';
 import type { ViewState } from '../render/map/MapLayer';
 import type { MapView } from '../render/map/MapView';
@@ -84,6 +84,8 @@ export class GameController implements GameActions, GameQueries {
   private readonly classById = new Map(SHIP_CLASSES.map((c) => [c.id, c]));
   private readonly targetStars = new Map<string, StarSystem>();
   private lastClick: { id: string; at: number } | null = null;
+  /** Other players' fleets in the shared galaxy (drawn and selectable, never simulated here). */
+  private others: FleetView[] = [];
 
   constructor(private readonly deps: ControllerDeps) {}
 
@@ -288,17 +290,23 @@ export class GameController implements GameActions, GameQueries {
     return { miners, reached };
   }
 
+  /** Show other players' fleets (from the server) on the map. */
+  setOtherFleets(fleets: FleetView[]): void {
+    this.others = fleets;
+    this.view.fleets.setFleets(this.fleetViews());
+  }
+
   /** Map fleets with a supply/ammunition line for the player's own. */
-  private fleetViews() {
+  private fleetViews(): FleetView[] {
     const s = this.state;
-    return s.fleets.map((f) => {
+    return [...this.others, ...s.fleets.map((f): FleetView => {
       const l = s.loadouts[f.id];
       if (!l) return f;
       const cap = capacity(l.ships, specOf);
       const parts = [`Supply ${l.supply}/${cap.supply}`];
       if (cap.ammo) parts.push(`Ammo ${l.ammo}/${cap.ammo}`);
       return { ...f, status: parts.join(' · ') };
-    });
+    })];
   }
 
   // ── Commands: map ──────────────────────────────────────────────────
@@ -435,7 +443,7 @@ export class GameController implements GameActions, GameQueries {
       }
       return;
     }
-    if (!this.state.fleets.some((f) => f.id === fleetId)) return;
+    if (!this.state.fleets.some((f) => f.id === fleetId) && !this.others.some((f) => f.id === fleetId)) return;
     if (this.state.selectedPlanet) { this.deps.store.update({ selectedPlanet: null }); this.view.system.setSelected(null); }
     this.deps.store.update({ selectedFleet: fleetId });
     this.view.fleets.setSelected(fleetId);
@@ -444,7 +452,7 @@ export class GameController implements GameActions, GameQueries {
 
   fleetInfo = (fleetId: string): FleetInfo | null => {
     const s = this.state;
-    const fleet = s.fleets.find((f) => f.id === fleetId);
+    const fleet = s.fleets.find((f) => f.id === fleetId) ?? this.others.find((f) => f.id === fleetId);
     if (!fleet) return null;
     const m = fleet.movement;
     return {
@@ -453,7 +461,7 @@ export class GameController implements GameActions, GameQueries {
       at: isStationed(m, s.turn) ? this.deps.galaxy.starAt(hexAt(m, s.turn)) : null,
       dest: this.deps.galaxy.starAt(m.route[m.route.length - 1]),
       eta: Math.max(0, arrivalTurn(m) - s.turn),
-      mine: fleet.owner === s.playerName,
+      mine: s.fleets.some((f) => f.id === fleetId) && fleet.owner === s.playerName,
     };
   };
 

@@ -121,6 +121,34 @@ jobs:
           fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
+      # Discord sign-in secrets live in GitHub (Settings -> Secrets -> Actions) and are
+      # staged onto Fly here, so docs/discord.md needs no flyctl on your machine.
+      # Each is optional: sign-in stays off until all three are set.
+      - name: Sync Discord secrets to Fly
+        if: steps.fly_gate.outputs.ready == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+        run: |
+          args=()
+          for name in DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET SESSION_SECRET; do
+            [ -n "${!name}" ] && args+=("$name=${!name}")
+          done
+          if [ ${#args[@]} -eq 0 ]; then
+            echo "::notice::Discord secrets not set in GitHub; sign-in stays off. See docs/discord.md."
+          elif ! flyctl secrets set --stage -a "$APP" "${args[@]}" > /dev/null; then
+            echo "::warning::Could not stage Discord secrets on Fly (token scope?). Set them with 'fly secrets set' instead."
+          fi
+
+      # Saves live on one volume, so run exactly one machine (one writer).
+      - name: Single machine for the save volume
+        if: steps.fly_gate.outputs.ready == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl scale count 1 -a "$APP" --yes || echo "::warning::Could not scale to one machine; scale manually with 'fly scale count 1'."
+
       # Built from the repo root (see server/Dockerfile). Retries with
       # backoff because Fly's remote builder can drop connections transiently.
       - name: Deploy to Fly.io

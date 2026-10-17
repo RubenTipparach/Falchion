@@ -8,6 +8,8 @@ import type { ShipModel } from '../ships/ShipKit';
 import type { MapLayer, ViewState } from './MapLayer';
 import { fade, fadeIn } from './ZoomModel';
 
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
 /** Height of routes and ships above the galactic plane (ly): close to it, so they meet stars cleanly. */
 const LIFT = 0.0004;
 /** Radius (ly) of the parking orbit for fleets on station: close to the star, inside the first planet. */
@@ -143,7 +145,8 @@ export class FleetLayer implements MapLayer {
       v.line.visible = routeOpacity > 0.01;
       const near = !local || Math.hypot(v.root.position.x - fx, v.root.position.z - fz) < Math.max(1, view.visibleWidth * 1.5);
       v.root.visible = near;
-      const html = `<b>${v.fleet.name}</b><br>${remaining > 0 ? `ETA ${this.formatEta(remaining)}` : 'Arrived'}${v.fleet.status ? `<br><small>${v.fleet.status}</small>` : ''}`;
+      // Fleet names can come from other players: always escaped.
+      const html = `<b>${escapeHtml(v.fleet.name)}</b><br>${remaining > 0 ? `ETA ${this.formatEta(remaining)}` : 'Arrived'}${v.fleet.status ? `<br><small>${escapeHtml(v.fleet.status)}</small>` : ''}`;
       if (v.label.element.innerHTML !== html) v.label.element.innerHTML = html;
       v.label.element.classList.toggle('selected', v.fleet.id === this.selectedId);
       v.label.visible = near && view.visibleWidth < 4_000;
@@ -179,7 +182,7 @@ export class FleetLayer implements MapLayer {
     const el = document.createElement('div');
     el.className = 'fleet-label';
     el.style.borderColor = fleet.color;
-    el.title = `Select ${fleet.name}`;
+    el.title = `Select ${fleet.name}`; // title is an attribute: not parsed as HTML
     el.addEventListener('pointerdown', (e) => e.stopPropagation());
     el.addEventListener('click', (e) => { e.stopPropagation(); this.onSelect(fleet.id); });
     const label = new CSS2DObject(el);

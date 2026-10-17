@@ -143,7 +143,8 @@ export class BattleLayer implements MapLayer {
     this.stage = new BattleStage(this.factory);
     if (this.env) this.stage.scene.environment = this.env;
     const seed = hashSeed(target.key, target.tick, target.record.round);
-    this.script = buildScript(target.record, this.classes, { seed, R: ROUND_SECONDS });
+    // Wider spacing: every ship is a wing of four hulls (BattleStage WING).
+    this.script = buildScript(target.record, this.classes, { seed, R: ROUND_SECONDS, spacing: 22 });
     this.stage.setScript(this.script, target.sides, seed);
   }
 
@@ -252,7 +253,7 @@ export class BattleLayer implements MapLayer {
       if (!sh.visible) continue;
       const hp = health(sh.s, Math.min(t, R), R);
       this._w.copy(sh.cur);
-      this._w.y += sh.r * 0.9 + 2.2;
+      this._w.y += sh.r * 1.6 + 2.2; // above the whole wing
       const p = project(this._w);
       if (p.behind || p.x < -20 || p.x > w + 20 || p.y < -20 || p.y > h + 20) continue;
       const side = sideAt(sh.s, t);

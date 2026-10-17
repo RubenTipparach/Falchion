@@ -37,13 +37,24 @@ export interface StageShip {
   deathPos: THREE.Vector3 | null;
   capPos: THREE.Vector3 | null;
   capQ: THREE.Quaternion | null;
+  /** Its pose when it was destroyed (the wing's hulls go up around it). */
+  deathQ?: THREE.Quaternion;
   readonly keys: readonly [string, string];
   readonly chunks: ReadonlyArray<{ v: THREE.Vector3; axis: THREE.Vector3; w: number; s: THREE.Vector3; c: RGB }>;
   readonly fb: readonly THREE.Vector3[];
   readonly sparks: ReadonlyArray<{ d: THREE.Vector3; v: number }>;
 }
 
-const SHIP_SCALE = 1.7;
+const SHIP_SCALE = 1.15;
+/**
+ * Hulls drawn for each ship the rules count: one ship of a fleet is a wing of four flying in a
+ * diamond (a lead, two flankers, one trailing), which fights, takes damage, dies and is boarded as one.
+ */
+export const WING = 4;
+/** Where each hull of a wing sits, in units of its radius (x across, y up, z forward), centred on the wing. */
+const WING_OFF: readonly THREE.Vector3[] = [[0, 0, 1.2], [-1.35, -0.25, 0], [1.35, 0.25, 0], [0, 0.45, -1.2]].map(([x, y, z]) => new THREE.Vector3(x, y, z));
+/** Seconds between the hulls of a wing going up when it is destroyed. */
+const WING_STAGGER = 0.16;
 /** Distance between the fleets as the range closes: by round (fractional), long → medium → short. */
 const SEP_KEYS: ReadonlyArray<readonly [number, number]> = [[0, 148], [2, 122], [2.08, 84], [4, 74], [4.08, 44], [12, 36], [1e6, 36]];
 /** Their brawlers press ahead of their line as the fleets close. */
@@ -63,12 +74,12 @@ function bez(out: THREE.Vector3, p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE
   return out.set(p0.x * a + p1.x * b + p2.x * c + p3.x * d, p0.y * a + p1.y * b + p2.y * c + p3.y * d, p0.z * a + p1.z * b + p2.z * c + p3.z * d);
 }
 
-const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _p = new THREE.Vector3(), _r = new THREE.Vector3(), _s = new THREE.Vector3();
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _p = new THREE.Vector3(), _r = new THREE.Vector3(), _s = new THREE.Vector3(), _w = new THREE.Vector3();
 const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _e = new THREE.Euler();
 const FW = new THREE.Vector3(0, 0, 1);
 
 /** Per event, things worked out once: the launch point and the aim offsets at stage scale. */
-interface EventState { p0: THREE.Vector3 | null; fw0: THREE.Vector3 | null; }
+interface EventState { p0: THREE.Vector3 | null; fw0: THREE.Vector3 | null; /** The hull of the shooting and the struck wing. */ ws: number; wd: number; }
 
 /**
  * The battle on stage: both fleets in formation with the game's ship meshes, the range closing by
@@ -123,7 +134,7 @@ export class BattleStage {
       for (const owner of [sh.side, sh.capBy]) {
         if (owner < 0) continue;
         const k = `${owner}|${sh.classId}`;
-        need.set(k, (need.get(k) ?? 0) + 1);
+        need.set(k, (need.get(k) ?? 0) + WING);
       }
     }
     const sizes = new Map<string, { radius: number; length: number }>();
@@ -151,7 +162,7 @@ export class BattleStage {
         sparks: Array.from({ length: 22 }, () => ({ d: unit(rng), v: rng.range(6, 22) })),
       });
     }
-    this.evState = script.events.map(() => ({ p0: null, fw0: null }));
+    this.evState = script.events.map((e, i) => ({ p0: null, fw0: null, ws: (i * 7 + e.s) % WING, wd: (i * 3 + Math.max(0, e.d ?? 0)) % WING }));
   }
 
   /** Distance between the fleets at `t`. */
@@ -206,26 +217,32 @@ export class BattleStage {
   }
 
   deathPosOf(sh: StageShip): THREE.Vector3 {
-    if (!sh.deathPos) { sh.deathPos = new THREE.Vector3(); this.posOf(sh, sh.s.death, sh.deathPos, _qa); }
+    if (!sh.deathPos) { sh.deathPos = new THREE.Vector3(); sh.deathQ = new THREE.Quaternion(); this.posOf(sh, sh.s.death, sh.deathPos, sh.deathQ); }
     return sh.deathPos;
   }
 
-  private muzzle(sh: StageShip, out: THREE.Vector3): THREE.Vector3 { return out.copy(sh.cur).addScaledVector(sh.fwd, sh.len * 0.42); }
+  /** Hull `k` of a wing: where it is now (or, given a pose, there). */
+  wingPos(sh: StageShip, k: number, out: THREE.Vector3, pos: THREE.Vector3 = sh.cur, quat: THREE.Quaternion = sh.q): THREE.Vector3 {
+    return out.copy(WING_OFF[k % WING]).multiplyScalar(sh.r).applyQuaternion(quat).add(pos);
+  }
+
+  private muzzle(sh: StageShip, out: THREE.Vector3, k = 0): THREE.Vector3 { return this.wingPos(sh, k, out).addScaledVector(sh.fwd, sh.len * 0.42); }
 
   private launchPos(e: ScriptEvent, st: EventState): THREE.Vector3 {
     if (!st.p0) {
       const s = this.ships[e.s];
       st.p0 = new THREE.Vector3();
-      this.posOf(s, e.t0, st.p0, _qa);
+      this.posOf(s, e.t0, _r, _qa);
+      this.wingPos(s, st.ws, st.p0, _r, _qa);
       st.fw0 = FW.clone().applyQuaternion(_qa);
       st.p0.addScaledVector(st.fw0, s.len * 0.42);
     }
     return st.p0;
   }
 
-  private tgt(e: ScriptEvent, out: THREE.Vector3): THREE.Vector3 {
+  private tgt(e: ScriptEvent, out: THREE.Vector3, k = 0): THREE.Vector3 {
     const d = this.ships[e.d];
-    out.copy(d.cur);
+    this.wingPos(d, k, out);
     if (e.off) out.x += e.off[0] * d.r * 0.35, out.y += e.off[1] * d.r * 0.35, out.z += e.off[2] * d.r * 0.35;
     return out;
   }
@@ -244,7 +261,9 @@ export class BattleStage {
       this.posOf(sh, t, sh.cur, sh.q);
       sh.fwd.copy(FW).applyQuaternion(sh.q);
       sh.visible = t < sh.s.death;
-      if (sh.visible) this.batches.add(t >= sh.s.cap ? sh.keys[1] : sh.keys[0], sh.cur, sh.q, SHIP_SCALE);
+      // The wing's hulls; when it is destroyed they go up one after another.
+      const key = t >= sh.s.cap ? sh.keys[1] : sh.keys[0];
+      for (let k = 0; k < WING; k++) if (t < sh.s.death + k * WING_STAGGER) this.batches.add(key, this.wingPos(sh, k, _p), sh.q, SHIP_SCALE);
       this.shipFx(sh, t);
     }
     this.jamNow[0] = this.jamNow[1] = 0;
@@ -258,16 +277,27 @@ export class BattleStage {
       if (t > e.t0 + e.span || e.k === 'jam') continue;
       this.draw(e, this.evState[i], t);
     }
-    for (const [sh, a] of this.flash) if (sh.visible) this.fx.shield.add(sh.cur, sh.q, _s.setScalar(sh.r * 1.18), this.shieldRgb[sideAt(sh.s, t)], a * 0.38);
+    for (const [sh, a] of this.flash) if (sh.visible) for (let k = 0; k < WING; k++) this.fx.shield.add(this.wingPos(sh, k, _p), sh.q, _s.setScalar(sh.r * 1.18), this.shieldRgb[sideAt(sh.s, t)], a * 0.38);
     this.fx.end();
     this.batches.end();
   }
 
   private shipFx(sh: StageShip, t: number): void {
-    const G = this.fx.glow, s = sh.s;
+    const s = sh.s;
     if (t >= s.death) {
-      // Death: flash, fireballs, a shockwave in the empire's colour, sparks, then wreckage that keeps drifting.
-      const dt = t - s.death, p = this.deathPosOf(sh), r = sh.r, col = this.sideRgb[sideAt(s, s.death)];
+      this.deathPosOf(sh);
+      for (let k = 0; k < WING; k++) this.wreck(sh, k, t - s.death - k * WING_STAGGER);
+      return;
+    }
+    this.liveFx(sh, t);
+  }
+
+  /** One hull of a destroyed wing, `dt` seconds after it went up: flash, fireballs, a shockwave in the empire's colour, sparks, then wreckage that keeps drifting. */
+  private wreck(sh: StageShip, k: number, dt: number): void {
+    if (dt < 0) return;
+    const G = this.fx.glow, s = sh.s;
+    {
+      const p = this.wingPos(sh, k, _w, sh.deathPos!, sh.deathQ!), r = sh.r, col = this.sideRgb[sideAt(s, s.death)];
       if (dt < 0.7) { const k = dt / 0.7; G.add(p, COL.flash, (1 - k) * 1.6, r * (3 + 7 * k)); }
       if (dt < 1.8) { const k = dt / 1.8; for (const o of sh.fb) G.add(_p.copy(o).multiplyScalar(1 + k * 1.6).add(p), mix3(COL.fire, COL.bad, k), (1 - k) ** 2 * 1.3, r * (1.1 + k * 1.8)); }
       if (dt < 1.2) { const k = dt / 1.2; G.add(p, col, (1 - k) * 0.9, r * (2 + k * 9), 1); }
@@ -280,8 +310,12 @@ export class BattleStage {
         this.fx.debris.add(_p, _qa, c.s, c.c, 0.65);
         if (dt < 5) G.add(_p, COL.fire, (1 - dt / 5) * 0.55, c.s.x * 2.4);
       }
-      return;
     }
+  }
+
+  /** A wing still fighting: crippled before boarding, and taken. */
+  private liveFx(sh: StageShip, t: number): void {
+    const G = this.fx.glow, s = sh.s;
     // Crippled before boarding: venting sparks and fires.
     if (t >= s.crip && t < s.cap + 0.4) {
       for (let j = 0; j < 4; j++) {

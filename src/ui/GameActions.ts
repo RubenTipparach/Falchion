@@ -160,6 +160,8 @@ export interface GameActions {
   editEmpire(): void;
   /** Select a fleet and follow its ship with the camera; null clears. */
   selectFleet(fleetId: string | null): void;
+  /** Chase another player's fleet (`${ownerId}:${fleetId}`) with one of yours; null stops. */
+  chase(fleetId: string, target: string | null): void;
   /** Break off a battle: the fleet heads at once for the nearest friendly system. */
   retreat(fleetId: string): void;
   /** Standing orders a fleet follows on its own. */

@@ -8,7 +8,7 @@ import type { TerritoryClaim } from '../render/map/TerritoryLayer';
 import { WorldClock } from './WorldClock';
 import type { SaveGame } from './SaveGame';
 import { capacity } from '../core/fleet/Logistics';
-import { isStationed } from '../core/fleet/Presence';
+import { isStationed, type ForeignFleet } from '../core/fleet/Presence';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { StarSystem } from '../core/galaxy/GalaxyModel';
 import { Planet } from '../core/galaxy/Planets';
@@ -97,6 +97,12 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
       }
       return star ? star.position : null;
     };
+  }
+
+  /** Another player's fleet from the live feed (for chasing it): `${ownerId}:${fleetId}`. */
+  protected override foreignFleet(key: string): ForeignFleet | null {
+    const f = this.others.find((x) => x.id === key);
+    return f ? { name: f.name.split(' · ')[0], empire: f.owner, movement: f.movement } : super.foreignFleet(key);
   }
 
   /** Show other players' fleets (from the server) on the map. */

@@ -27,7 +27,7 @@ import type { Market } from '../core/economy/Trade';
 import { stepNpcs, type RaidTargets } from '../core/npc/NpcSim';
 import type { NpcRaid } from '../core/npc/types';
 import { hexAt, type FleetMovement } from '../core/fleet/Fleet';
-import { attacks, isStationed, nextRound, startsFight, type Encounter } from '../core/fleet/Presence';
+import { attacks, isStationed, nextRound, startsFight, type Encounter, type ForeignFleet } from '../core/fleet/Presence';
 import { hexEquals, type Hex } from '../core/hex/Hex';
 import { hashSeed } from '../core/rng/Rng';
 import { resolveRound } from '../core/combat/Combat';
@@ -123,7 +123,7 @@ export function applyCommand(save: unknown, player: Player, worldTime: number, c
 export interface PublicRecord {
   readonly home?: Hex | null;
   readonly colonies?: readonly Hex[];
-  readonly fleets?: ReadonlyArray<{ readonly id?: string; readonly movement?: FleetMovement; readonly armed?: boolean; readonly stance?: string; readonly battle?: { readonly foe?: string; readonly tick?: number } }>;
+  readonly fleets?: ReadonlyArray<{ readonly id?: string; readonly movement?: FleetMovement; readonly armed?: boolean; readonly stance?: string; readonly battle?: { readonly foe?: string; readonly tick?: number }; readonly chase?: string }>;
 }
 
 /** Two fleets of different players that meet at sea and fight (at most one per fleet per year). */
@@ -186,38 +186,34 @@ export function findContacts(players: ReadonlyArray<{ readonly id: string; reado
   return out;
 }
 
-/** A fleet that broke off last year's battle, overtaken by a faster enemy that pursues it. */
+/** A chasing fleet that has caught its quarry: they are on the same hex this year. */
 export interface Pursuit extends Contact {
   readonly pursuit: true;
 }
 
 /**
- * Pursuits in `tick`: an aggressive armed fleet that fought a round last year and has stayed put
- * (it was not ordered away), whose foe has since broken off, chases it when its fleet is faster.
- * The round is fought where the fleeing fleet now is. `a` is the pursuer, `b` the quarry. Fleets
- * already in a contact this year, and fleets as fast or faster than their pursuer, are left alone.
+ * Chases that end in a fight in `tick`: a fleet with warships chasing another player's fleet
+ * (its `chase` order) is on the same hex as it, whether either is under way or on station. `a` is
+ * the chaser, `b` the quarry. Fleets already in a contact this year are left out.
  */
 export function findPursuits(players: ReadonlyArray<{ readonly id: string; readonly public?: PublicRecord | null }>, tick: number, busy: readonly Contact[] = []): Pursuit[] {
-  const fleets = new Map<string, { player: string; fleet: string; movement: FleetMovement; armed: boolean; aggressive: boolean; battle?: { foe?: string; tick?: number } }>();
+  const fleets = new Map<string, { player: string; fleet: string; movement: FleetMovement; armed: boolean; chase?: string }>();
   for (const p of players) {
     for (const f of (p.public?.fleets ?? []).slice(0, 50)) {
       if (typeof f?.id !== 'string' || !isFleetMovement(f.movement)) continue;
-      fleets.set(`${p.id}:${f.id}`, { player: p.id, fleet: f.id, movement: f.movement, armed: f.armed === true, aggressive: f.stance === 'aggressive', battle: f.battle });
+      fleets.set(`${p.id}:${f.id}`, { player: p.id, fleet: f.id, movement: f.movement, armed: f.armed === true, chase: typeof f.chase === 'string' ? f.chase : undefined });
     }
   }
   const used = new Set(busy.flatMap((c) => [`${c.a.player}:${c.a.fleet}`, `${c.b.player}:${c.b.fleet}`]));
   const out: Pursuit[] = [];
   for (const key of [...fleets.keys()].sort()) {
     const p = fleets.get(key)!;
-    const q = p.battle?.foe ? fleets.get(p.battle.foe) : undefined;
-    if (!q || used.has(key) || used.has(p.battle!.foe!) || p.battle!.tick !== tick - 1 || q.player === p.player) continue;
-    if (!p.aggressive || !p.armed || !isStationed(p.movement, tick)) continue;
-    const at = hexAt(q.movement, tick);
-    // Still side by side on station: an ordinary contact, not a chase.
-    if (isStationed(q.movement, tick) && hexEquals(at, hexAt(p.movement, tick))) continue;
-    if (p.movement.speed <= q.movement.speed) continue; // as fast or faster: it gets away
+    const q = p.chase ? fleets.get(p.chase) : undefined;
+    if (!q || !p.armed || q.player === p.player || used.has(key) || used.has(p.chase!)) continue;
+    const at = hexAt(p.movement, tick);
+    if (!hexEquals(at, hexAt(q.movement, tick))) continue;
     used.add(key);
-    used.add(p.battle!.foe!);
+    used.add(p.chase!);
     out.push({ a: { player: p.player, fleet: p.fleet }, b: { player: q.player, fleet: q.fleet }, hex: at, pursuit: true });
   }
   return out;
@@ -275,9 +271,9 @@ export function resolveContact(saveA: unknown, playerA: Player, fleetIdA: string
 }
 
 /**
- * A pursuit: the faster pursuer (A) closes on the fleet that broke off (B) where B now is, and the
- * battle's next round is fought there. Null when either empire is not at `tick`, either fleet is
- * gone, the pursuer cannot attack, or B is not faster-fled (A no faster than B).
+ * A chaser (A) that has caught the fleet it chases (B): the next round of their battle is fought
+ * where they meet, under way or not. Null when either empire is not at `tick`, either fleet is
+ * gone, A is not chasing B or cannot attack, or they are not on the same hex.
  */
 export function resolvePursuit(saveA: unknown, playerA: Player, fleetIdA: string, saveB: unknown, playerB: Player, fleetIdB: string, tick: number): ContactResult | null {
   if (!validSave(saveA) || !validSave(saveB) || playerA.id === playerB.id || !Number.isInteger(tick)) return null;
@@ -286,16 +282,16 @@ export function resolvePursuit(saveA: unknown, playerA: Player, fleetIdA: string
   const b = runtime(saveB, playerB, EMPTY_WORLD, []);
   const simA = new EmpireSim(a.deps);
   const simB = new EmpireSim(b.deps);
-  const quarry = simB.contactForce(fleetIdB, tick, true);
   const keyA = `${playerA.id}:${fleetIdA}`, keyB = `${playerB.id}:${fleetIdB}`;
-  if (!quarry || !simA.pursue(fleetIdA, quarry, keyB, tick)) return null;
-  const pursuer = simA.contactForce(fleetIdA, tick);
-  if (!pursuer || !attacks(pursuer)) return null;
+  if (saveA.loadouts[fleetIdA]?.orders?.chase !== keyB) return null;
+  const chaser = simA.contactForce(fleetIdA, tick, true);
+  const quarry = simB.contactForce(fleetIdB, tick, true);
+  if (!chaser || !quarry || !chaser.armed || !hexEquals(chaser.at, quarry.at)) return null;
   const [lo, hi] = keyA < keyB ? [keyA, keyB] : [keyB, keyA];
-  const round = Math.max(nextRound(pursuer.battle, keyB, tick), nextRound(quarry.battle, keyA, tick));
-  const battle = resolveRound(pursuer.side, quarry.side, SHIP_CLASSES, hashSeed(tables().galaxy.params.seed, lo, hi, tick, 'pursuit'), round);
-  simA.applyContact(pursuer, foeOf(quarry, keyB), battle, 0, round, tick);
-  simB.applyContact(quarry, foeOf(pursuer, keyA), battle, 1, round, tick, true);
+  const round = Math.max(nextRound(chaser.battle, keyB, tick), nextRound(quarry.battle, keyA, tick));
+  const battle = resolveRound(chaser.side, quarry.side, SHIP_CLASSES, hashSeed(tables().galaxy.params.seed, lo, hi, tick, 'chase'), round);
+  simA.applyContact(chaser, foeOf(quarry, keyB), battle, 0, round, tick);
+  simB.applyContact(quarry, foeOf(chaser, keyA), battle, 1, round, tick, !isStationed(saveB.fleets.find((f) => f.id === fleetIdB)!.movement, tick));
   const outA = result(a.store.state, playerA);
   const outB = result(b.store.state, playerB);
   return { saveA: outA.save, publicA: outA.public, saveB: outB.save, publicB: outB.public };
@@ -328,6 +324,20 @@ function marketsOf(others: readonly TradingEmpire[], playerId: string): Market[]
 }
 
 /** A save as live simulation state, with its world, the shared world it plays in and the other players' markets. */
+/** Other players' fleets by `${ownerId}:${fleetId}`, from their public views (for chases). */
+function foreignFleets(others: readonly TradingEmpire[], playerId: string): Map<string, ForeignFleet> {
+  const out = new Map<string, ForeignFleet>();
+  for (const o of Array.isArray(others) ? others : []) {
+    if (!o || o.id === playerId) continue;
+    const pub = o as TradingEmpire & { fleets?: ReadonlyArray<{ id?: unknown; name?: unknown; movement?: unknown }> };
+    const empire = typeof o.empire?.name === 'string' ? o.empire.name : typeof o.name === 'string' ? o.name : 'Unknown';
+    for (const f of (Array.isArray(pub.fleets) ? pub.fleets : []).slice(0, 50)) {
+      if (typeof f?.id === 'string' && isFleetMovement(f.movement)) out.set(`${o.id}:${f.id}`, { name: typeof f.name === 'string' ? f.name : 'Fleet', empire, movement: f.movement });
+    }
+  }
+  return out;
+}
+
 function runtime(saved: SavedGame, player: Player, shared: SharedWorld, others: readonly TradingEmpire[]): { deps: SimDeps; store: Store<GameState>; link: ReturnType<typeof snapshotLink> } {
   const save = upgradeSave(saved);
   const { galaxy, tree, encounters } = tables();
@@ -348,7 +358,8 @@ function runtime(saved: SavedGame, player: Player, shared: SharedWorld, others: 
   const store = new Store<GameState>(state);
   const link = snapshotLink(validWorld(shared) ? shared : EMPTY_WORLD);
   const markets = marketsOf(others, player.id);
-  return { deps: { store, galaxy, tree, encounters, world, economy, shared: link, playerId: player.id, markets: () => markets }, store, link };
+  const fleets = foreignFleets(others, player.id);
+  return { deps: { store, galaxy, tree, encounters, world, economy, shared: link, playerId: player.id, markets: () => markets, foreignFleet: (key) => fleets.get(key) ?? null }, store, link };
 }
 
 function result(state: GameState, player: Player): { save: Record<string, unknown>; public: PublicEmpire } {

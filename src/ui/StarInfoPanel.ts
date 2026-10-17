@@ -7,6 +7,7 @@ import { BIOMES } from '../content/biomes';
 import { BIOME_YIELDS, RESOURCES } from '../content/resources';
 import { hasWarships } from '../content/logistics';
 import type { FleetGroup, FleetInfo, GameActions, GameQueries } from './GameActions';
+import type { FleetView } from '../render/map/FleetLayer';
 import { formatDuration } from '../core/time/WorldTime';
 import { CLOCK } from '../app/WorldClock';
 import type { EconomyTables } from '../core/economy/Economy';
@@ -188,6 +189,8 @@ export class StarInfoPanel {
           h('div', {}, h('b', {}, `In battle: round ${group.battle.round}`),
             h('div', { class: 'small' }, `Against ${group.battle.foeName} of ${group.battle.foeEmpire}. A round every year (minute) until one side is gone or breaks off.`)),
           h('button', { class: 'btn danger', onclick: () => this.actions.retreat(group.id) }, 'Retreat')) : '',
+        group.orders?.chase ? h('div', { class: 'row orders' },
+          h('button', { class: 'chip active', title: 'Stop the chase', onclick: () => this.actions.chase(group.id, null) }, `✓ Chasing ${this.q.fleetInfo(group.orders.chase)?.fleet.name.split(' · ')[0] ?? 'a fleet'} · stop`)) : '',
         h('p', { class: 'small' }, shipsText(group.ships)),
         storesView(group),
         h('div', { class: 'row orders' },
@@ -207,7 +210,7 @@ export class StarInfoPanel {
         h('p', { class: 'notice' }, touchFirst()
           ? 'Press and hold a star, or anywhere in empty space, to send this fleet there. Pinch to zoom.'
           : 'Right-click a star, or anywhere in empty space, to send this fleet there. Right-drag to orbit the camera.'))
-        : h('p', { class: 'small muted' }, fleet.owner.startsWith('alien:') ? 'Hostile alien fleet.' : fleet.status ? `Another empire's fleet: ${fleet.status}.` : 'Another empire\'s fleet.'),
+        : h('div', {}, h('p', { class: 'small muted' }, fleet.owner.startsWith('alien:') ? 'Hostile alien fleet.' : fleet.status ? `Another empire's fleet: ${fleet.status}.` : 'Another empire\'s fleet.'), this.chaseView(fleet)),
       h('div', { class: 'actions' },
         h('button', { class: 'btn', title: 'Centre the camera on this fleet', onclick: () => this.actions.focusFleet(fleet.id) }, icon('locate'), ' Centre'),
         h('button', { class: 'btn', title: 'Zoom in to the ship', onclick: () => this.actions.focusFleet(fleet.id, true) }, icon('focus'), ' Zoom'),
@@ -234,6 +237,19 @@ export class StarInfoPanel {
         !to && canLoad ? h('button', { class: 'chip', onclick: () => this.actions.loadGoods(g.id) }, 'Load goods') : null,
         !to && sale ? h('button', { class: 'chip', onclick: () => this.actions.sellGoods(g.id) }, `Sell here · ${fmt(sale)} cr`) : null,
         !to && market && !sale ? h('button', { class: 'chip', title: `Load goods at your nearest colony and sell them at ${market.name}, again and again`, onclick: () => this.actions.tradeRun(g.id, at) }, `Trade run to ${market.name}`) : null));
+  }
+
+  /** Another player's fleet: send one of your warship fleets after it. */
+  private chaseView(fleet: FleetView): HTMLElement | string {
+    if (fleet.owner.startsWith('alien:') || !fleet.id.includes(':')) return '';
+    const hunters = this.q.groups().filter((g) => g.id !== 'dock' && hasWarships(g.ships));
+    if (!hunters.length) return h('p', { class: 'small muted' }, 'Form a fleet with warships to chase it.');
+    return h('div', {}, h('span', { class: 'eyebrow' }, 'Chase with'),
+      h('p', { class: 'small muted' }, 'A faster fleet catches up; a slower one only when it stops. They fight a round a year once they meet.'),
+      h('div', { class: 'row orders' }, ...hunters.map((g) => {
+        const on = g.orders?.chase === fleet.id;
+        return h('button', { class: `chip ${on ? 'active' : ''}`, onclick: () => this.actions.chase(g.id, on ? null : fleet.id) }, on ? `✓ ${g.name}` : g.name);
+      })));
   }
 
   /** Warships only: an aggressive fleet attacks the fleets of other empires it meets at sea. */

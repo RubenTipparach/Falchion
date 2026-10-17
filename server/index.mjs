@@ -123,6 +123,8 @@ export function publicView(p) {
       armed: f.armed === true, ...(f.stance === 'aggressive' ? { stance: 'aggressive' } : {}),
       // The fleet it last fought at sea, and the year: how the server tells a pursuit from an escape.
       ...(typeof f.battle?.foe === 'string' && Number.isInteger(f.battle?.tick) ? { battle: { foe: f.battle.foe.slice(0, 160), tick: f.battle.tick } } : {}),
+      // The other player's fleet it is chasing, if any.
+      ...(typeof f.chase === 'string' ? { chase: f.chase.slice(0, 160) } : {}),
     })),
   };
 }

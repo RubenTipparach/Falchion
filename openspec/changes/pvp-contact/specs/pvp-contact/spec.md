@@ -33,16 +33,16 @@ A battle at sea SHALL be fought one round per world year (one real minute) while
 - **WHEN** the defender presses Retreat between rounds and the attacker's ships are no faster
 - **THEN** its fleet sets course for the nearest friendly system and no further round is fought
 
-### Requirement: A faster fleet can pursue
-When a fleet breaks off a battle, an aggressive armed foe that fought it the year before and has stayed put SHALL pursue it if the foe's ships are faster: the pursuer closes on the fleeing fleet where it now is and the next round is fought there. A fleet as fast or faster than its pursuer SHALL get away. Both owners SHALL be told of the pursuit.
+### Requirement: Fleets chase by moving, at their own speed
+A fleet with warships SHALL be able to chase another player's fleet: each year it steers for where that fleet will be a year later, at its own speed, and a round SHALL be fought whenever the two are on the same hex, under way or not. A faster chaser SHALL close in and catch up; a slower one SHALL catch up only once its quarry stops long enough. An aggressive fleet whose foe breaks off SHALL give chase on its own. Any other course SHALL end a chase.
 
 #### Scenario: Run down
-- **WHEN** a fleet retreats from an enemy whose empire has faster drives
-- **THEN** the next year the enemy catches it where it has got to, and the round is fought there
+- **WHEN** a fleet retreats from an aggressive enemy whose empire has faster drives
+- **THEN** the enemy chases it, closes the gap over the years and fights it where it catches it
 
-#### Scenario: A clean escape
-- **WHEN** a fleet retreats from an enemy no faster than itself
-- **THEN** no further round is fought
+#### Scenario: A slow chaser
+- **WHEN** a player orders a slower fleet to chase an enemy fleet that keeps moving
+- **THEN** it does not catch up until the enemy fleet stops long enough for it to arrive
 
 ### Requirement: The battle is the same for both sides
 The battle SHALL run the game's combat rules with each side's warships, research bonuses and ammunition-scaled firepower. It SHALL be deterministic in both fleets (owner and id) and the year, whichever empire is named first. Each empire's save SHALL record its own losses and a dispatch naming the other fleet and its empire, with those names bounded. Both empires SHALL have played exactly to that year.

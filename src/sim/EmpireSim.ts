@@ -12,7 +12,7 @@ import type { ActivityPlace, ReportKind } from '../core/social/Activity';
 import { arrivalTurn, hexAt, planMovement, positionAt, retime, travelTurns } from '../core/fleet/Fleet';
 import { catchUpTicks, formatDuration } from '../core/time/WorldTime';
 import { capacity, clampStores, exploreCost, firepower, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
-import { adjustShips, countOf, dockedShips, Encounter, FleetBattle, FleetOrders, inBattle, hasShips, isAggressive, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
+import { adjustShips, countOf, dockedShips, Encounter, FleetBattle, FleetOrders, ForeignFleet, inBattle, hasShips, isAggressive, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
 import { planSurvey } from '../core/fleet/Survey';
 import { minedBy, nearestMine, stockFor } from '../core/fleet/AutoMine';
 import { fieldLeft, fieldsOf, homeBelt, yearsToFull, type AsteroidField } from '../core/galaxy/Asteroids';
@@ -57,6 +57,8 @@ export interface FieldReport {
   /** Years until full (0 when it is). */
   readonly fullIn: number;
 }
+
+const xz = (p: Point2): [number, number] => [p.x, p.z];
 
 /** What raiders take from an undefended colony system: a share of each, capped. */
 const RAID_LOOT: readonly Resource[] = ['credits', 'metals', 'food', 'goods'];
@@ -120,6 +122,8 @@ export interface SimDeps {
   readonly npcs?: 'local';
   /** The galaxy's shared state (asteroid fields, NPC empires): read it, and hand it this empire's changes. */
   readonly shared?: SharedLink;
+  /** Other players' fleets by `${ownerId}:${fleetId}`, for chasing them. */
+  readonly foreignFleet?: (key: string) => ForeignFleet | null;
   /** Markets beyond your own colonies and the neighbours (other players' worlds). */
   readonly markets?: () => readonly Market[];
 }
@@ -465,6 +469,14 @@ export class EmpireSim {
 
   /** Send a fleet to any hex: a star system or empty space. */
   moveFleetToHex(fleetId: string, to: Hex, label: string, quiet = false): void {
+    // Any other course ends a chase.
+    const l = this.state.loadouts[fleetId];
+    if (l?.orders?.chase) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { ...l.orders, chase: undefined } } } }));
+    this.setCourse(fleetId, to, label, quiet);
+  }
+
+  /** Set a fleet's course from exactly where it is now (keeps its orders). */
+  protected setCourse(fleetId: string, to: Hex, label: string, quiet = false): void {
     const s = this.state;
     const f = s.fleets.find((x) => x.id === fleetId);
     const l = s.loadouts[fleetId];
@@ -488,7 +500,7 @@ export class EmpireSim {
     const trade = orders.autoExplore ? undefined : orders.trade ?? l.orders?.trade;
     // Only a fleet with warships may be aggressive.
     const stance = isAggressive(orders) && hasWarships(l.ships) ? 'aggressive' as const : undefined;
-    const next: FleetOrders = { autoExplore: orders.autoExplore === true, autoReturn: orders.autoReturn === true, ...(orders.autoMine === true ? { autoMine: true } : {}), trade, stance };
+    const next: FleetOrders = { autoExplore: orders.autoExplore === true, autoReturn: orders.autoReturn === true, ...(orders.autoMine === true ? { autoMine: true } : {}), trade, stance, ...(l.orders?.chase ? { chase: l.orders.chase } : {}) };
     this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: next } } }));
   }
 
@@ -853,6 +865,22 @@ export class EmpireSim {
     const news: string[] = [];
     for (const f of s.fleets) {
       const l = s.loadouts[f.id];
+      if (l?.orders?.chase) {
+        const note = this.steerChase(f.id);
+        if (note) news.push(note);
+        continue;
+      }
+      // An aggressive fleet whose foe broke off last year's battle gives chase on its own.
+      if (l && isAggressive(l.orders) && hasWarships(l.ships) && l.battle && l.battle.tick >= s.turn - 1 && isStationed(f.movement, s.turn)) {
+        const foe = this.foreignFleet(l.battle.foe);
+        const here = hexAt(f.movement, s.turn);
+        if (foe && !(isStationed(foe.movement, s.turn) && hexEquals(hexAt(foe.movement, s.turn), here))) {
+          this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [f.id]: { ...l, orders: { ...l.orders, chase: l.battle!.foe } } } }));
+          news.push(`${f.name} gives chase to ${foe.name.slice(0, 64)} of ${foe.empire.slice(0, 100)}`);
+          this.steerChase(f.id);
+          continue;
+        }
+      }
       if (!l?.orders || !isStationed(f.movement, s.turn)) continue;
       if (l.orders.trade) {
         const sold = this.runTrade(f.id);
@@ -1230,21 +1258,51 @@ export class EmpireSim {
     this.dispatch(overtaken ? `Overtaken while breaking off: ${text}` : text, result.winner === index ? 'good' : result.winner === other || mine > theirs ? 'bad' : undefined);
   }
 
+  /** Another player's fleet by `${ownerId}:${fleetId}` (from the server's list of empires, or the live feed). */
+  protected foreignFleet(key: string): ForeignFleet | null {
+    return this.deps.foreignFleet?.(key) ?? null;
+  }
+
   /**
-   * Chase a fleet that broke off last year's battle: when this fleet is faster, it closes on the
-   * other where it now is (and stops there). False when it is not faster, or not the foe it fought.
+   * Order a fleet with warships to chase another player's fleet (null stops). Each year it steers
+   * for where its quarry will be; it fights when they are on the same hex.
    */
-  pursue(fleetId: string, quarry: ContactForce, quarryKey: string, tick: number): boolean {
+  chase(fleetId: string, target: string | null): void {
     const s = this.state;
     const f = s.fleets.find((x) => x.id === fleetId);
     const l = s.loadouts[fleetId];
-    if (!f || !l || l.battle?.foe !== quarryKey || l.battle.tick !== tick - 1) return false;
-    const speed = this.fleetSpeed();
-    if (speed <= quarry.speed) return false;
-    const at = positionAt(f.movement, tick, this.pointOf);
-    this.deps.store.update((st) => ({ fleets: st.fleets.map((x) => (x.id === fleetId ? { ...x, movement: planMovement(quarry.at, quarry.at, tick, speed, at) } : x)) }));
-    this.dispatch(`${f.name} pursues ${quarry.fleetName.slice(0, 64)} of ${quarry.empire.slice(0, 100)}: faster ships run it down`);
-    return true;
+    if (!f || !l) return;
+    if (!target) {
+      if (l.orders?.chase) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { ...l.orders, chase: undefined } } } }));
+      return;
+    }
+    const foe = this.foreignFleet(target);
+    if (!foe || !hasWarships(l.ships) || target.startsWith(`${this.me}:`)) return this.dispatch(`${f.name} cannot chase that fleet`, 'bad');
+    this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { ...(l.orders ?? {}), chase: target } } } }));
+    this.dispatch(`${f.name} gives chase to ${foe.name.slice(0, 64)} of ${foe.empire.slice(0, 100)}`);
+    this.steerChase(fleetId);
+  }
+
+  /**
+   * Steer a chasing fleet for where its quarry will be a year from now: a faster chaser closes
+   * in and catches it; a slower one gains only while the quarry is stopped. Lost quarry ends the chase.
+   */
+  protected steerChase(fleetId: string): string | null {
+    const s = this.state;
+    const f = s.fleets.find((x) => x.id === fleetId);
+    const l = s.loadouts[fleetId];
+    const key = l?.orders?.chase;
+    if (!f || !l || !key) return null;
+    const foe = this.foreignFleet(key);
+    if (!foe) {
+      this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { ...l.orders, chase: undefined } } } }));
+      return `${f.name} has lost track of the fleet it was chasing`;
+    }
+    const time = Math.max(s.turn, this.now());
+    const ahead = worldToHex(...xz(positionAt(foe.movement, Math.floor(time) + 1, this.pointOf)));
+    const dest = f.movement.route[f.movement.route.length - 1];
+    if (!hexEquals(dest, ahead)) this.setCourse(fleetId, ahead, foe.name, true);
+    return null;
   }
 
   /**

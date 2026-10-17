@@ -60,6 +60,8 @@ const hex: ArgCodec<Hex> = {
     return h && Number.isInteger(h.q) && Number.isInteger(h.r) && Math.abs(h.q) < 1e6 && Math.abs(h.r) < 1e6 ? { q: h.q, r: h.r } : fail('bad hex');
   },
 };
+/** Another player's fleet, as `${ownerId}:${fleetId}`. */
+const fleetKey: ArgCodec<string> = { encode: (v) => v, decode: (raw) => (typeof raw === 'string' && /^[\w-]{1,40}:[\w:,./+-]{1,80}$/.test(raw) ? raw : fail('bad fleet')) };
 const CLASS_IDS = new Set(SHIP_CLASSES.map((c) => c.id));
 const squadrons: ArgCodec<Squadron[]> = {
   encode: (ships) => ships.map((s) => ({ classId: s.classId, count: s.count })),
@@ -134,6 +136,7 @@ export const COMMANDS = {
   tradeRun: [id, nullable(star)],
   sendTribute: [id],
   retreat: [id],
+  chase: [id, nullable(fleetKey)],
   foundFaith: [string(40), tenets],
   toggleMission: [string(60)],
   toggleSpy: [string(60)],

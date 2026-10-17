@@ -14,6 +14,18 @@ export interface FleetOrders {
   readonly trade?: { readonly from: string; readonly to: string };
   /** Attacks other empires' fleets it meets at sea (absent = passive). Only fleets with warships may be aggressive. */
   readonly stance?: 'aggressive';
+  /**
+   * Chasing another player's fleet (`${ownerId}:${fleetId}`): each year it steers for where that
+   * fleet will be, at its own speed. A faster chaser catches up; a slower one only when the other stops.
+   */
+  readonly chase?: string;
+}
+
+/** A fleet as another empire's chaser sees it: where it is going and how fast. */
+export interface ForeignFleet {
+  readonly name: string;
+  readonly empire: string;
+  readonly movement: FleetMovement;
 }
 
 /** A deployed group of ships with its own supply and ammunition. */

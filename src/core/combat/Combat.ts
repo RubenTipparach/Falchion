@@ -251,3 +251,50 @@ export function resolveAssault(attacker: Side, planet: PlanetTarget, classes: re
   const troopsNeeded = Math.round(planet.troops * (0.5 + (defense / maxDefense) * 2));
   return { space, bombardment, troopsLanded, troopsNeeded, captured: troopsLanded > troopsNeeded, phaseReached: 'ground', survivors: ships };
 }
+
+/**
+ * One round of a running battle (player fleets that meet at sea fight a round a world year until
+ * one side is gone or breaks off). `round` sets the range: fleets open at long range and close in
+ * over the rounds. No damage carries between rounds: a round's damage destroys whole hulls, and
+ * what is left over destroys one more ship with that chance. Every round costs at least one ship:
+ * when nothing would die, the side that took more damage (the defender, side 1, on a tie) loses
+ * its lightest hull.
+ */
+export function resolveRound(a: Side, d: Side, classes: readonly ShipClassDef[], seed: number, round: number): BattleResult {
+  const byId = new Map(classes.map((c) => [c.id, c]));
+  const sides = [groupsOf(a, byId), groupsOf(d, byId)] as const;
+  const bon = [a.bonuses ?? {}, d.bonuses ?? {}] as const;
+  const rng = new Rng(hashSeed(seed, 'round', round));
+  const band = bandOf(round);
+  const dmg0 = output(sides[0], sides[1], bon[0], bon[1], band, rng, a.firepower ?? 1);
+  const dmg1 = output(sides[1], sides[0], bon[1], bon[0], band, rng, d.firepower ?? 1);
+  const losses = [applyDamage(sides[0], dmg1), applyDamage(sides[1], dmg0)];
+  // The damage left over on each group: one more ship lost with that chance.
+  for (const i of [0, 1] as const) {
+    for (const g of alive(sides[i])) {
+      if (g.wound > 0 && rng.chance(Math.min(1, g.wound / g.hull))) { g.count--; losses[i]++; }
+      g.wound = 0;
+    }
+  }
+  const cap0 = capture(sides[0], sides[1], bon[0], band);
+  const cap1 = capture(sides[1], sides[0], bon[1], band);
+  const c0 = cap0.reduce((s, x) => s + x.count, 0), c1 = cap1.reduce((s, x) => s + x.count, 0);
+  if (losses[0] + losses[1] + c0 + c1 === 0) {
+    const hullOf = (gs: Group[]) => Math.max(1, alive(gs).reduce((s, g) => s + g.count * g.hull, 0));
+    const loser = dmg0 / hullOf(sides[1]) >= dmg1 / hullOf(sides[0]) ? 1 : 0;
+    const light = alive(sides[loser]).sort((x, y) => x.hull - y.hull || (x.def.id < y.def.id ? -1 : 1))[0];
+    if (light) { light.count--; losses[loser]++; }
+  }
+  const notes: string[] = [];
+  if (c0) notes.push(`${a.name} boarded ${c0} ship${c0 > 1 ? 's' : ''}`);
+  if (c1) notes.push(`${d.name} boarded ${c1} ship${c1 > 1 ? 's' : ''}`);
+  const left0 = shipsOf(alive(sides[0])), left1 = shipsOf(alive(sides[1]));
+  const winner: 0 | 1 | null = left0 && !left1 ? 0 : left1 && !left0 ? 1 : null;
+  const surv = (gs: Group[]) => alive(gs).map((g) => ({ classId: g.def.id, count: g.count }));
+  return {
+    winner,
+    rounds: [{ round, band, damage: [Math.round(dmg0), Math.round(dmg1)], losses: [losses[0], losses[1]], captured: [c0, c1], notes }],
+    survivors: [surv(sides[0]), surv(sides[1])],
+    captured: [cap0, cap1],
+  };
+}

@@ -8,7 +8,7 @@ import type { Capacity, Stores } from '../core/fleet/Logistics';
 import type { FleetView } from '../render/map/FleetLayer';
 import type { Colony } from '../core/economy/Economy';
 import type { Job } from '../core/construction/Construction';
-import type { FleetOrders } from '../core/fleet/Presence';
+import type { FleetBattle, FleetOrders } from '../core/fleet/Presence';
 import type { Resource } from '../content/resources';
 import type { Market } from '../core/economy/Trade';
 import type { FieldReport } from '../sim/EmpireSim';
@@ -31,6 +31,8 @@ export interface FleetGroup {
   readonly eta: number;
   readonly friendly: boolean;
   readonly orders?: FleetOrders;
+  /** A battle at sea it is in (another player's fleet), if one is going on. */
+  readonly battle?: FleetBattle;
   /** Trade goods aboard, and where they were loaded. */
   readonly cargo?: number;
   readonly cargoFrom?: string;
@@ -158,6 +160,8 @@ export interface GameActions {
   editEmpire(): void;
   /** Select a fleet and follow its ship with the camera; null clears. */
   selectFleet(fleetId: string | null): void;
+  /** Break off a battle: the fleet heads at once for the nearest friendly system. */
+  retreat(fleetId: string): void;
   /** Standing orders a fleet follows on its own. */
   setOrders(fleetId: string, orders: FleetOrders): void;
   /** Settle an explored planet with a Colony Ark on station. */

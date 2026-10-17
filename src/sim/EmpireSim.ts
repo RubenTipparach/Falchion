@@ -12,7 +12,7 @@ import type { ActivityPlace, ReportKind } from '../core/social/Activity';
 import { arrivalTurn, hexAt, planMovement, positionAt, retime, travelTurns } from '../core/fleet/Fleet';
 import { catchUpTicks, formatDuration } from '../core/time/WorldTime';
 import { capacity, clampStores, exploreCost, firepower, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
-import { adjustShips, countOf, dockedShips, Encounter, FleetOrders, hasShips, isAggressive, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
+import { adjustShips, countOf, dockedShips, Encounter, FleetBattle, FleetOrders, inBattle, hasShips, isAggressive, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
 import { planSurvey } from '../core/fleet/Survey';
 import { minedBy, nearestMine, stockFor } from '../core/fleet/AutoMine';
 import { fieldLeft, fieldsOf, homeBelt, yearsToFull, type AsteroidField } from '../core/galaxy/Asteroids';
@@ -86,13 +86,17 @@ export interface ContactForce extends Encounter {
   readonly star: StarSystem | null;
   /** The ships that fight: the warships, or the whole fleet when it has none. */
   readonly ships: readonly Squadron[];
-  /** Ammunition the fleet fires in this battle. */
+  /** Ammunition the fleet fires in this round. */
   readonly spent: number;
+  /** The battle it is already in, if any (its round count). */
+  readonly battle?: FleetBattle;
   readonly side: Side;
 }
 
 /** The other fleet of a contact, as it stood going in. */
 export interface ContactFoe {
+  /** The other fleet as `${ownerId}:${fleetId}` (fleet ids repeat between empires). */
+  readonly key: string;
   readonly fleetName: string;
   readonly empire: string;
   readonly ships: readonly Squadron[];
@@ -280,7 +284,7 @@ export class EmpireSim {
       out.push({
         id: f.id, name: f.name, ships: l.ships, stores: { supply: l.supply, ammo: l.ammo }, capacity: capacity(l.ships, specOf),
         star: this.deps.galaxy.starAt(dest), stationed, eta: Math.max(0, arrivalTurn(f.movement) - s.turn), friendly: stationed && this.isFriendlyHex(dest), orders: l.orders,
-        cargo: l.cargo, cargoFrom: l.cargoFrom,
+        cargo: l.cargo, cargoFrom: l.cargoFrom, battle: inBattle(l.battle, s.turn) ? l.battle : undefined,
       });
     }
     return out;
@@ -1193,27 +1197,54 @@ export class EmpireSim {
     const at = hexAt(f.movement, turn);
     const empire = s.identity?.name ?? s.playerName;
     return {
-      fleetId, fleetName: f.name, empire, at, star: this.deps.galaxy.starAt(at), ships, spent: fire.spent,
+      fleetId, fleetName: f.name, empire, at, star: this.deps.galaxy.starAt(at), ships, spent: fire.spent, battle: l.battle,
       aggressive: isAggressive(l.orders), armed: warships.length > 0,
       side: { name: empire, ships, bonuses: this.combatBonuses(), firepower: fire.factor },
     };
   }
 
   /**
-   * Record a battle at sea in this empire's own save: the ships its fleet lost (and any it took),
-   * the ammunition it fired, and the news. `index` is its side in the battle; `foe` is the other
-   * fleet as it went in.
+   * Record one round of a battle at sea in this empire's own save: the ships its fleet lost (and
+   * any it took), the ammunition it fired, the battle it is now in, and the news. `index` is its
+   * side in the round; `foe` is the other fleet as it went in.
    */
-  applyContact(force: ContactForce, foe: ContactFoe, result: BattleResult, index: 0 | 1): void {
+  applyContact(force: ContactForce, foe: ContactFoe, result: BattleResult, index: 0 | 1, round: number, tick: number): void {
     const other = index === 0 ? 1 : 0;
     const delta: Squadron[] = force.ships.map((x) => ({ classId: x.classId, count: -(x.count - countOf(result.survivors[index], x.classId)) }));
     for (const c of result.captured[index]) delta.push({ classId: c.classId, count: c.count });
     this.adjustGroup(force.fleetId, delta, { ammo: (this.state.loadouts[force.fleetId]?.ammo ?? 0) - force.spent });
     const mine = shipTotal(force.ships) - shipTotal(result.survivors[index]);
     const theirs = shipTotal(foe.ships) - shipTotal(result.survivors[other]);
-    const verdict = result.winner === null ? 'stalemate' : result.winner === index ? 'victory' : 'defeat';
     // The other fleet's and empire's names come from another player: bounded like their public view.
-    this.dispatch(`${force.fleetName} fought ${foe.fleetName.slice(0, 64)} of ${foe.empire.slice(0, 100)} at ${force.star?.name ?? 'deep space'}: ${verdict}, ${mine} of ours lost, ${theirs} of theirs destroyed`, verdict === 'victory' ? 'good' : verdict === 'defeat' ? 'bad' : undefined);
+    const foeName = foe.fleetName.slice(0, 64), foeEmpire = foe.empire.slice(0, 100);
+    const place = force.star?.name ?? 'deep space';
+    const l = this.state.loadouts[force.fleetId];
+    if (l) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [force.fleetId]: { ...l, battle: { foe: foe.key, foeName, foeEmpire, round, tick } } } }));
+    const tally = `${mine} of ours lost, ${theirs} of theirs destroyed`;
+    const text = result.winner === index ? `${force.fleetName} destroyed ${foeName} of ${foeEmpire} at ${place} in round ${round}: ${tally}`
+      : result.winner === other ? `${force.fleetName} was destroyed by ${foeName} of ${foeEmpire} at ${place} in round ${round}`
+      : `Battle at ${place}, round ${round}: ${force.fleetName} against ${foeName} of ${foeEmpire}, ${tally}.${round === 1 ? ' A round a year until one side is gone or breaks off: Retreat from the fleet card.' : ''}`;
+    this.dispatch(text, result.winner === index ? 'good' : result.winner === other || mine > theirs ? 'bad' : undefined);
+  }
+
+  /**
+   * Break off: the fleet sets course at once for the nearest friendly system (home when it is
+   * already there, or a nearby star), which ends any battle it is in. Allowed any time.
+   */
+  retreat(fleetId: string): void {
+    const s = this.state;
+    const f = s.fleets.find((x) => x.id === fleetId);
+    const l = s.loadouts[fleetId];
+    if (!f || !l) return;
+    const here = hexAt(f.movement, s.turn);
+    const friendly = [s.home.id, ...this.colonyStars(), ...s.depots].map((id) => this.starById(id)).filter((x): x is StarSystem => !!x && !hexEquals(x.hex, here))
+      .sort((a, b) => hexDistance(a.hex, here) - hexDistance(b.hex, here) || (a.id < b.id ? -1 : 1));
+    const away = friendly[0] ?? this.deps.galaxy.nearestStar({ q: here.q + 4, r: here.r - 2 }, 10);
+    if (!away) return;
+    // Retreating ends the fight: the fleet is no longer aggressive.
+    if (l.orders?.stance) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { ...l.orders, stance: undefined } } } }));
+    this.moveFleet(fleetId, away, true);
+    this.dispatch(`${f.name} breaks off and retreats to ${away.name}`, 'bad');
   }
 
   // ── NPC empires ────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Squadron } from '../core/combat/Combat';
+import { resolveRound, type Squadron } from '../core/combat/Combat';
+import { SHIP_CLASSES } from '../content/shipClasses';
 import { planMovement } from '../core/fleet/Fleet';
 import { GalaxyModel } from '../core/galaxy/GalaxyModel';
 import type { Hex } from '../core/hex/Hex';
@@ -10,7 +11,7 @@ import { createWorld } from '../app/World';
 import { Store } from '../app/Store';
 import type { GameState } from '../app/GameState';
 import { SaveGame } from '../app/SaveGame';
-import { applyCommand, findContacts, resolveContact } from './headless';
+import { advanceSave, applyCommand, findContacts, resolveContact } from './headless';
 import { decodeArgs, encodeCommand } from './commands';
 import { newEmpireState } from './newEmpireState';
 import type { EmpireSim } from './EmpireSim';
@@ -60,6 +61,60 @@ function meet(a: Record<string, any>, b: Record<string, any>, tick = T) {
   return resolveContact(a, player(A), fid(A), b, player(B), fid(B), tick);
 }
 
+describe('a battle at sea is a round a year until one side is gone or breaks off', () => {
+  /** Both empires one year on, then the next round. */
+  const nextYear = (r: NonNullable<ReturnType<typeof meet>>, tick: number) => {
+    const a = advanceSave(r.saveA, player(A), tick + 1)!.save;
+    const b = advanceSave(r.saveB, player(B), tick + 1)!.save;
+    return { a, b, r: meet(a, b, tick + 1) };
+  };
+
+  it('every round costs at least one ship, and the rounds count up', () => {
+    let r = meet(empireWith(A, interceptors(8), HERE, { stance: 'aggressive' }), empireWith(B, interceptors(8), HERE))!;
+    let left = total(fleetOf(r.saveA, A)) + total(fleetOf(r.saveB, B));
+    expect(left).toBeLessThan(16);
+    expect((asSave(r.saveA).loadouts[fid(A)] as { battle: { round: number } }).battle.round).toBe(1);
+    let reached = 1;
+    for (let tick = T, round = 2; r && round <= 4; tick++, round++) {
+      const next = nextYear(r, tick);
+      if (!next.r) break; // one side is gone
+      r = next.r;
+      reached = round;
+      const now = total(fleetOf(r.saveA, A)) + total(fleetOf(r.saveB, B));
+      expect(now).toBeLessThan(left);
+      left = now;
+      expect(news(r.saveA)).toMatch(new RegExp(`round ${round}|destroyed`));
+    }
+    expect(reached).toBeGreaterThanOrEqual(2);
+  });
+
+  it('either side can retreat at any time: the battle ends there', () => {
+    const r = meet(empireWith(A, interceptors(8), HERE, { stance: 'aggressive' }), empireWith(B, interceptors(8), HERE))!;
+    // B breaks off between ticks: an order the server applies at once.
+    const fled = applyCommand(r.saveB, player(B), T + 0.5, encodeCommand('retreat', [fid(B)]))!;
+    expect(fled.ok).toBe(true);
+    expect(news(fled.save)).toContain('retreats to');
+    const a = advanceSave(r.saveA, player(A), T + 1)!.save;
+    const b = advanceSave(fled.save, player(B), T + 1)!.save;
+    expect(meet(a, b, T + 1)).toBeNull();
+  });
+});
+
+describe('a single round', () => {
+  const side = (n: number, name: string) => ({ name, ships: [{ classId: 'lancer', count: n }] });
+  it('always destroys at least one ship, the same way for the same seed', () => {
+    for (let seed = 1; seed < 40; seed++) {
+      const r = resolveRound(side(1, 'a'), side(1, 'b'), SHIP_CLASSES, seed, 1);
+      expect(r.rounds[0].losses[0] + r.rounds[0].losses[1]).toBeGreaterThanOrEqual(1);
+      expect(resolveRound(side(1, 'a'), side(1, 'b'), SHIP_CLASSES, seed, 1)).toEqual(r);
+    }
+  });
+  it('fleets close from long to short range over the rounds', () => {
+    expect(resolveRound(side(5, 'a'), side(5, 'b'), SHIP_CLASSES, 7, 1).rounds[0].band).toBe('long');
+    expect(resolveRound(side(5, 'a'), side(5, 'b'), SHIP_CLASSES, 7, 6).rounds[0].band).toBe('short');
+  });
+});
+
 describe('a battle at sea needs an aggressive armed fleet', () => {
   it('passive fleets pass each other: no battle', () => {
     expect(meet(empireWith(A, interceptors(4), HERE), empireWith(B, interceptors(4), HERE))).toBeNull();
@@ -96,11 +151,11 @@ describe('both sides of a battle lose ships and hear about it', () => {
     const a = empireWith(A, interceptors(6), HERE, { stance: 'aggressive' });
     const b = empireWith(B, interceptors(6), HERE);
     const r = meet(a, b)!;
-    expect(total(fleetOf(r.saveA, A))).toBeLessThan(6);
-    expect(total(fleetOf(r.saveB, B))).toBeLessThan(6);
+    // One round: at least one ship is lost between them.
+    expect(total(fleetOf(r.saveA, A)) + total(fleetOf(r.saveB, B))).toBeLessThan(12);
     expect(news(r.saveA)).toContain(`Strike ${B.slice(-2)} of P${B.slice(-2)}`);
     expect(news(r.saveB)).toContain(`Strike ${A.slice(-2)} of P${A.slice(-2)}`);
-    expect(news(r.saveA)).toMatch(/at deep space: (victory|defeat|stalemate)/);
+    expect(news(r.saveA)).toMatch(/at deep space, round 1/);
     // The empire's roster loses the same ships, and a fleet wiped out is gone from the map.
     for (const [save, id, before] of [[r.saveA, A, a], [r.saveB, B, b]] as const) {
       const left = total(fleetOf(save, id));

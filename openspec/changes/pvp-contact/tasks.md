@@ -20,3 +20,8 @@
 - [x] 5.2 Fight only when both empires have played exactly to the year; order and seed the battle by owner and fleet id; bound the other player's names in the dispatch (verified in `src/sim/pvp.test.ts`).
 - [x] 5.3 Fight a year's contacts once per ticker, and put the first save back when the second cannot be stored (verified in `server/simTicker.test.mjs`).
 - [x] 5.4 Show another empire's warfleets and aggressive warfleets on the map label and fleet card (verified in `src/app/players.test.ts`); test `publicView` sanitising (`server/server.test.mjs`).
+
+## 6. Rounds and retreat
+- [x] 6.1 One round a world year (resolveRound), at least one ship lost per round, range closing over rounds
+- [x] 6.2 Fleets remember the battle and its round; the fleet card shows it with Retreat
+- [x] 6.3 `retreat` command: nearest friendly system at once, ending the battle

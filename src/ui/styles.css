@@ -759,3 +759,8 @@ button.chat-mention:hover { filter: brightness(1.25); }
   .fleet-label.compact { padding: 6px 8px; }
   .fl-list button { padding: 8px; }
 }
+
+/* A battle at sea in progress, on the fleet card. */
+.battle-banner { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--bad, #ff5d5d); border-radius: 8px; background: rgba(255, 93, 93, 0.1); }
+.battle-banner b { color: var(--bad, #ff5d5d); }
+.btn.danger { border-color: var(--bad, #ff5d5d); color: var(--bad, #ff5d5d); }

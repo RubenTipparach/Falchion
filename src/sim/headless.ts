@@ -27,10 +27,10 @@ import type { Market } from '../core/economy/Trade';
 import { stepNpcs, type RaidTargets } from '../core/npc/NpcSim';
 import type { NpcRaid } from '../core/npc/types';
 import { hexAt, type FleetMovement } from '../core/fleet/Fleet';
-import { attacks, isStationed, startsFight, type Encounter } from '../core/fleet/Presence';
+import { attacks, isStationed, nextRound, startsFight, type Encounter } from '../core/fleet/Presence';
 import { hexEquals, type Hex } from '../core/hex/Hex';
 import { hashSeed } from '../core/rng/Rng';
-import { resolveBattle } from '../core/combat/Combat';
+import { resolveRound } from '../core/combat/Combat';
 
 /**
  * The game rules without a browser: the server runs this to keep every empire going while its
@@ -227,15 +227,17 @@ export function resolveContact(saveA: unknown, playerA: Player, fleetIdA: string
   const [first, second] = aFirst ? [forceA, forceB] : [forceB, forceA];
   // Same seed whichever empire asks: both fleets (in order) and the year.
   const [lo, hi] = keyA < keyB ? [keyA, keyB] : [keyB, keyA];
-  const battle = resolveBattle(first.side, second.side, SHIP_CLASSES, hashSeed(tables().galaxy.params.seed, lo, hi, tick));
-  simA.applyContact(forceA, foeOf(forceB), battle, aFirst ? 0 : 1);
-  simB.applyContact(forceB, foeOf(forceA), battle, aFirst ? 1 : 0);
+  // One round a year: the battle goes on from where last year's round left it (the range closes).
+  const round = Math.max(nextRound(forceA.battle, keyB, tick), nextRound(forceB.battle, keyA, tick));
+  const battle = resolveRound(first.side, second.side, SHIP_CLASSES, hashSeed(tables().galaxy.params.seed, lo, hi, tick), round);
+  simA.applyContact(forceA, foeOf(forceB, keyB), battle, aFirst ? 0 : 1, round, tick);
+  simB.applyContact(forceB, foeOf(forceA, keyA), battle, aFirst ? 1 : 0, round, tick);
   const outA = result(a.store.state, playerA);
   const outB = result(b.store.state, playerB);
   return { saveA: outA.save, publicA: outA.public, saveB: outB.save, publicB: outB.public };
 }
 
-const foeOf = (f: ContactForce) => ({ fleetName: f.fleetName, empire: f.empire, ships: f.ships });
+const foeOf = (f: ContactForce, key: string) => ({ key, fleetName: f.fleetName, empire: f.empire, ships: f.ships });
 
 /** How far back (in years) a player's order may be dated: a few seconds of latency. */
 const ORDER_SLACK_YEARS = 5 / 60;

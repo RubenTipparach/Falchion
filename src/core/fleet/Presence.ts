@@ -23,7 +23,27 @@ export interface Loadout extends Stores {
   /** Trade goods aboard, and the system they were loaded at (their price grows with distance from it). */
   readonly cargo?: number;
   readonly cargoFrom?: string;
+  /** A running battle at sea with another player's fleet: who, which round, and the year it was fought. */
+  readonly battle?: FleetBattle;
 }
+
+export interface FleetBattle {
+  /** The other fleet, as `${ownerId}:${fleetId}`. */
+  readonly foe: string;
+  readonly foeName: string;
+  readonly foeEmpire: string;
+  readonly round: number;
+  /** World year of the last round. */
+  readonly tick: number;
+}
+
+/** The round a fleet fights next against `foe` in `tick`: one more than last year's, else a new battle. */
+export function nextRound(battle: FleetBattle | undefined, foe: string, tick: number): number {
+  return battle && battle.foe === foe && battle.tick === tick - 1 ? battle.round + 1 : 1;
+}
+
+/** Whether a fleet is in a battle that is still going (it fought last year or this one). */
+export const inBattle = (battle: FleetBattle | undefined, turn: number): boolean => !!battle && battle.tick >= turn - 1;
 
 /** A fleet is on station (can explore, fight, mine, settle) once it has arrived. */
 export function isStationed(m: FleetMovement, turn: number): boolean {

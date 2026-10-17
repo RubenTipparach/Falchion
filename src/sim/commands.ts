@@ -133,6 +133,7 @@ export const COMMANDS = {
   sellGoods: [id],
   tradeRun: [id, nullable(star)],
   sendTribute: [id],
+  retreat: [id],
   foundFaith: [string(40), tenets],
   toggleMission: [string(60)],
   toggleSpy: [string(60)],

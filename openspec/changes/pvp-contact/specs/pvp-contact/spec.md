@@ -22,12 +22,23 @@ Two fleets of different empires on the same hex, both on station, SHALL fight wh
 - **WHEN** an aggressive armed fleet is on the same hex as a passive fleet of another player
 - **THEN** the two fleets fight that year
 
+### Requirement: A battle is a round a year until one side is gone or breaks off
+A battle at sea SHALL be fought one round per world year (one real minute) while the fleets stay on the same hex and one still attacks. Each round SHALL destroy at least one ship, and the range SHALL close over the rounds. Either fleet SHALL be able to retreat at any time, which sends it to the nearest friendly system at once and ends the battle; its owner's fleet card SHALL show the battle and its round with a Retreat button.
+
+#### Scenario: A drawn-out fight
+- **WHEN** two evenly matched fleets fight for three years
+- **THEN** three rounds are fought, each costing at least one ship, and the dispatches count the rounds
+
+#### Scenario: Breaking off
+- **WHEN** the defender presses Retreat between rounds
+- **THEN** its fleet sets course for the nearest friendly system and no further round is fought
+
 ### Requirement: The battle is the same for both sides
 The battle SHALL run the game's combat rules with each side's warships, research bonuses and ammunition-scaled firepower. It SHALL be deterministic in both fleets (owner and id) and the year, whichever empire is named first. Each empire's save SHALL record its own losses and a dispatch naming the other fleet and its empire, with those names bounded. Both empires SHALL have played exactly to that year.
 
-#### Scenario: Both sides lose ships
+#### Scenario: A round's losses
 - **WHEN** an aggressive fleet of six interceptors meets six interceptors
-- **THEN** each empire's fleet has fewer ships and its dispatch names the other fleet and empire
+- **THEN** at least one ship is lost between them, and each empire's dispatch names the other fleet and empire
 
 #### Scenario: An empire behind the year does not fight
 - **WHEN** one of the two empires has not been played to the year of the contact

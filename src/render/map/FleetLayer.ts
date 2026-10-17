@@ -52,7 +52,6 @@ export class FleetLayer implements MapLayer {
   readonly object3d = new THREE.Group();
   private readonly visuals = new Map<string, FleetVisual>();
   private time = 0;
-  private lastTime = 0;
 
   constructor(
     private readonly ships: ShipFactory,
@@ -109,9 +108,6 @@ export class FleetLayer implements MapLayer {
 
   update(view: ViewState): void {
     this.origin = view.origin;
-    const dt = Math.min(0.1, Math.max(0, view.time - this.lastTime));
-    this.lastTime = view.time;
-    const ease = 1 - Math.exp(-4 * dt);
     // Ships have a real length (smaller than a planet) and only grow on screen as a
     // marker when zoomed out: never bigger than about 1% of the view.
     const length = Math.max(SHIP_LENGTH, view.visibleWidth * 0.01);
@@ -124,9 +120,9 @@ export class FleetLayer implements MapLayer {
     const local = view.visibleWidth < 9;
     const fx = view.focus.x, fz = view.focus.z; // ship roots are in absolute galaxy coordinates
     for (const v of this.visuals.values()) {
-      const target = progressAtTime(v.fleet.movement, this.time);
-      v.shown += (target - v.shown) * ease;
-      if (Math.abs(target - v.shown) < 1e-3) v.shown = target;
+      // Exactly where the ship is at this moment: no easing, so it glides at a steady speed
+      // (easing toward a moving target and snapping when close made it judder up close).
+      v.shown = progressAtTime(v.fleet.movement, this.time);
       v.root.position.lerpVectors(v.start, v.end, v.shown);
       // Up close, a fleet on station parks in a slow orbit outside the planets instead of
       // sitting inside the star, and turns to fly along that orbit.

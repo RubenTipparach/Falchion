@@ -169,6 +169,19 @@ jobs:
           echo "Creating save volume falchion_data (1 GB) in ${region}"
           flyctl volumes create falchion_data -a "$APP" -r "$region" -s 1 --yes
 
+      # The app is unreachable without a public address (a fresh `fly apps create` has none).
+      - name: Ensure public IPs
+        if: steps.fly_gate.outputs.ready == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          ips="$(flyctl ips list -a "$APP" --json)"
+          echo "$ips" | jq -r '.[] | "\(.Type) \(.Address)"'
+          echo "$ips" | jq -e 'map(select(.Type == "v4" or .Type == "shared_v4")) | length > 0' > /dev/null \
+            || flyctl ips allocate-v4 --shared -a "$APP" || echo "::warning::Could not allocate a shared IPv4"
+          echo "$ips" | jq -e 'map(select(.Type == "v6")) | length > 0' > /dev/null \
+            || flyctl ips allocate-v6 -a "$APP" || echo "::warning::Could not allocate an IPv6"
+
       # Built from the repo root (see server/Dockerfile). Retries with
       # backoff because Fly's remote builder can drop connections transiently.
       - name: Deploy to Fly.io
@@ -206,8 +219,14 @@ jobs:
             fi
             sleep 5
           done
-          echo "::error::$url is not answering. Machine state and recent logs follow."
+          echo "::error::$url is not answering. Machine state, addresses and recent logs follow."
           flyctl status -a "$APP" || true
           flyctl machines list -a "$APP" || true
+          flyctl ips list -a "$APP" || true
+          for id in $(flyctl machines list -a "$APP" --json | jq -r '.[] | select(.state != "started") | .id'); do
+            echo "Starting machine $id"; flyctl machine start "$id" -a "$APP" || true
+          done
+          sleep 10
+          curl -sS -m 20 -o /dev/null -w "after start: HTTP %{http_code}\n" "$url/healthz" || true
           flyctl logs -a "$APP" --no-tail 2>&1 | tail -n 150 || true
           exit 1

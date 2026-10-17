@@ -37,7 +37,9 @@ class Clock implements WorldClock {
 
   /** Server-pushed tick (also corrects skew). */
   serverTick(tick: number, serverNow: number): void {
-    this.offsetMs = serverNow - Date.now();
+    // Small skew changes are slewed in so moving ships don't hop once a minute.
+    const offset = serverNow - Date.now();
+    this.offsetMs = Math.abs(offset - this.offsetMs) > 1000 ? offset : this.offsetMs + (offset - this.offsetMs) * 0.2;
     this.advance(tick);
   }
 

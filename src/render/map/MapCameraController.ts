@@ -34,6 +34,12 @@ export class MapCameraController {
   /** Right-click without dragging: an RTS-style command at that ground point. Right-drag still rotates. */
   onRightClick: ((world: THREE.Vector3, ray: THREE.Raycaster) => void) | null = null;
   private follow: (() => THREE.Vector3 | null) | null = null;
+  /**
+   * Focus minus the followed target. It decays to zero, so the view glides onto a moving
+   * ship and then sits exactly on it (a plain lerp trails a moving target forever, by an
+   * amount that wobbles with frame time).
+   */
+  private followOffset: THREE.Vector2 | null = null;
   private drag: { button: number; x: number; y: number; moved: number } | null = null;
   private readonly raycaster = new THREE.Raycaster();
   private readonly plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -69,6 +75,7 @@ export class MapCameraController {
   /** Keep the camera centred on a moving target (absolute coords) until the user pans. */
   followTarget(get: (() => THREE.Vector3 | null) | null, altitude?: number): void {
     this.follow = get;
+    this.followOffset = null;
     this.flyTarget = null;
     this.flyAltitude = null;
     this.zoomAnchor = null;
@@ -106,12 +113,28 @@ export class MapCameraController {
     }
     if (this.follow) {
       const p = this.follow();
-      if (p) this.focus.lerp(new THREE.Vector2(p.x, p.z), 1 - Math.exp(-10 * dt));
-      else this.follow = null;
+      if (!p) this.follow = null;
+      else {
+        this.followOffset ??= new THREE.Vector2(this.focus.x - p.x, this.focus.y - p.z);
+        this.followOffset.multiplyScalar(Math.exp(-8 * dt));
+        this.focus.set(p.x + this.followOffset.x, p.z + this.followOffset.y);
+      }
     } else if (this.flyTarget) {
       this.focus.lerp(this.flyTarget, 1 - Math.exp(-6 * dt));
       if (this.focus.distanceTo(this.flyTarget) < this.zoom.altitude * 0.001 && this.flyAltitude === null) this.flyTarget = null;
     }
+    this.place();
+  }
+
+  /**
+   * Re-centre on the followed target after the layers have moved it this frame, so the
+   * camera and the ship use the same position (otherwise the camera trails by a frame).
+   */
+  refollow(): void {
+    if (!this.follow || !this.followOffset) return;
+    const p = this.follow();
+    if (!p) return;
+    this.focus.set(p.x + this.followOffset.x, p.z + this.followOffset.y);
     this.place();
   }
 

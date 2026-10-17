@@ -273,11 +273,12 @@ export function resolveRound(a: Side, d: Side, classes: readonly ShipClassDef[],
   for (const i of [0, 1] as const) {
     for (const g of alive(sides[i])) {
       if (g.wound > 0 && rng.chance(Math.min(1, g.wound / g.hull))) { g.count--; losses[i]++; }
-      g.wound = 0;
     }
   }
+  // Boarders take the badly damaged ships this round's fire left; then the damage is cleared.
   const cap0 = capture(sides[0], sides[1], bon[0], band);
   const cap1 = capture(sides[1], sides[0], bon[1], band);
+  for (const g of [...sides[0], ...sides[1]]) g.wound = 0;
   const c0 = cap0.reduce((s, x) => s + x.count, 0), c1 = cap1.reduce((s, x) => s + x.count, 0);
   if (losses[0] + losses[1] + c0 + c1 === 0) {
     const hullOf = (gs: Group[]) => Math.max(1, alive(gs).reduce((s, g) => s + g.count * g.hull, 0));

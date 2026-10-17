@@ -120,9 +120,16 @@ export class MapView {
     this.layers.update(view);
     this.controller.refollow();
     this.opts.onFrame?.(view, dt);
-    this.layers.prerender(this.renderer, this.camera);
-    this.renderer.render(this.scene, this.camera);
+    // A layer whose own view fills the screen (a planet's surface) replaces the map: skip drawing it, hide its labels.
+    const covered = this.layers.covered();
+    if (!covered) {
+      this.layers.prerender(this.renderer, this.camera);
+      this.renderer.render(this.scene, this.camera);
+    }
+    this.world.visible = !covered;
     this.labelRenderer.render(this.scene, this.camera);
+    this.world.visible = true;
+    this.layers.overlay(this.renderer, this.labelRenderer, this.camera);
   };
 
   private readonly resize = (): void => {

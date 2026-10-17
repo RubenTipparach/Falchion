@@ -127,6 +127,7 @@ ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .hud-mode { font: 700 11px var(--font-display); letter-spacing: 0.2em; text-transform: uppercase; color: var(--chart); }
 .hud-width { color: var(--muted); }
 .ruler { display: flex; align-items: center; gap: 8px; }
+.ruler[hidden] { display: none; }
 .ruler-bar { height: 8px; border: 1px solid var(--chart); border-top: 0; transition: width 0.15s ease; }
 .ruler-label { color: var(--chart); }
 .hud-hover { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -776,3 +777,18 @@ button.chat-mention:hover { filter: brightness(1.25); }
 .tag.relation.proposal { color: var(--brass, #e6b450); border-color: var(--brass, #e6b450); }
 .tag.relation.unmet { color: var(--muted); border-color: var(--line-strong); }
 .unmet { border-left: 2px solid var(--line-strong); padding-left: 8px; }
+
+/* ── Planet surface view: labels on the ground, styled like the map's ── */
+.surface-label { pointer-events: auto; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none;
+  color: var(--chart); font: 500 11px/1.2 var(--font-mono); letter-spacing: 0.04em; white-space: nowrap; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85); }
+.surface-label::before { content: ''; width: 7px; height: 7px; flex: none; border: 1.5px solid currentColor; transform: rotate(45deg); background: rgba(5, 8, 15, 0.6); }
+.surface-label b { font-weight: 500; color: inherit; background: rgba(5, 8, 15, 0.72); padding: 2px 6px; border-left: 1px solid currentColor; }
+.surface-label small { color: var(--muted); font: 500 10px var(--font-mono); letter-spacing: 0.04em; text-transform: none; margin-left: 6px; }
+.surface-label.capital, .surface-label.city { color: var(--brass); }
+.surface-label.capital b, .surface-label.city b { font: 600 12px/1.2 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; }
+.surface-label.capital::before { width: 9px; height: 9px; }
+.surface-label.site { color: var(--text); font-size: 10px; }
+.surface-label.site::before { width: 5px; height: 5px; border-radius: 50%; transform: none; border-width: 1px; }
+.surface-label.survey { color: var(--muted); cursor: default; }
+.surface-label:hover b { color: #fff; border-color: var(--brass); }
+.surface-label:focus-visible b { outline: 1px solid var(--brass); }

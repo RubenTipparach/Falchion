@@ -25,6 +25,7 @@ import { NebulaSkyboxLayer } from '../render/map/NebulaSkyboxLayer';
 import { GalaxyDiscLayer } from '../render/map/GalaxyDiscLayer';
 import { StarfieldLayer } from '../render/map/StarfieldLayer';
 import { SystemLayer } from '../render/map/SystemLayer';
+import { SurfaceLayer } from '../render/planets/surface/SurfaceLayer';
 import { Dispatches } from '../ui/Dispatches';
 import type { Drawer } from '../ui/Drawer';
 import { EmpirePanel } from '../ui/panels/EmpirePanel';
@@ -166,12 +167,18 @@ async function bootstrap(): Promise<void> {
   const nearStars = map.layers.add(new NearStarLayer(galaxy));
   nearStars.surveyed = controller.surveyedPercent;
   const system = map.layers.add(new SystemLayer(galaxy, { isHome: (s) => s.id === world.home.id, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet) }));
+  // Surface view: the focused planet's close-up, below planet view (draws its own scene when near).
+  const surface = map.layers.add(new SurfaceLayer({ zoom: map.controller.zoom, input: map.controller, frame: (id) => system.planetFrame(id), hold: (id) => system.holdPlanet(id), canvas: map.canvas, lite }));
   const selection = map.layers.add(new SelectionLayer());
   const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK), (h) => galaxy.starAt(h)?.position ?? hexToWorld(h), (id) => controller.selectFleet(id)));
 
   const zoomCfg = map.controller.zoom.config;
   const topBar = new TopBar(store, controller, identity, clock, controller.caps);
-  const hud = new Hud({ min: zoomCfg.minAltitude, max: zoomCfg.maxAltitude }, (alt) => controller.zoomTo(alt));
+  const hud = new Hud({ min: zoomCfg.minAltitude / 10, max: zoomCfg.maxAltitude }, (alt) => controller.zoomTo(alt), () => {
+    const s = store.state;
+    if (s.selected && s.selectedPlanet && s.selectedPlanet.biome !== 'gas') controller.land(s.selected, s.selectedPlanet);
+    else hud.setHover('Focus a rocky planet first, then land on it');
+  });
   const thumbs = new PlanetThumbnails(80);
   const thumb = (p: Planet) => thumbs.url(p);
   const starInfo = new StarInfoPanel(store, controller, controller, controller.describe, thumb, economyTables);
@@ -194,7 +201,7 @@ async function bootstrap(): Promise<void> {
   };
   app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, dispatches.el, ...Object.values(panels).map((p) => p.el));
 
-  controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system });
+  controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system, surface });
   // Phones: the star, planet and fleet card is a bottom sheet; keep what you look at centred above it.
   if (lite) {
     const phone = window.matchMedia('(max-width: 720px)');
@@ -240,6 +247,7 @@ async function bootstrap(): Promise<void> {
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     if (e.key === 'g' || e.key === 'G') controller.toggleView();
     if (e.key === 'Escape' && store.state.selectedFleet) { controller.selectFleet(null); return; }
+    if (e.key === 'Escape' && surface.status.active) { controller.leaveSurface(); return; }
     if (e.key === 'Escape') { if (store.state.selectedPlanet && store.state.selected) controller.focusPlanet(store.state.selected, null); else controller.select(null); }
     if (e.key === 'h' || e.key === 'H') controller.flyTo(world.home, true);
     if (import.meta.env.DEV && e.key === 'Enter' && tag !== 'BUTTON') controller.skipYear();

@@ -19,7 +19,9 @@ import type { ViewState } from '../render/map/MapLayer';
 import type { MapView } from '../render/map/MapView';
 import type { SectorOverlayLayer } from '../render/map/SectorOverlayLayer';
 import type { SelectionLayer } from '../render/map/SelectionLayer';
-import { SYSTEM_VIEW_WIDTH, SystemLayer } from '../render/map/SystemLayer';
+import { SYSTEM_VIEW_WIDTH, SystemLayer, planetRadius } from '../render/map/SystemLayer';
+import type { SurfaceLayer, SurfaceTarget } from '../render/planets/surface/SurfaceLayer';
+import { foreignSeat, type SettlementInput } from '../core/surface/SurfaceLayout';
 import type { Drawer } from '../ui/Drawer';
 import type { FleetInfo, GameActions, GameQueries, PanelId } from '../ui/GameActions';
 import type { Hud } from '../ui/Hud';
@@ -45,10 +47,14 @@ export interface ViewDeps {
   readonly topBar: TopBar;
   readonly panels: Readonly<Record<PanelId, Drawer>>;
   readonly system: SystemLayer;
+  /** The planet close-up below planet view. */
+  readonly surface: SurfaceLayer;
 }
 
 /** Camera altitude (ly) that frames a whole star system. */
 const SYSTEM_ALTITUDE = 0.45;
+/** Camera altitude (ly) of planet view: following a planet in its orbit. */
+const PLANET_ALTITUDE = 0.07;
 /** Camera altitude (ly) when following a ship: close enough to see the hull. */
 const FLEET_ALTITUDE = 0.03;
 /** Locate buttons pan to their target and come no closer than this (a regional view); double-click dives in. */
@@ -73,6 +79,8 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     this.deps.store.subscribe((s, prev) => {
       if (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts) view.fleets.setFleets(this.fleetViews());
       if (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts || s.explored !== prev.explored || s.turn !== prev.turn) this.refreshSurveyPlans();
+      // A finished building or a new colony shows up on the planet being viewed.
+      if (s.selectedPlanet !== prev.selectedPlanet || s.economy.colonies !== prev.economy.colonies || s.explored !== prev.explored) this.refreshSurface();
     });
     // Up close, a surveyor flies to the planet it is surveying (when that system is drawn).
     view.fleets.surveyPoint = (id) => {
@@ -231,9 +239,52 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     } else this.followPlanet(planet);
   }
 
-  private followPlanet(planet: Planet): void {
+  /** Follow a planet; `altitude` null keeps the zoom where it is. */
+  private followPlanet(planet: Planet, altitude: number | null = PLANET_ALTITUDE): void {
     if (this.state.selectedPlanet?.id !== planet.id) return;
-    this.view.map.controller.followTarget(() => this.view.system.planetPosition(planet.id), 0.07);
+    // Until the system is drawn (a slow device may not be there yet), follow its star.
+    const star = this.starById(planet.starId);
+    const fallback = star ? new THREE.Vector3(star.position.x, 0, star.position.z) : null;
+    this.view.map.controller.followTarget(() => this.view.system.planetPosition(planet.id) ?? fallback, altitude ?? undefined);
+  }
+
+  /** Descend to a rocky planet's surface (its capital or main city): focuses it first if need be. */
+  land(star: StarSystem, planet: Planet): void {
+    if (planet.biome === 'gas') return;
+    if (this.state.selectedPlanet?.id !== planet.id || this.state.selectedFleet) this.focusPlanet(star, planet);
+    else if (!this.view.map.controller.following) this.followPlanet(planet, null);
+    this.refreshSurface();
+    this.view.surface.land();
+  }
+
+  /** On the surface: rise back to planet view. */
+  leaveSurface(): void {
+    const planet = this.state.selectedPlanet;
+    if (planet && !this.view.map.controller.following) this.followPlanet(planet, null);
+    this.view.surface.leave(PLANET_ALTITUDE);
+  }
+
+  /** The surface view's planet and what stands on it, from the game state (null: no surface to show). */
+  surfaceTarget(planet: Planet | null): SurfaceTarget | null {
+    if (!planet || planet.biome === 'gas') return null;
+    const star = this.starById(planet.starId);
+    const own = this.colonyAt(planet.id);
+    let colony: SettlementInput | null = null;
+    if (own) {
+      colony = { owner: 'own', name: own.name.replace(/ \(capital\)$/, ''), capital: !!own.capital, size: own.size ?? planet.size, buildings: own.buildings ?? [] };
+    } else if (star) {
+      // Another empire's system: a generic city on its main world.
+      const market = this.marketAt(star);
+      if (market && market.kind !== 'own' && foreignSeat(this.planets(star))?.id === planet.id) {
+        colony = { owner: 'foreign', name: this.describe(star).owner ?? market.name, capital: false, size: planet.size, buildings: [] };
+      }
+    }
+    const done = this.state.explored[planet.id];
+    return { planet, radius: planetRadius(planet), colony, survey: done ? `Unsettled · surveyed (${done.kind})` : 'Unsettled · not yet surveyed' };
+  }
+
+  private refreshSurface(): void {
+    this.view.surface.setTarget(this.surfaceTarget(this.state.selectedPlanet));
   }
 
   private clearPlanetFocus(): void {
@@ -464,6 +515,8 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     this.view.topBar.setGalaxyMode(view.galaxyMode);
     // Ships glide through the current year toward next year's position.
     this.view.fleets.setTime(this.fleetTime());
+    const surface = this.view.surface.status;
+    if (surface.engaged) return this.view.hud.setSurface(surface.altitudeKm, view.altitude);
     const mode = this.state.selectedPlanet ? 'Planet view' : view.visibleWidth < SYSTEM_VIEW_WIDTH ? 'System view' : view.visibleWidth < 420 ? 'Hex view' : view.visibleWidth < 7_000 ? 'Sector view' : 'Galaxy view';
     const pxPerLy = this.view.map.viewportWidth() / view.visibleWidth;
     this.view.hud.setScale(view.visibleWidth, pxPerLy, mode, view.altitude);

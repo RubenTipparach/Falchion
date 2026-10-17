@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { PlanetLook } from '../../content/planetLooks';
 import { Rng } from '../../core/rng/Rng';
 import { NOISE_GLSL } from './noise.glsl';
+import { surfaceLookOf } from '../../core/surface/Terrain';
 
 const KIND: Record<PlanetLook['kind'], number> = { rocky: 0, gas: 1, lava: 2 };
 
@@ -91,20 +92,19 @@ void main() {
   gl_FragColor = vec4(lit, 1.0);
 }`;
 
-/** Procedural planet surface material for a biome look, varied by seed. */
+/** Procedural planet surface material for a biome look, varied by seed (the same roll as the surface view). */
 export function createPlanetMaterial(look: PlanetLook, seed: number, opts: { lights?: boolean } = {}): THREE.ShaderMaterial {
-  const rng = new Rng(seed);
-  const palette = look.variants ? rng.pick(look.variants) : look.palette;
+  const s = surfaceLookOf(look, seed);
   const c = (hex: string) => new THREE.Color(hex);
   return new THREE.ShaderMaterial({
     defines: { KIND: KIND[look.kind] },
     uniforms: {
-      uC0: { value: c(palette[0]) }, uC1: { value: c(palette[1]) }, uC2: { value: c(palette[2]) }, uC3: { value: c(palette[3]) },
-      uCloud: { value: c(look.cloudColor) }, uAtmo: { value: c(look.atmosphere) }, uGlow: { value: c(look.glow ?? '#ffcf7a') },
-      uSea: { value: look.sea + rng.range(-0.08, 0.08) }, uIce: { value: look.ice + rng.range(-0.06, 0.06) },
-      uClouds: { value: look.clouds * rng.range(0.7, 1.2) }, uAtmoStrength: { value: look.atmosphereStrength },
-      uDetail: { value: look.detail * rng.range(0.85, 1.25) }, uCraters: { value: look.craters ? 1 : 0 }, uLights: { value: opts.lights ? 1 : 0 },
-      uTime: { value: 0 }, uSeed: { value: new THREE.Vector3(rng.range(-50, 50), rng.range(-50, 50), rng.range(-50, 50)) },
+      uC0: { value: c(s.palette[0]) }, uC1: { value: c(s.palette[1]) }, uC2: { value: c(s.palette[2]) }, uC3: { value: c(s.palette[3]) },
+      uCloud: { value: c(s.cloudColor) }, uAtmo: { value: c(s.atmosphere) }, uGlow: { value: c(s.glow) },
+      uSea: { value: s.sea }, uIce: { value: s.ice },
+      uClouds: { value: s.clouds }, uAtmoStrength: { value: s.atmosphereStrength },
+      uDetail: { value: s.detail }, uCraters: { value: s.craters ? 1 : 0 }, uLights: { value: opts.lights ? 1 : 0 },
+      uTime: { value: 0 }, uSeed: { value: new THREE.Vector3(...s.seed) },
       uStarPos: { value: new THREE.Vector3() }, uStarColor: { value: new THREE.Color('#ffffff') },
     },
     vertexShader: VERT,

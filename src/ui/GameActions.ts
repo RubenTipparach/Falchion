@@ -152,6 +152,8 @@ export interface GameActions {
   select(star: StarSystem | null): void;
   /** Fly into a system and follow one of its planets (null = back to the system). */
   focusPlanet(star: StarSystem, planet: Planet | null): void;
+  /** Descend to a rocky planet's surface: its capital or main city (a camera move, not an order). */
+  land(star: StarSystem, planet: Planet): void;
   /** Form a new fleet from docked ships and send it to a star. */
   formFleet(ships: Squadron[], to: StarSystem, name?: string): void;
   /** Send a deployed fleet to a star (straight line from where it is now). */

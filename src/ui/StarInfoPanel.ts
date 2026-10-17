@@ -154,6 +154,7 @@ export class StarInfoPanel {
         !done && !colony ? h('button', { class: 'btn primary', disabled: !canExplore, onclick: () => this.actions.explore(p) }, icon('explore'), ` Explore · ${cost} supply`) : '',
         cache || crateWaiting ? h('button', { class: 'btn primary collect', title: 'Gather what this world holds', onclick: () => collectWithFx(portrait, () => this.actions.collectPlanet(p)) }, icon('crate'), ' Collect') : '',
         done && !colony && p.biome !== 'gas' ? h('button', { class: 'btn', disabled: !ark, title: ark ? 'Uses one Colony Ark' : 'Needs a Colony Ark on station here', onclick: () => this.actions.settle(p) }, icon('build'), ' Settle') : '',
+        p.biome !== 'gas' ? h('button', { class: 'btn land', title: colony ? `Descend to ${colony.name.replace(/ \(capital\)$/, '')}` : 'Descend to the surface', onclick: () => this.actions.land(star, p) }, icon('land'), ' Land') : '',
         h('button', { class: 'btn', onclick: () => this.actions.focusPlanet(star, null) }, 'Back to system')),
     );
   }

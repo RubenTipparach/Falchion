@@ -14,6 +14,9 @@ const STAR_SCALE: Record<SpectralClass, number> = { O: 1.8, B: 1.5, A: 1.25, F: 
 /** Show the system below this visible width (ly). */
 export const SYSTEM_VIEW_WIDTH = 9;
 const LABELS_BELOW = 3;
+/** Planet spin (radians per second), and while a close-up of it is shown (a day of about four minutes). */
+const SPIN = 0.15;
+const HELD_SPIN = SPIN / 6;
 const STAR_V = new THREE.Vector3();
 const TMP = new THREE.Vector3();
 
@@ -26,6 +29,8 @@ interface OrbitingPlanet {
   readonly phase: number;
   readonly speed: number;
   readonly label: CSS2DObject;
+  /** Turned so far (radians): planets turn steadily, slower while a close-up holds them. */
+  spin: number;
 }
 
 interface BuiltSystem {
@@ -35,6 +40,15 @@ interface BuiltSystem {
   readonly corona: THREE.Sprite;
   readonly planets: OrbitingPlanet[];
   readonly starLabel: CSS2DObject;
+}
+
+/** A planet as drawn this frame (see SystemLayer.planetFrame). */
+export interface PlanetFrame {
+  readonly position: THREE.Vector3;
+  readonly quaternion: THREE.Quaternion;
+  /** Radius in light years. */
+  readonly radius: number;
+  readonly star: THREE.Vector3;
 }
 
 export interface SystemEvents {
@@ -52,6 +66,9 @@ export class SystemLayer implements MapLayer {
   private readonly coronaTexture = radialTexture();
   private selectedId: string | null = null;
   private hoverId: string | null = null;
+  /** A planet a close-up draws instead (the surface view): hidden here, turning slower. */
+  private heldId: string | null = null;
+  private lastTime = 0;
   private origin = { x: 0, z: 0 };
 
   constructor(private readonly galaxy: GalaxyModel, private readonly events: SystemEvents) {
@@ -84,11 +101,35 @@ export class SystemLayer implements MapLayer {
     this.selectedId = planetId;
   }
 
+  /**
+   * A close-up (the surface view) is drawing this planet from the same viewpoint: hide it here and
+   * slow its spin (a long day on the ground, so the view does not wheel). null releases it.
+   */
+  holdPlanet(planetId: string | null): void {
+    this.heldId = planetId;
+  }
+
   /** Absolute galaxy position of a planet (for the camera to follow). */
   planetPosition(planetId: string): THREE.Vector3 | null {
     const p = this.current?.planets.find((x) => x.planet.id === planetId);
     if (!p) return null;
     return p.mesh.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(this.origin.x, 0, this.origin.z));
+  }
+
+  /**
+   * Where a planet is drawn this frame, for a close-up that must line up with it: its centre and
+   * its star's centre (render-relative, as the camera), its orientation and its radius (ly).
+   */
+  planetFrame(planetId: string): PlanetFrame | null {
+    const sys = this.current;
+    const p = sys?.planets.find((x) => x.planet.id === planetId);
+    if (!sys || !p || !this.object3d.visible) return null;
+    return {
+      position: p.mesh.getWorldPosition(new THREE.Vector3()),
+      quaternion: p.mesh.getWorldQuaternion(new THREE.Quaternion()),
+      radius: p.radius,
+      star: sys.root.getWorldPosition(new THREE.Vector3()),
+    };
   }
 
   update(view: ViewState): void {
@@ -108,6 +149,8 @@ export class SystemLayer implements MapLayer {
     }
     const sys = this.current!;
     const t = view.time;
+    const dt = Math.min(1, Math.max(0, t - this.lastTime));
+    this.lastTime = t;
     // Star position in view space: planet shading is camera-relative.
     const starPos = sys.root.getWorldPosition(STAR_V).applyMatrix4(view.camera.matrixWorldInverse);
     sys.starMaterial.uniforms.uTime.value = t;
@@ -118,7 +161,10 @@ export class SystemLayer implements MapLayer {
     sys.starLabel.element.style.opacity = labelFade;
     for (const p of sys.planets) {
       p.pivot.rotation.y = p.phase + t * p.speed;
-      p.mesh.rotation.y = t * 0.15;
+      const held = p.planet.id === this.heldId;
+      p.spin += dt * (held ? HELD_SPIN : SPIN);
+      p.mesh.rotation.y = p.spin;
+      p.mesh.parent!.visible = !held;
       p.material.uniforms.uTime.value = t;
       p.material.uniforms.uStarPos.value.copy(starPos);
       p.label.visible = showLabels;
@@ -153,7 +199,7 @@ export class SystemLayer implements MapLayer {
       root.add(ring);
 
       const look = PLANET_LOOKS[planet.biome] ?? PLANET_LOOKS.barren;
-      const radius = (0.0028 + planet.size * 0.0013) * (look.kind === 'gas' ? 1.7 : 1);
+      const radius = planetRadius(planet);
       const material = createPlanetMaterial(look, hashSeed(planet.id, 'surface'), { lights: this.events.isHome(star) && planet.index === 0 });
       material.uniforms.uStarColor.value.set(color).lerp(new THREE.Color('#ffffff'), 0.6);
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 64, 40), material);
@@ -175,7 +221,7 @@ export class SystemLayer implements MapLayer {
       holder.add(lbl);
       pivot.add(holder);
       root.add(pivot);
-      planets.push({ planet, pivot, mesh, material, radius, phase: rng.range(0, Math.PI * 2), speed: 0.1 / Math.pow(orbit * 12, 1.5), label: lbl });
+      planets.push({ planet, pivot, mesh, material, radius, phase: rng.range(0, Math.PI * 2), speed: 0.1 / Math.pow(orbit * 12, 1.5), label: lbl, spin: this.lastTime * SPIN });
     }
     return { star, root, starMaterial, corona, planets, starLabel };
   }
@@ -197,6 +243,12 @@ export class SystemLayer implements MapLayer {
     this.clear();
     this.coronaTexture.dispose();
   }
+}
+
+/** A planet's drawn radius in light years (bigger worlds, and gas giants, are larger). */
+export function planetRadius(planet: Planet): number {
+  const look = PLANET_LOOKS[planet.biome] ?? PLANET_LOOKS.barren;
+  return (0.0028 + planet.size * 0.0013) * (look.kind === 'gas' ? 1.7 : 1);
 }
 
 function label(html: string, cls: string): CSS2DObject {

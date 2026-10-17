@@ -9,6 +9,18 @@ export interface Magnet {
   readonly follow?: () => THREE.Vector3 | null;
 }
 
+/**
+ * A close-up view (a planet's surface) that takes the pointer while it is shown: drags turn into
+ * its own camera moves and clicks into its own picks, instead of panning the map. The wheel and
+ * pinch still drive the zoom model, which the close-up reads.
+ */
+export interface InputCapture {
+  /** A drag by (dx, dy) pixels; `turn` for right-drag or shift-drag (heading and tilt). */
+  drag(dx: number, dy: number, turn: boolean): void;
+  /** A click or tap at client coordinates; `double` for the second of a double-click. */
+  click(clientX: number, clientY: number, double: boolean): void;
+}
+
 /** Rebase once the focus drifts this far (ly) from the render origin. */
 const REBASE_DISTANCE = 256;
 /** A finger may wander this far (px) and still count as a tap or a long press. */
@@ -53,6 +65,9 @@ export class MapCameraController {
   attractor: ((ground: THREE.Vector3, viewWidth: number, touch?: boolean) => Magnet | null) | null = null;
   /** Right-click without dragging: an RTS-style command at that ground point. Right-drag still rotates. */
   onRightClick: ((world: THREE.Vector3, ray: THREE.Raycaster) => void) | null = null;
+  /** While set, drags and clicks go to a close-up view instead of the map (see InputCapture). */
+  capture: InputCapture | null = null;
+  private lastCaptureClick = 0;
   private follow: (() => THREE.Vector3 | null) | null = null;
   /**
    * Focus minus the followed target. It decays to zero, so the view glides onto a moving
@@ -217,7 +232,7 @@ export class MapCameraController {
     this.flyAltitude = null;
     const delta = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
     this.zoom.wheel(delta);
-    if (this.follow) return; // Keep the followed planet centred; just zoom.
+    if (this.follow || this.capture) return; // Keep the followed planet centred (or the close-up in charge); just zoom.
     const ground = this.groundAt(e.clientX, e.clientY);
     if (!ground) return;
     // Zooming in close: let a nearby star pull the view to centre on it, so you land in its system.
@@ -259,7 +274,7 @@ export class MapCameraController {
   private firePress(): void {
     this.longPress = null;
     const d = this.drag;
-    if (!d || !d.touch || d.moved >= TOUCH_SLOP || this.touches.size !== 1) return;
+    if (!d || !d.touch || d.moved >= TOUCH_SLOP || this.touches.size !== 1 || this.capture) return;
     this.consumed = true;
     const p = this.groundAt(d.x, d.y);
     if (p) {
@@ -294,6 +309,7 @@ export class MapCameraController {
     const before = this.groundAt(m0.x, m0.y);
     this.zoom.setAltitude(this.zoom.altitude * (d0 / d1) ** PINCH_POWER);
     this.place();
+    if (this.capture) return; // a close-up is in charge: the fingers only zoom
     // Pinching in close: glide onto the nearest star system or ship (and keep following a ship).
     if (d1 > d0 && before && !this.follow) {
       const magnet = this.attractor?.(before, this.visibleWidth(), true);
@@ -320,6 +336,7 @@ export class MapCameraController {
       this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
     }
     if (!this.drag) {
+      if (this.capture) return;
       if (e.target === this.dom || this.dom.contains(e.target as Node)) {
         const g = this.groundAt(e.clientX, e.clientY);
         this.onHover(g, this.rayAt(e.clientX, e.clientY));
@@ -329,6 +346,12 @@ export class MapCameraController {
     const dx = e.clientX - this.drag.x, dy = e.clientY - this.drag.y;
     this.drag.moved += Math.abs(dx) + Math.abs(dy);
     if (this.drag.moved >= TOUCH_SLOP) this.cancelLongPress();
+    if (this.capture) {
+      this.capture.drag(dx, dy, this.drag.button !== 0 || e.shiftKey || e.ctrlKey);
+      this.drag.x = e.clientX;
+      this.drag.y = e.clientY;
+      return;
+    }
     if (this.drag.button === 0 && !e.shiftKey) {
       if (this.drag.moved > (this.drag.touch ? TOUCH_SLOP : 4)) this.follow = null;
       const a = this.groundAt(this.drag.x, this.drag.y);
@@ -362,6 +385,15 @@ export class MapCameraController {
       if (this.consumed) { this.drag = null; return; }
     }
     const slop = this.drag?.touch ? TOUCH_SLOP : 5;
+    if (this.capture) {
+      if (this.drag && this.drag.moved < slop && this.drag.button === 0) {
+        const now = performance.now();
+        this.capture.click(e.clientX, e.clientY, now - this.lastCaptureClick < 400);
+        this.lastCaptureClick = now;
+      }
+      this.drag = null;
+      return;
+    }
     if (this.drag && this.drag.moved < slop && (this.drag.button === 0 || this.drag.button === 2)) {
       const p = this.groundAt(e.clientX, e.clientY);
       if (p && this.drag.button === 0) this.onClick(p, this.rayAt(e.clientX, e.clientY));

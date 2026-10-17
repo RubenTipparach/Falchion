@@ -26,6 +26,8 @@ export const DEFAULT_ZOOM: ZoomConfig = {
 export class ZoomModel {
   private z: number;
   private targetZ: number;
+  /** Lowest z allowed: 0 (minAltitude) unless a floor lets the zoom go further in (a planet's surface). */
+  private minZ = 0;
 
   constructor(readonly config: ZoomConfig = DEFAULT_ZOOM, initialAltitude = config.hexPreset) {
     this.z = this.targetZ = this.zOf(initialAltitude);
@@ -41,6 +43,20 @@ export class ZoomModel {
 
   get maxZ(): number {
     return Math.log(this.config.maxAltitude / this.config.minAltitude);
+  }
+
+  /** The lowest altitude the zoom goes to now. */
+  get floor(): number {
+    return this.config.minAltitude * Math.exp(this.minZ);
+  }
+
+  /**
+   * Let the zoom go below `minAltitude`, down to `altitude` (null: back to `minAltitude`). Raising
+   * the floor above the current target eases the view back up to it.
+   */
+  setFloor(altitude: number | null): void {
+    this.minZ = altitude === null ? 0 : Math.min(0, Math.log(altitude / this.config.minAltitude));
+    this.targetZ = this.clampZ(this.targetZ);
   }
 
   get isGalaxyMode(): boolean {
@@ -82,11 +98,11 @@ export class ZoomModel {
   }
 
   private zOf(altitude: number): number {
-    return this.clampZ(Math.log(altitude / this.config.minAltitude));
+    return this.clampZ(Math.log(Math.max(altitude, 1e-12) / this.config.minAltitude));
   }
 
   private clampZ(z: number): number {
-    return Math.min(this.maxZ, Math.max(0, z));
+    return Math.min(this.maxZ, Math.max(this.minZ, z));
   }
 }
 

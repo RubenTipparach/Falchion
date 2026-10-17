@@ -32,6 +32,7 @@ export const ICONS = {
   supply: svg('<rect x="4" y="7" width="16" height="12" rx="1.5"/><path d="M9 7V5h6v2M4 12h16"/>'),
   ammo: svg('<path d="M7 20V9l2-4 2 4v11zM13 20V9l2-4 2 4v11z"/>'),
   home: svg('<path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/>'),
+  land: svg('<path d="M12 3v10"/><path d="M8 9.5l4 4 4-4"/><path d="M3 20c3-2.6 6-3.4 9-3.4s6 .8 9 3.4"/>'),
   build: svg('<path d="M4 20h16"/><path d="M6 20V9l6-5 6 5v11"/><path d="M10 20v-6h4v6"/>'),
   // Share: a link (two chain loops).
   link: svg('<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/>'),

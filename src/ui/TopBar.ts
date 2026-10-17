@@ -21,6 +21,7 @@ export class TopBar {
   private readonly tabs: Record<PanelId, HTMLButtonElement>;
   private readonly lootBadge = h('span', { class: 'badge', hidden: true });
   private readonly empireBtn: HTMLButtonElement;
+  private readonly nav: HTMLElement;
 
   constructor(store: Store<GameState>, actions: GameActions, identity: PlayerIdentity, private readonly clock: WorldClock, private readonly caps: () => Partial<Record<Resource, number>>) {
     const skip = import.meta.env.DEV ? h('button', { class: 'chip', title: 'Development only: advance one year now', onclick: () => actions.skipYear() }, '+1 yr') : '';
@@ -40,7 +41,7 @@ export class TopBar {
       h('div', { class: 'turn' },
         h('div', { class: 'turn-dial' }, h('span', { class: 'turn-label' }, 'Year'), this.turnNum),
         this.clockEl),
-      h('nav', { class: 'tabs' }, this.viewBtn, this.tabs.shipyard, this.tabs.research, this.tabs.empire, this.tabs.fleets, this.tabs.explore, this.tabs.war),
+      (this.nav = h('nav', { class: 'tabs' }, this.viewBtn, this.tabs.shipyard, this.tabs.research, this.tabs.empire, this.tabs.fleets, this.tabs.explore, this.tabs.war)),
       h('div', { class: 'identity', title: identity.provider === 'discord' ? 'Signed in with Discord: your empire is saved on the server' : 'Guest: your empire is saved in this browser only' },
         identity.avatar ? h('img', { class: 'avatar', src: identity.avatar, alt: '' }) : h('span', { class: 'avatar' }, identity.displayName.slice(0, 1)),
         h('span', { class: 'who' }, h('b', {}, identity.displayName),
@@ -56,6 +57,15 @@ export class TopBar {
     this.renderEmpire(store.state);
     this.renderStats(store.state);
     this.renderTurn(store.state.turn);
+    // The tabs fit whatever else the bar holds: labels when there is room, icons when not, and
+    // a sideways scroll (wheel too) when even the icons do not fit.
+    new ResizeObserver(() => this.fit()).observe(this.el);
+    this.nav.addEventListener('wheel', (e) => {
+      if (this.nav.scrollWidth <= this.nav.clientWidth || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      this.nav.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }, { passive: false });
+    this.nav.addEventListener('scroll', () => this.edges());
     const tickClock = () => this.renderClock();
     tickClock();
     setInterval(tickClock, 250);
@@ -68,7 +78,25 @@ export class TopBar {
 
   /** A tab that manages its own drawer (e.g. Chat), added after the game tabs. */
   addTab(tab: HTMLElement): void {
-    this.el.querySelector('nav.tabs')?.append(tab);
+    this.nav.append(tab);
+    this.fit();
+  }
+
+  /** Make room for the tabs: drop the wordmark first, then the tab labels; scroll if even the icons do not fit. */
+  private fit(): void {
+    const n = this.nav, over = () => n.scrollWidth > n.clientWidth + 1;
+    n.classList.remove('compact');
+    this.el.classList.remove('tight');
+    if (over()) this.el.classList.add('tight');
+    if (over()) n.classList.add('compact');
+    this.edges();
+  }
+
+  /** Fade the ends of the tab strip that have more tabs past them. */
+  private edges(): void {
+    const n = this.nav, more = n.scrollWidth > n.clientWidth + 1;
+    n.classList.toggle('more-left', more && n.scrollLeft > 2);
+    n.classList.toggle('more-right', more && n.scrollLeft + n.clientWidth < n.scrollWidth - 2);
   }
 
   setActivePanel(id: PanelId | null): void {

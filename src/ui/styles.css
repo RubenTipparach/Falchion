@@ -576,11 +576,17 @@ button.chat-mention:hover { filter: brightness(1.25); }
 .chat-guest p { margin: 0 0 12px; }
 .badge.hot { background: var(--bad); color: #fff; }
 
-/* Narrower screens: tabs show their icons only (the label stays as a tooltip). */
-@media (max-width: 1700px) {
-  .tabs .tab .tab-label { display: none; }
-  .tabs .tab { padding: 7px 9px; }
-}
+/* The tabs take what room the bar has left: labels when they fit, icons when not (TopBar.fit;
+   the label stays as a tooltip), and a sideways scroll with faded ends when even icons do not fit. */
+.topbar > :not(.tabs) { flex-shrink: 0; }
+.topbar .tabs { flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; }
+.topbar .tabs::-webkit-scrollbar { display: none; }
+.topbar.tight .brand .wordmark { display: none; }
+.tabs.compact .tab .tab-label { display: none; }
+.tabs.compact .tab { padding: 7px 9px; }
+.tabs.more-right { mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+.tabs.more-left { mask-image: linear-gradient(90deg, transparent, #000 28px); }
+.tabs.more-left.more-right { mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 @media (max-width: 1440px) {
   .topbar { gap: 10px; }
   .topbar .brand .wordmark { display: none; }

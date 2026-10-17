@@ -115,7 +115,7 @@ export function setupPlayers({ identity, canSignIn, galaxy, controller, store, t
 
   const panel = new PlayersPanel({
     signedIn,
-    signInUrl: canSignIn ? './auth/discord' : null,
+    signInUrl: canSignIn ? `./auth/discord?next=${encodeURIComponent(location.pathname)}` : null,
     rows,
     activity: () => model.activity,
     empireOf,

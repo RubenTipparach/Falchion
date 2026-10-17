@@ -2,6 +2,8 @@
 // a channel webhook (DISCORD_WEBHOOK_URL, no bot token needed) or the bot
 // (DISCORD_BOT_TOKEN + DISCORD_CHANNEL_ID). Inert until one is set; the webhook wins.
 
+import { placeLink } from './links.mjs';
+
 /** What players may report, and how it reads in the channel. */
 export const EVENT_KINDS = {
   battle: '⚔️',
@@ -160,11 +162,13 @@ export function createNotifier(opts) {
       : `🚀 **${clean(name, 64)}** founded an empire in the galaxy.`),
     announcement: (text, by) => post(`📣 **Announcement** (${clean(by, 64)}): ${clean(text, 280)}`),
     /** A player's own news (battle, colony, depot). Returns false when unknown or rate-limited. */
-    async report(player, kind, text) {
+    async report(player, kind, text, place) {
       if (!enabled || !(kind in EVENT_KINDS)) return false;
       const line = clean(text, 200);
       if (!line || !allow(player.id)) return false;
-      return (await post(`${EVENT_KINDS[kind]} **${clean(player.name, 64)}**: ${line}`)).ok;
+      // A hotlink to the place, so the channel can click straight there.
+      const link = placeLink(publicUrl, place);
+      return (await post(`${EVENT_KINDS[kind]} **${clean(player.name, 64)}**: ${line}${link ? ` — ${link}` : ''}`)).ok;
     },
   };
 }

@@ -118,6 +118,8 @@ export interface GameActions {
   /** Open every crate and collect the resource caches of newly explored planets in a system. */
   /** Collect one explored planet's resource cache and loot crate. */
   collectPlanet(planet: Planet): Collected | null;
+  /** Share a hotlink to a star system or one of its planets: the share sheet on phones, else the clipboard. */
+  shareLink(star: StarSystem, planet?: Planet | null): Promise<'shared' | 'copied' | 'failed'>;
   collectResources(star: StarSystem): Collected | null;
   research(nodeId: string): void;
   setFocus(nodeId: string | null): void;

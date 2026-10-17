@@ -709,3 +709,7 @@ button.chat-mention:hover { filter: brightness(1.25); }
 @media (max-width: 720px) {
   .toasts { bottom: calc(var(--tabbar) + 8px); width: calc(100vw - 16px); }
 }
+/* Share link: a brief "Link copied" under the button. */
+.icon-btn.share { position: relative; }
+.icon-btn.tipped::after { content: attr(data-tip); position: absolute; top: calc(100% + 6px); right: 0; z-index: 3; padding: 4px 8px; border: 1px solid var(--line); border-radius: 4px;
+  background: rgba(5, 8, 16, 0.95); color: var(--good); font: 600 11px var(--font-body); white-space: nowrap; pointer-events: none; animation: toast-in 0.2s ease-out; }

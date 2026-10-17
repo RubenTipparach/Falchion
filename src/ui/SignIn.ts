@@ -11,7 +11,7 @@ const DISCORD_LOGO = '<svg width="20" height="20" viewBox="0 0 24 24" aria-hidde
  */
 export function showSignIn(guest: PlayerIdentity): Promise<PlayerIdentity> {
   return new Promise((resolve) => {
-    const discord = h('a', { class: 'btn discord', href: './auth/discord' });
+    const discord = h('a', { class: 'btn discord', href: `./auth/discord?next=${encodeURIComponent(location.pathname)}` });
     discord.innerHTML = DISCORD_LOGO;
     discord.append(h('span', {}, 'Sign in with Discord'));
     const el = h('div', { class: 'signin', role: 'dialog', 'aria-label': 'Sign in' },

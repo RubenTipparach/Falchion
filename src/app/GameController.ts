@@ -22,6 +22,8 @@ import type { FleetInfo, GameActions, GameQueries, PanelId } from '../ui/GameAct
 import type { Hud } from '../ui/Hud';
 import type { TopBar } from '../ui/TopBar';
 import type { GameState } from './GameState';
+import { routePath, systemRoute } from './Routes';
+import { touchFirst } from '../ui/dom';
 import type { World } from './World';
 import { EmpireSim, SimDeps } from '../sim/EmpireSim';
 
@@ -126,6 +128,21 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
 
   /** Opens the founding screen to edit the empire's name, colours and flag (set by main). */
   onEditEmpire: () => void = () => {};
+
+  async shareLink(star: StarSystem, planet: Planet | null = null): Promise<'shared' | 'copied' | 'failed'> {
+    const url = new URL(routePath(systemRoute(star, planet ? planet.index : null)), location.origin).toString();
+    const title = `${planet?.name ?? star.name} · Falchion`;
+    try {
+      if (touchFirst() && navigator.share) {
+        await navigator.share({ title, url });
+        return 'shared';
+      }
+      await navigator.clipboard.writeText(url);
+      return 'copied';
+    } catch {
+      return 'failed';
+    }
+  }
 
   editEmpire(): void {
     this.onEditEmpire();

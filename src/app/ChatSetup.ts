@@ -47,7 +47,7 @@ export function setupChat({ identity, canSignIn, galaxy, controller, panels, liv
 
   const chat: ChatPanel = new ChatPanel({
     me,
-    signInUrl: canSignIn ? './auth/discord' : null,
+    signInUrl: canSignIn ? `./auth/discord?next=${encodeURIComponent(location.pathname)}` : null,
     knownPlaces: () => {
       const s = controller.state;
       if (cache?.state !== s || cache.others !== others) cache = { state: s, others, places: knownPlaces(s, galaxy, controller.planets, others.map((p) => p.home)) };

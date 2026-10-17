@@ -49,7 +49,7 @@ function limiter(max, windowMs, now) {
  *   file: string,
  *   empireOf: (playerId: string) => Promise<{ name: string, color: string } | null>,
  *   broadcast?: (event: string, data: object) => void,
- *   forward?: (user: { id: string, name: string }, kind: string, text: string) => Promise<unknown>,
+ *   forward?: (user: { id: string, name: string }, kind: string, text: string, place?: { name: string, q: number, r: number }) => Promise<unknown>,
  *   now?: () => number,
  *   keep?: number,
  *   rate?: { max: number, windowMs: number },
@@ -215,7 +215,7 @@ export function createActivity(deps) {
       try { body = await readJson(req); } catch { json(res, 400, { error: 'bad event' }); return true; }
       const r = await report(user, body);
       // Battles, colonies and depots also go to the Discord channel (the notifier has its own limit).
-      const posted = r.status === 200 && !r.body.duplicate && forward ? await forward(user, r.body.kind, r.body.text).catch(() => false) : false;
+      const posted = r.status === 200 && !r.body.duplicate && forward ? await forward(user, r.body.kind, r.body.text, r.body.place).catch(() => false) : false;
       json(res, r.status, r.status === 200 ? { ...r.body, posted: Boolean(posted) } : r.body);
       return true;
     }

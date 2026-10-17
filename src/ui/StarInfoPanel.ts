@@ -59,6 +59,7 @@ export class StarInfoPanel {
         h('span', { class: 'star-dot', style: `background:${SPECTRAL_COLORS[star.spectral]}` }),
         h('div', {}, h('span', { class: 'eyebrow' }, isHome ? 'Home system' : 'Star system'), h('h3', {}, star.name),
           h('p', { class: 'muted' }, `Class ${star.spectral} · ${star.planetCount} planets${d.owner ? ` · ${d.owner}` : ''}`)),
+        this.shareButton(star, null),
         h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => this.actions.select(null) }, icon('close'))),
       h('dl', {},
         h('dt', {}, 'Address'), h('dd', {}, d.address),
@@ -101,6 +102,7 @@ export class StarInfoPanel {
       h('header', {},
         h('div', {}, h('span', { class: 'eyebrow' }, `${star.name} · planet ${p.index + 1} of ${star.planetCount}`), h('h3', {}, p.name),
           h('p', { class: 'muted' }, `${biome?.name ?? p.biome} world · size ${p.size}`)),
+        this.shareButton(star, p),
         h('button', { class: 'icon-btn', 'aria-label': 'Back to system', title: 'Back to system (Esc)', onclick: () => this.actions.focusPlanet(star, null) }, icon('close'))),
       portrait,
       h('dl', {},
@@ -117,6 +119,20 @@ export class StarInfoPanel {
         done && !colony && p.biome !== 'gas' ? h('button', { class: 'btn', disabled: !ark, title: ark ? 'Uses one Colony Ark' : 'Needs a Colony Ark on station here', onclick: () => this.actions.settle(p) }, icon('build'), ' Settle') : '',
         h('button', { class: 'btn', onclick: () => this.actions.focusPlanet(star, null) }, 'Back to system')),
     );
+  }
+
+  /** Share a hotlink to the system or planet (share sheet on phones, else copied), with a brief confirmation. */
+  private shareButton(star: StarSystem, planet: Planet | null): HTMLElement {
+    const what = planet ? planet.name : star.name;
+    const btn = h('button', { class: 'icon-btn share', 'aria-label': `Share a link to ${what}`, title: `Copy a link to ${what}` }, icon('link'));
+    btn.addEventListener('click', async () => {
+      const result = await this.actions.shareLink(star, planet);
+      if (result === 'shared') return;
+      btn.dataset.tip = result === 'copied' ? 'Link copied' : 'Could not copy the link';
+      btn.classList.add('tipped');
+      setTimeout(() => btn.classList.remove('tipped'), 1_600);
+    });
+    return btn;
   }
 
   /** Card for a selected fleet: yours shows stores and orders; right-click a star or empty space to move it. */

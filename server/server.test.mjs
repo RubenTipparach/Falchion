@@ -135,6 +135,8 @@ describe('sign-in redirect', async () => {
   const { safeNext } = await import('./auth.mjs');
   it('only returns to paths on this site', () => {
     expect(safeNext('/admin')).toBe('/admin');
+    expect(safeNext('/system/-14697,20078/Norka_II/planet/2')).toBe('/system/-14697,20078/Norka_II/planet/2');
+    expect(safeNext('/system/1,2/S%C3%A9')).toBe('/system/1,2/S%C3%A9');
     expect(safeNext('//evil.example')).toBe('/');
     expect(safeNext('https://evil.example')).toBe('/');
   });

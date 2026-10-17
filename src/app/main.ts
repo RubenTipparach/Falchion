@@ -64,6 +64,7 @@ import { Store } from './Store';
 import { createWorld } from './World';
 import { setupChat } from './ChatSetup';
 import { setupPlayers } from './PlayersSetup';
+import { setupRouting } from './Router';
 import { reportActivity } from './GalaxyApi';
 
 /** Composition root: build the pure services, the views, and wire them together. */
@@ -215,6 +216,8 @@ async function bootstrap(): Promise<void> {
   map.controller.zoom.setTargetAltitude(48);
   map.controller.zoom.snap();
   controller.select(world.home);
+  // Hotlinks (/system/q,r/Name, /hex/q,r, /player/id): open where the link points; the address bar follows the selection.
+  setupRouting({ controller, store, galaxy, map, showPlayer: (id) => players.panel.show(id) });
 
   window.addEventListener('keydown', (e) => {
     const tag = (e.target as HTMLElement).tagName;

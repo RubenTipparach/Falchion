@@ -14,6 +14,7 @@ import { createAuth } from './auth.mjs';
 import { createChat } from './chat.mjs';
 import { createPlayerFeed } from './live.mjs';
 import { createNotifier } from './notifier.mjs';
+import { linkPreview, withPreview } from './links.mjs';
 import { createStore } from './store.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -61,7 +62,7 @@ export const activity = createActivity({
     return pub ? { name: pub.empire?.name ?? '', color: pub.color } : null;
   },
   broadcast: (event, data) => chat.broadcast(event, data),
-  forward: (user, kind, text) => notifier.report(user, kind, text),
+  forward: (user, kind, text, place) => notifier.report(user, kind, text, place),
 });
 // Each save's public view reaches the other players at once (server/live.mjs).
 export const playerFeed = createPlayerFeed({ broadcast: (event, data, opts) => chat.broadcast(event, data, opts) });
@@ -191,8 +192,25 @@ function send(res, status, body, headers = {}) {
 }
 
 async function serveStatic(pathname, res) {
+  // A hotlink: the game's page, titled after the place so it unfurls well in Discord.
+  const preview = linkPreview(pathname);
+  if (preview) {
+    try {
+      const html = await readFile(join(STATIC_DIR, 'index.html'), 'utf8');
+      const url = `${(process.env.PUBLIC_URL ?? 'https://falchion.fly.dev').replace(/\/$/, '')}${pathname}`;
+      return send(res, 200, withPreview(html, preview, url), { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' });
+    } catch {
+      return send(res, 404, 'not found');
+    }
+  }
   // Resolve inside STATIC_DIR only (no path traversal).
-  const rel = normalize(decodeURIComponent(pathname)).replace(/^([/\\])+/, '');
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return send(res, 400, 'bad path');
+  }
+  const rel = normalize(decoded).replace(/^([/\\])+/, '');
   let file = resolve(STATIC_DIR, rel);
   if (file !== STATIC_DIR && !file.startsWith(STATIC_DIR + sep)) return send(res, 403, 'forbidden');
   try {

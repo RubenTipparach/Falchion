@@ -11,7 +11,7 @@
 # Discord sign-in secrets: see docs/discord.md (CI syncs them from GitHub secrets).
 
 app = "falchion"
-primary_region = "ams"
+primary_region = "ord"
 
 [build]
 
@@ -20,7 +20,7 @@ primary_region = "ams"
   PUBLIC_URL = "https://falchion.fly.dev"
   DATA_DIR = "/data"
 
-# fly deploy creates the volume on first deploy if it does not exist yet.
+# The deploy workflow creates this volume ("Ensure save volume") if it is missing.
 [mounts]
   source = "falchion_data"
   destination = "/data"

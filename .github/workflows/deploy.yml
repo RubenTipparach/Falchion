@@ -149,6 +149,21 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl scale count 1 -a "$APP" --yes || echo "::warning::Could not scale to one machine; scale manually with 'fly scale count 1'."
 
+      # fly deploy only creates volumes for new machines, not for the one already
+      # running: make sure the save volume exists, in the region that machine is in.
+      - name: Ensure save volume
+        if: steps.fly_gate.outputs.ready == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if flyctl volumes list -a "$APP" --json | jq -e 'map(select(.name == "falchion_data")) | length > 0' > /dev/null; then
+            echo "Save volume falchion_data exists."; exit 0
+          fi
+          region="$(flyctl machines list -a "$APP" --json | jq -r '.[0].region // empty')"
+          region="${region:-$(sed -n 's/^primary_region = "\(.*\)"/\1/p' server/fly.toml)}"
+          echo "Creating save volume falchion_data (1 GB) in ${region}"
+          flyctl volumes create falchion_data -a "$APP" -r "$region" -s 1 --yes
+
       # Built from the repo root (see server/Dockerfile). Retries with
       # backoff because Fly's remote builder can drop connections transiently.
       - name: Deploy to Fly.io

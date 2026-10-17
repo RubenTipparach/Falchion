@@ -1,0 +1,6 @@
+- [ ] 1 Extract the rules from GameController into a pure EmpireSim (no three/DOM); controller extends it
+- [ ] 2 Server bundle of the simulation (Vite SSR), built in CI and Docker
+- [ ] 3 Server ticks every empire each minute and persists it
+- [ ] 4 Command API: client sends commands, server applies them and returns state; validation by ids
+- [ ] 5 Client adopts server state after each command and tick (signed in); guests stay local
+- [ ] 6 Tests: sim determinism (client = server), commands, ticking offline empires

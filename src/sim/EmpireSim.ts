@@ -3,6 +3,8 @@ import { BUILDINGS, slotsOf } from '../content/buildings';
 import { buildYears, hasWarships, isSurveyClass, isWarship, REPAIR, specOf, warshipsOf, type RepairSite } from '../content/logistics';
 import { SHIP_CLASSES, ShipClassDef } from '../content/shipClasses';
 import { BattleResult, CombatBonuses, Damage, menderRepair, repairDamage, resolveAssault, resolveBattle, Side, Squadron } from '../core/combat/Combat';
+import { recordRound } from '../core/combat/BattleRecord';
+import { ROLE_TRAIT } from '../core/ships/ClassDesign';
 import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf } from '../core/economy/Economy';
 import { cargoCapacity, FREIGHTER, saleValue, type Market } from '../core/economy/Trade';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
@@ -108,6 +110,8 @@ export interface ContactForce extends Encounter {
   readonly ships: readonly Squadron[];
   /** The battle it is already in, if any (its round count). */
   readonly battle?: FleetBattle;
+  /** Damage its ship classes carry into the round (hull points by class). */
+  readonly damage?: Damage;
   /** Light years a year it travels: a faster enemy can run it down when it breaks off. */
   readonly speed: number;
   readonly side: Side;
@@ -120,6 +124,8 @@ export interface ContactFoe {
   readonly fleetName: string;
   readonly empire: string;
   readonly ships: readonly Squadron[];
+  /** Damage its ship classes carried into the round (hull points by class). */
+  readonly damage?: Damage;
 }
 
 /** What the rules need: state, the galaxy and the content tables. No view, no DOM, no three.js. */
@@ -156,10 +162,6 @@ const MAX_CATCH_UP = 7 * 24 * 60;
 /** Per-year report lines that would repeat every minute. */
 const ROUTINE = /^(Science: \+|Trade: \d)/;
 const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
-const ROLE_TRAIT: Partial<Record<string, string>> = {
-  long: 'role-long', short: 'role-short', barrage: 'role-barrage', siege: 'role-siege', suppression: 'role-suppression',
-  capture: 'role-capture', assault: 'role-assault', support: 'role-support',
-};
 
 /**
  * The game's rules for one empire: its state, every command a player can give, and the yearly
@@ -1278,7 +1280,7 @@ export class EmpireSim {
     const at = hexAt(f.movement, turn);
     const empire = s.identity?.name ?? s.playerName;
     return {
-      fleetId, fleetName: f.name, empire, at, star: this.deps.galaxy.starAt(at), ships, battle: l.battle, speed: f.movement.speed,
+      fleetId, fleetName: f.name, empire, at, star: this.deps.galaxy.starAt(at), ships, battle: l.battle, damage: l.damage, speed: f.movement.speed,
       aggressive: isAggressive(l.orders), armed: warships.length > 0,
       side: { name: empire, ships, bonuses: this.combatBonuses(), damage: l.damage },
     };
@@ -1300,7 +1302,11 @@ export class EmpireSim {
     const foeName = foe.fleetName.slice(0, 64), foeEmpire = foe.empire.slice(0, 100);
     const place = force.star?.name ?? 'deep space';
     const l = this.state.loadouts[force.fleetId];
-    if (l) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [force.fleetId]: { ...l, battle: { foe: foe.key, foeName, foeEmpire, round, tick } } } }));
+    // The round as the battle view draws it, this fleet first; the meter's 100% carries over from the battle's first round.
+    const detail = result.rounds[0]?.detail;
+    const going = l?.battle && l.battle.foe === foe.key && round > 1 ? l.battle.view : undefined;
+    const view = detail ? recordRound(detail, round, [{ ships: force.ships, damage: force.damage }, { ships: foe.ships, damage: foe.damage }], index, this.classById, going?.start ?? null) : undefined;
+    if (l) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [force.fleetId]: { ...l, battle: { foe: foe.key, foeName, foeEmpire, round, tick, ...(view ? { view } : {}) } } } }));
     const tally = `${mine} of ours lost, ${theirs} of theirs destroyed`;
     const text = result.winner === index ? `${force.fleetName} destroyed ${foeName} of ${foeEmpire} at ${place} in round ${round}: ${tally}`
       : result.winner === other ? `${force.fleetName} was destroyed by ${foeName} of ${foeEmpire} at ${place} in round ${round}`

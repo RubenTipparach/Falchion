@@ -118,6 +118,38 @@ function publicIdentity(e) {
   };
 }
 
+const CLASS_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
+/** Class id → number maps in a battle record, bounded. */
+function tally(x, max) {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(x).slice(0, 40)) if (CLASS_ID.test(k) && typeof v === 'number' && Number.isFinite(v) && v > 0) out[k] = Math.min(v, max);
+  return out;
+}
+const pair = (x, f) => (Array.isArray(x) && x.length === 2 ? [f(x[0]), f(x[1])] : null);
+/** The last round of a fleet's battle at sea (src/core/combat/BattleRecord.ts), bounded; dropped when malformed. */
+function battleRecord(r) {
+  if (!r || typeof r !== 'object' || !Number.isInteger(r.round) || r.round < 1 || r.round > 100000) return undefined;
+  const ships = (x) => (Array.isArray(x) ? x.slice(0, 40).filter((s) => typeof s?.classId === 'string' && CLASS_ID.test(s.classId) && Number.isInteger(s.count) && s.count > 0).map((s) => ({ classId: s.classId, count: Math.min(s.count, 100000) })) : []);
+  const before = pair(r.before, (f) => ({ ships: ships(f?.ships), damage: tally(f?.damage, 1e9) }));
+  const t = (k, max) => pair(r[k], (v) => tally(v, max));
+  const num = (lo, hi) => (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : lo);
+  const out = { round: r.round, before, lostBy: t('lostBy', 100000), takenBy: t('takenBy', 100000), by: t('by', 1e9), jam: pair(r.jam, num(0, 1)), flak: pair(r.flak, num(0, 0.6)), hull: t('hull', 1e9), wounds: t('wounds', 1e9), start: pair(r.start, num(0, 1e9)) };
+  return Object.values(out).every((v) => v !== null) ? out : undefined;
+}
+/** A fleet's battle at sea: who, the round and year, and the round's record so anyone who sees it can watch. */
+function publicBattle(b) {
+  if (typeof b?.foe !== 'string' || !Number.isInteger(b?.tick)) return undefined;
+  const view = battleRecord(b.view);
+  return {
+    foe: b.foe.slice(0, 160), tick: b.tick,
+    ...(Number.isInteger(b.round) && b.round > 0 ? { round: b.round } : {}),
+    ...(typeof b.foeName === 'string' ? { foeName: text(b.foeName, 64) } : {}),
+    ...(typeof b.foeEmpire === 'string' ? { foeEmpire: text(b.foeEmpire, 100) } : {}),
+    ...(view ? { view } : {}),
+  };
+}
+
 /** Only what other players may see: identity, home, colony stars and fleets (no stockpiles or research). */
 export function publicView(p) {
   const fleets = Array.isArray(p?.fleets) ? p.fleets.slice(0, 50) : [];
@@ -131,7 +163,8 @@ export function publicView(p) {
       // Whether it has warships, and whether it attacks what it meets at sea (anything else is passive).
       armed: f.armed === true, ...(f.stance === 'aggressive' ? { stance: 'aggressive' } : {}),
       // The fleet it last fought at sea, and the year: how the server tells a pursuit from an escape.
-      ...(typeof f.battle?.foe === 'string' && Number.isInteger(f.battle?.tick) ? { battle: { foe: f.battle.foe.slice(0, 160), tick: f.battle.tick } } : {}),
+      // With the round's record, so anyone who sees the battle can watch it.
+      ...(publicBattle(f.battle) ? { battle: publicBattle(f.battle) } : {}),
       // The other player's fleet it is chasing, if any.
       ...(typeof f.chase === 'string' ? { chase: f.chase.slice(0, 160) } : {}),
     })),

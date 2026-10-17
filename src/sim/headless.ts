@@ -319,7 +319,7 @@ export function resolvePursuit(saveA: unknown, playerA: Player, fleetIdA: string
   return { saveA: outA.save, publicA: outA.public, saveB: outB.save, publicB: outB.public };
 }
 
-const foeOf = (f: ContactForce, key: string) => ({ key, fleetName: f.fleetName, empire: f.empire, ships: f.ships });
+const foeOf = (f: ContactForce, key: string) => ({ key, fleetName: f.fleetName, empire: f.empire, ships: f.ships, damage: f.damage });
 
 /** How far back (in years) a player's order may be dated: a few seconds of latency. */
 const ORDER_SLACK_YEARS = 5 / 60;

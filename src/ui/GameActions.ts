@@ -96,6 +96,8 @@ export interface GameQueries {
   cacheOf(planet: Planet): Haul;
   planetById(id: string): Planet | null;
   fleetInfo(fleetId: string): FleetInfo | null;
+  /** A fleet's battle at sea you can watch (yours by id, another player's by `${ownerId}:${fleetId}`), or null. */
+  battleOf(fleetId: string): { round: number; foeName: string; foeEmpire: string } | null;
   /** Construction queued at a site (planet id), or everywhere. */
   jobs(site?: string): Job[];
   /** A system's asteroid fields: what each holds now and when it is full again. */
@@ -179,6 +181,10 @@ export interface GameActions {
   chase(fleetId: string, target: string | null): void;
   /** Break off a battle: the fleet heads at once for the nearest friendly system. */
   retreat(fleetId: string): void;
+  /** Open the battle view on a fleet's battle at sea (a view, not an order). */
+  watchBattle(fleetId: string): void;
+  /** Leave the battle view, back to the map. */
+  leaveBattle(): void;
   /** Standing orders a fleet follows on its own. */
   setOrders(fleetId: string, orders: FleetOrders): void;
   /** Settle an explored planet with a Colony Ark on station. */

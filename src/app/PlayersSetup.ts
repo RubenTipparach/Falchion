@@ -145,8 +145,8 @@ export function setupPlayers({ identity, canSignIn, galaxy, controller, store, t
     if (what === 'players') {
       others.clear();
       for (const p of model.others) others.set(p.id, p);
-      const { fleets, claims } = othersOnMap(model.others);
-      controller.setOtherFleets(fleets);
+      const { fleets, claims, battles } = othersOnMap(model.others);
+      controller.setOtherFleets(fleets, battles);
       controller.setOtherEmpires(empiresOf(model.others));
       // Territory changes rarely (a new colony or a new empire): rebuild it only then.
       const key = JSON.stringify(claims);

@@ -1,4 +1,5 @@
-import type { Squadron, Damage } from '../combat/Combat';
+import type { BattleRecord } from '../combat/BattleRecord';
+import type { Damage, Squadron } from '../combat/Combat';
 import { arrivalTurn, type FleetMovement } from './Fleet';
 import type { Stores } from './Logistics';
 
@@ -49,6 +50,8 @@ export interface FleetBattle {
   readonly round: number;
   /** World year of the last round. */
   readonly tick: number;
+  /** The last round, for the battle view (this fleet is side 0). */
+  readonly view?: BattleRecord;
 }
 
 /** The round a fleet fights next against `foe` in `tick`: one more than last year's, else a new battle. */

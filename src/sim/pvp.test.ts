@@ -92,6 +92,30 @@ describe('a battle at sea is a round a year until one side is gone or breaks off
     expect(reached).toBeGreaterThanOrEqual(2);
   });
 
+  it('keeps the round\'s record for the battle view in both saves, each fleet first, and in the public view', () => {
+    const r = meet(empireWith(A, [{ classId: 'lancer', count: 5 }, { classId: 'interceptor', count: 4 }], HERE, { stance: 'aggressive' }), empireWith(B, interceptors(8), HERE))!;
+    const va = loadoutOf(r.saveA, A).battle.view, vb = loadoutOf(r.saveB, B).battle.view;
+    expect(va.round).toBe(1);
+    expect(va.before[0].ships).toEqual([{ classId: 'lancer', count: 5 }, { classId: 'interceptor', count: 4 }]);
+    expect(va.before[1].ships).toEqual(interceptors(8));
+    // The other save holds the same round the other way round.
+    expect(vb.before[0]).toEqual(va.before[1]);
+    expect(vb.lostBy).toEqual([va.lostBy[1], va.lostBy[0]]);
+    expect(vb.start).toEqual([va.start[1], va.start[0]]);
+    // What each lost matches its fleet.
+    const lost = (t: Record<string, number>) => Object.values(t).reduce((a, b) => a + b, 0);
+    expect(total(fleetOf(r.saveA, A))).toBe(9 - lost(va.lostBy[0]) - lost(va.takenBy[0]) + lost(va.takenBy[1]));
+    // Anyone who sees the battle can watch it: the record is public.
+    const pub = (r.publicA as unknown as { fleets: Array<{ id: string; battle?: { round: number; view?: unknown } }> }).fleets.find((f) => f.id === fid(A))!;
+    expect(pub.battle?.round).toBe(1);
+    expect(pub.battle?.view).toEqual(va);
+    // The next round keeps the battle's starting strength.
+    const a = advanceSave(r.saveA, player(A), T + 1)!.save;
+    const b = advanceSave(r.saveB, player(B), T + 1)!.save;
+    const r2 = meet(a, b, T + 1);
+    if (r2 && loadoutOf(r2.saveA, A)) expect(loadoutOf(r2.saveA, A).battle.view.start).toEqual(va.start);
+  });
+
   it('either side can retreat at any time: the battle ends there', () => {
     const r = meet(empireWith(A, interceptors(8), HERE, { stance: 'aggressive' }), empireWith(B, interceptors(8), HERE))!;
     // B breaks off between ticks: an order the server applies at once.

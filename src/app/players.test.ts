@@ -36,6 +36,18 @@ describe('other players on the map', () => {
     expect(claims.map((c) => [c.id, c.kind])).toEqual([[A, 'other-player']]);
     expect(fleets.map((f) => [f.id, f.name, f.owner])).toEqual([[`${A}:scout-1`, `Scout · P1`, 'P1']]);
   });
+
+  it('lists the battles other players\' fleets are in, with their round record checked', () => {
+    const m = planMovement({ q: 1, r: 2 }, { q: 1, r: 2 }, 3, 1);
+    const view = { round: 2, before: [{ ships: [{ classId: 'lancer', count: 3 }] }, { ships: [{ classId: 'brawler', count: 2 }] }], lostBy: [{}, { brawler: 1 }], takenBy: [{}, {}], by: [{ long: 50 }, {}], jam: [1, 1], flak: [0, 0], hull: [{ lancer: 40 }, { brawler: 90 }], wounds: [{}, {}], start: [300, 400] };
+    const { battles } = othersOnMap([player(A, 1, { fleets: [
+      { id: 'war', name: 'War', movement: m, design: {} as never, armed: true, battle: { foe: 'p2:f', tick: 7, round: 2, foeName: 'Raiders', foeEmpire: 'Vossk', view: view as never }, chase: 'p2:f' },
+      { id: 'odd', name: 'Odd', movement: m, design: {} as never, armed: true, battle: { foe: 'p2:g', tick: 7, view: { round: 'x' } as never } },
+    ] })]);
+    expect(battles.map((b) => [b.fleet, b.foe, b.round, b.foeName, b.chase])).toEqual([[`${A}:war`, 'p2:f', 2, 'Raiders', 'p2:f'], [`${A}:odd`, 'p2:g', 1, 'a fleet', undefined]]);
+    expect(battles[0].view?.before[0].ships).toEqual([{ classId: 'lancer', count: 3 }]);
+    expect(battles[1].view).toBeNull();
+  });
 });
 
 describe('galaxy players model', () => {

@@ -1,6 +1,7 @@
 import type { OtherEmpire } from '../sim/EmpireSim';
 import { cleanIdentity, type EmpireIdentity } from '../core/empire/Identity';
 import type { FleetMovement } from '../core/fleet/Fleet';
+import { cleanBattleRecord, type BattleRecord } from '../core/combat/BattleRecord';
 import type { Hex } from '../core/hex/Hex';
 import { HERALDRY } from '../content/heraldry';
 import { hasWarships } from '../content/logistics';
@@ -20,9 +21,33 @@ export interface PublicEmpire {
   /**
    * `armed`: has warships. `stance`: 'aggressive' when it attacks the fleets it meets at sea (absent
    * = passive). `battle`: the fleet it last fought at sea (`${ownerId}:${fleetId}`) and the year, so
-   * the server can tell a fleet that breaks off from one that pursues.
+   * the server can tell a fleet that breaks off from one that pursues, and the round's record so
+   * anyone who sees the battle can watch it.
    */
-  readonly fleets: ReadonlyArray<Pick<FleetView, 'id' | 'name' | 'movement' | 'design'> & { readonly armed: boolean; readonly stance?: 'aggressive'; readonly battle?: { readonly foe: string; readonly tick: number }; readonly chase?: string; readonly damage?: Readonly<Record<string, number>> }>;
+  readonly fleets: ReadonlyArray<Pick<FleetView, 'id' | 'name' | 'movement' | 'design'> & { readonly armed: boolean; readonly stance?: 'aggressive'; readonly battle?: PublicBattle; readonly chase?: string; readonly damage?: Readonly<Record<string, number>> }>;
+}
+
+/** A fleet's battle at sea as other players see it. */
+export interface PublicBattle {
+  readonly foe: string;
+  readonly tick: number;
+  readonly round?: number;
+  readonly foeName?: string;
+  readonly foeEmpire?: string;
+  readonly view?: BattleRecord;
+}
+
+/** Another player's fleet in a battle at sea (checked): `fleet` is `${ownerId}:${fleetId}`. */
+export interface ForeignBattle {
+  readonly fleet: string;
+  readonly foe: string;
+  readonly tick: number;
+  readonly round: number;
+  readonly foeName: string;
+  readonly foeEmpire: string;
+  readonly view: BattleRecord | null;
+  /** The fleet it chases, if any (a fleet that broke off and is pursued). */
+  readonly chase?: string;
 }
 
 /** Another player in the shared galaxy, as /api/players returns them (and the live stream pushes them). */
@@ -68,7 +93,8 @@ export function publicEmpire(s: GameState, color: string): PublicEmpire {
     colonies,
     fleets: s.fleets.filter((f) => f.owner === s.playerName).map((f) => {
       const l = s.loadouts[f.id];
-      const battle = l?.battle ? { battle: { foe: l.battle.foe, tick: l.battle.tick } } : {};
+      const b = l?.battle;
+      const battle = b ? { battle: { foe: b.foe, tick: b.tick, round: b.round, foeName: b.foeName, foeEmpire: b.foeEmpire, ...(b.view ? { view: b.view } : {}) } } : {};
       const chase = l?.orders?.chase ? { chase: l.orders.chase } : {};
       // The damage its ships carry: other players see it in the battle view.
       const damage = l?.damage ? { damage: l.damage } : {};
@@ -99,19 +125,31 @@ export function fleetStance(f: { readonly armed?: unknown; readonly stance?: unk
   return f.stance === 'aggressive' ? 'Aggressive warfleet' : 'Warfleet';
 }
 
-/** Other players as map fleets and territory, labelled with their empire's name and flag. */
-export function othersOnMap(players: readonly OtherPlayer[]): { fleets: FleetView[]; claims: TerritoryClaim[] } {
+/** Other players as map fleets and territory, labelled with their empire's name and flag, and their fleets' battles. */
+export function othersOnMap(players: readonly OtherPlayer[]): { fleets: FleetView[]; claims: TerritoryClaim[]; battles: ForeignBattle[] } {
   const fleets: FleetView[] = [];
   const claims: TerritoryClaim[] = [];
+  const battles: ForeignBattle[] = [];
   for (const p of players) {
     // Another player's identity is untrusted input: validate it like a save.
     const id = p.empire ? cleanIdentity({ ...p.empire, color: p.color }, HERALDRY) : null;
     const color = id?.color ?? colorFor(p.id);
     const name = id?.name ?? p.name;
     if (isHex(p.home)) claims.push({ id: p.id, name, color, kind: 'other-player', home: p.home, flag: id?.flag, colonies: [{ hex: p.home, radius: HOME_RADIUS }, ...(p.colonies ?? []).filter(isHex).map((hex) => ({ hex, radius: COLONY_RADIUS }))] });
-    for (const f of p.fleets ?? []) if (isFleetMovement(f.movement)) fleets.push({ ...f, id: `${p.id}:${f.id}`, name: `${f.name} · ${name}`, owner: name, color, status: fleetStance(f) });
+    for (const f of p.fleets ?? []) {
+      if (!isFleetMovement(f.movement)) continue;
+      fleets.push({ ...f, id: `${p.id}:${f.id}`, name: `${f.name} · ${name}`, owner: name, color, status: fleetStance(f) });
+      const b = f.battle;
+      if (b && typeof b.foe === 'string' && Number.isInteger(b.tick)) {
+        battles.push({
+          fleet: `${p.id}:${f.id}`, foe: b.foe.slice(0, 160), tick: b.tick, round: Number.isInteger(b.round) && b.round! > 0 ? b.round! : 1,
+          foeName: typeof b.foeName === 'string' ? b.foeName.slice(0, 64) : 'a fleet', foeEmpire: typeof b.foeEmpire === 'string' ? b.foeEmpire.slice(0, 100) : 'another empire',
+          view: cleanBattleRecord(b.view), ...(typeof f.chase === 'string' ? { chase: f.chase.slice(0, 160) } : {}),
+        });
+      }
+    }
   }
-  return { fleets, claims };
+  return { fleets, claims, battles };
 }
 
 /** Other players as diplomacy sees them: id, empire name, colour and worlds (untrusted input, checked). */

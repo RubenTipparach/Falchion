@@ -35,6 +35,29 @@ export type Damage = Readonly<Record<string, number>>;
 
 export type Band = 'long' | 'medium' | 'short';
 
+/** Counts or amounts by key (class id or doctrine). */
+export type Tally = Readonly<Record<string, number>>;
+
+/**
+ * What a round at sea did, in enough detail to draw it (resolveRound fills it). Pairs are by side.
+ */
+export interface RoundDetail {
+  /** Ships each side lost, by class. */
+  readonly lostBy: readonly [Tally, Tally];
+  /** Ships of each side the other side's boarders took, by class. */
+  readonly takenBy: readonly [Tally, Tally];
+  /** Damage each side dealt, by doctrine (rounded). */
+  readonly by: readonly [Tally, Tally];
+  /** Multiplier on each side's fire from the other side's jammers (1 = not jammed). */
+  readonly jam: readonly [number, number];
+  /** Share of each side's barrage the other side's flak and suppression cut (0 to 0.6). */
+  readonly flak: readonly [number, number];
+  /** Hull points of one ship of each class, with research bonuses. */
+  readonly hull: readonly [Tally, Tally];
+  /** Damage (hull points) each class group still carries at the end of the round, before it is cleared. */
+  readonly wounds: readonly [Tally, Tally];
+}
+
 export interface RoundLog {
   readonly round: number;
   readonly band: Band;
@@ -42,6 +65,8 @@ export interface RoundLog {
   readonly losses: readonly [number, number];
   readonly captured: readonly [number, number];
   readonly notes: readonly string[];
+  /** A round at sea's breakdown (resolveRound only). */
+  readonly detail?: RoundDetail;
 }
 
 export interface BattleResult {
@@ -105,26 +130,44 @@ const shareOf = (gs: Group[], d: Doctrine) => {
   return total ? gs.filter((g) => g.def.doctrine === d).reduce((s, g) => s + g.count, 0) / total : 0;
 };
 
+interface Output {
+  readonly total: number;
+  /** The total split by doctrine. */
+  readonly by: Record<string, number>;
+  readonly jam: number;
+  readonly flak: number;
+}
+
 /** Damage a side deals this round, split by doctrine. */
 function output(own: Group[], foe: Group[], b: CombatBonuses, foeB: CombatBonuses, band: Band, rng: Rng): number {
+  return outputOf(own, foe, b, foeB, band, rng).total;
+}
+
+function outputOf(own: Group[], foe: Group[], b: CombatBonuses, foeB: CombatBonuses, band: Band, rng: Rng): Output {
   const flagship = own.some((g) => g.def.id === 'flagship' && g.count > 0) ? 1.1 : 1;
   const morale = 1 + (b.morale ?? 0) / 100;
   const foeSuppression = shareOf(foe, 'suppression') + (foeB.suppression ?? 0) * 0.03;
   const jam = 1 - Math.min(0.25, shareOf(foe, 'suppression') * 0.5);
+  const flak = Math.min(0.6, foeSuppression * 1.5);
+  const by: Record<string, number> = {};
   let total = 0;
   for (const g of alive(own)) {
     const d = g.def.doctrine;
     let dmg = g.count * g.def.attack * BAND_MULT[d][band];
     dmg *= 1 + ((b as Record<string, number | undefined>)[d] ?? 0) * 0.05;
-    if (d === 'barrage') dmg *= 1 - Math.min(0.6, foeSuppression * 1.5) + (foeB.vsBarrage ? -foeB.vsBarrage / 100 : 0);
+    if (d === 'barrage') dmg *= 1 - flak + (foeB.vsBarrage ? -foeB.vsBarrage / 100 : 0);
     if (d === 'long' && foeB.vsLong) dmg *= 1 - foeB.vsLong / 100;
     total += dmg;
+    by[d] = (by[d] ?? 0) + dmg;
   }
-  return Math.max(0, total * morale * flagship * jam * rng.range(0.9, 1.1));
+  const roll = rng.range(0.9, 1.1);
+  const k = morale * flagship * jam * roll;
+  for (const d of Object.keys(by)) by[d] = Math.max(0, by[d] * k);
+  return { total: Math.max(0, total * morale * flagship * jam * roll), by, jam, flak };
 }
 
-/** Spread damage across groups in proportion to ship count; returns ships destroyed. */
-function applyDamage(gs: Group[], dmg: number): number {
+/** Spread damage across groups in proportion to ship count; returns ships destroyed (tallied by class in `lostBy`). */
+function applyDamage(gs: Group[], dmg: number, lostBy?: Record<string, number>): number {
   const live = alive(gs);
   const total = shipsOf(live);
   let destroyed = 0;
@@ -134,10 +177,25 @@ function applyDamage(gs: Group[], dmg: number): number {
     g.count -= lost;
     g.wound -= lost * g.hull;
     destroyed += lost;
+    if (lost && lostBy) count(lostBy, g.def.id, lost);
     if (g.count === 0) g.wound = 0;
   }
   return destroyed;
 }
+
+const count = (into: Record<string, number>, key: string, n: number) => { into[key] = (into[key] ?? 0) + n; };
+const tallyOf = (ships: readonly Squadron[]): Record<string, number> => {
+  const out: Record<string, number> = {};
+  for (const s of ships) count(out, s.classId, s.count);
+  return out;
+};
+/** Rounded, positive entries only: what goes in a log. */
+const rounded = (t: Record<string, number>, digits = 0): Record<string, number> => {
+  const k = 10 ** digits;
+  const out: Record<string, number> = {};
+  for (const key of Object.keys(t).sort()) { const v = Math.round(t[key] * k) / k; if (v > 0) out[key] = v; }
+  return out;
+};
 
 function repair(gs: Group[], b: CombatBonuses): void {
   const menders = alive(gs).filter((g) => g.def.id === 'repair-tender').reduce((s, g) => s + g.count, 0);
@@ -285,9 +343,12 @@ export function resolveRound(a: Side, d: Side, classes: readonly ShipClassDef[],
   const bon = [a.bonuses ?? {}, d.bonuses ?? {}] as const;
   const rng = new Rng(hashSeed(seed, 'round', round));
   const band = bandOf(round);
-  const dmg0 = output(sides[0], sides[1], bon[0], bon[1], band, rng);
-  const dmg1 = output(sides[1], sides[0], bon[1], bon[0], band, rng);
-  const losses = [applyDamage(sides[0], dmg1), applyDamage(sides[1], dmg0)];
+  const hull = [Object.fromEntries(sides[0].map((g) => [g.def.id, g.hull])), Object.fromEntries(sides[1].map((g) => [g.def.id, g.hull]))] as const;
+  const out0 = outputOf(sides[0], sides[1], bon[0], bon[1], band, rng);
+  const out1 = outputOf(sides[1], sides[0], bon[1], bon[0], band, rng);
+  const dmg0 = out0.total, dmg1 = out1.total;
+  const lostBy: [Record<string, number>, Record<string, number>] = [{}, {}];
+  const losses = [applyDamage(sides[0], dmg1, lostBy[0]), applyDamage(sides[1], dmg0, lostBy[1])];
   // Boarders take the ships this round's fire crippled.
   const cap0 = capture(sides[0], sides[1], bon[0], band);
   const cap1 = capture(sides[1], sides[0], bon[1], band);
@@ -296,11 +357,23 @@ export function resolveRound(a: Side, d: Side, classes: readonly ShipClassDef[],
     const hullOf = (gs: Group[]) => Math.max(1, alive(gs).reduce((s, g) => s + g.count * g.hull, 0));
     const loser = dmg0 / hullOf(sides[1]) >= dmg1 / hullOf(sides[0]) ? 1 : 0;
     const light = alive(sides[loser]).sort((x, y) => x.hull - y.hull || (x.def.id < y.def.id ? -1 : 1))[0];
-    if (light) { light.count--; light.wound = 0; losses[loser]++; }
+    if (light) { light.count--; light.wound = 0; losses[loser]++; count(lostBy[loser], light.def.id, 1); }
   }
   // Menders patch their fleet before the next round.
   repair(sides[0], bon[0]);
   repair(sides[1], bon[1]);
+  // The damage each class carries out of the round (what the battle view's health bars end on).
+  const woundsOf = (gs: Group[]) => rounded(Object.fromEntries(alive(gs).map((g) => [g.def.id, Math.min(g.wound, g.count * g.hull)])));
+  const wounds = [woundsOf(sides[0]), woundsOf(sides[1])] as const;
+  const detail: RoundDetail = {
+    lostBy: [rounded(lostBy[0]), rounded(lostBy[1])],
+    takenBy: [rounded(tallyOf(cap1)), rounded(tallyOf(cap0))],
+    by: [rounded(out0.by), rounded(out1.by)],
+    jam: [Math.round(out0.jam * 1000) / 1000, Math.round(out1.jam * 1000) / 1000],
+    flak: [Math.round(out0.flak * 1000) / 1000, Math.round(out1.flak * 1000) / 1000],
+    hull: [hull[0], hull[1]],
+    wounds,
+  };
   const notes: string[] = [];
   if (c0) notes.push(`${a.name} boarded ${c0} ship${c0 > 1 ? 's' : ''}`);
   if (c1) notes.push(`${d.name} boarded ${c1} ship${c1 > 1 ? 's' : ''}`);
@@ -309,7 +382,7 @@ export function resolveRound(a: Side, d: Side, classes: readonly ShipClassDef[],
   const surv = (gs: Group[]) => alive(gs).map((g) => ({ classId: g.def.id, count: g.count }));
   return {
     winner,
-    rounds: [{ round, band, damage: [Math.round(dmg0), Math.round(dmg1)], losses: [losses[0], losses[1]], captured: [c0, c1], notes }],
+    rounds: [{ round, band, damage: [Math.round(dmg0), Math.round(dmg1)], losses: [losses[0], losses[1]], captured: [c0, c1], notes, detail }],
     survivors: [surv(sides[0]), surv(sides[1])],
     captured: [cap0, cap1],
     damage: [damageOf(sides[0]), damageOf(sides[1])],

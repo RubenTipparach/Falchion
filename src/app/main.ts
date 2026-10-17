@@ -26,6 +26,9 @@ import { GalaxyDiscLayer } from '../render/map/GalaxyDiscLayer';
 import { StarfieldLayer } from '../render/map/StarfieldLayer';
 import { SystemLayer } from '../render/map/SystemLayer';
 import { SurfaceLayer } from '../render/planets/surface/SurfaceLayer';
+import { BattleLayer } from '../render/battle/BattleLayer';
+import { BattleMarkerLayer } from '../render/map/BattleMarkerLayer';
+import { BattleHud } from '../ui/BattleHud';
 import { Dispatches } from '../ui/Dispatches';
 import type { Drawer } from '../ui/Drawer';
 import { EmpirePanel } from '../ui/panels/EmpirePanel';
@@ -171,6 +174,11 @@ async function bootstrap(): Promise<void> {
   const surface = map.layers.add(new SurfaceLayer({ zoom: map.controller.zoom, input: map.controller, frame: (id) => system.planetFrame(id), hold: (id) => system.holdPlanet(id), canvas: map.canvas, lite }));
   const selection = map.layers.add(new SelectionLayer());
   const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK), (h) => galaxy.starAt(h)?.position ?? hexToWorld(h), (id) => controller.selectFleet(id)));
+  // Battles at sea: a marker on the map for each one you can see, and the view that covers the map to watch one.
+  const battleMarkers = map.layers.add(new BattleMarkerLayer((key) => controller.openBattle(key)));
+  const battle = map.layers.add(new BattleLayer(factory, SHIP_CLASSES, { worldTime: () => controller.worldTime(), ending: (t) => controller.battleEnding(t), lite }));
+  const battleHud = new BattleHud({ leave: () => controller.leaveBattle(), retreat: (id) => controller.retreat(id) }, battle.controls);
+  battle.onFrame = (f) => battleHud.render(f);
 
   const zoomCfg = map.controller.zoom.config;
   const topBar = new TopBar(store, controller, identity, clock, controller.caps);
@@ -199,9 +207,9 @@ async function bootstrap(): Promise<void> {
     explore: new ExplorePanel(store, controller, controller, controller.planets, tree, thumb),
     fleets: new FleetsPanel(store, controller, controller),
   };
-  app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, dispatches.el, ...Object.values(panels).map((p) => p.el));
+  app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, dispatches.el, battleHud.el, ...Object.values(panels).map((p) => p.el));
 
-  controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system, surface });
+  controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system, surface, battle, battleMarkers });
   // Phones: the star, planet and fleet card is a bottom sheet; keep what you look at centred above it.
   if (lite) {
     const phone = window.matchMedia('(max-width: 720px)');
@@ -245,6 +253,8 @@ async function bootstrap(): Promise<void> {
   window.addEventListener('keydown', (e) => {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === 'Escape' && battle.isOpen) { controller.leaveBattle(); return; }
+    if (battle.isOpen) return;
     if (e.key === 'g' || e.key === 'G') controller.toggleView();
     if (e.key === 'Escape' && store.state.selectedFleet) { controller.selectFleet(null); return; }
     if (e.key === 'Escape' && surface.status.active) { controller.leaveSurface(); return; }

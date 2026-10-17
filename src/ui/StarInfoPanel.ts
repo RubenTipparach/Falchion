@@ -189,7 +189,9 @@ export class StarInfoPanel {
         group.battle ? h('div', { class: 'battle-banner' },
           h('div', {}, h('b', {}, `In battle: round ${group.battle.round}`),
             h('div', { class: 'small' }, `Against ${group.battle.foeName} of ${group.battle.foeEmpire}. A round every year (minute) until one side is gone or breaks off.`)),
-          h('button', { class: 'btn danger', onclick: () => this.actions.retreat(group.id) }, 'Retreat')) : '',
+          h('div', { class: 'banner-actions' },
+            h('button', { class: 'btn watch', title: 'Watch the battle', onclick: () => this.actions.watchBattle(group.id) }, icon('battle'), ' Watch battle'),
+            h('button', { class: 'btn danger', onclick: () => this.actions.retreat(group.id) }, 'Retreat'))) : '',
         group.orders?.chase ? h('div', { class: 'row orders' },
           h('button', { class: 'chip active', title: 'Stop the chase', onclick: () => this.actions.chase(group.id, null) }, `✓ Chasing ${this.q.fleetInfo(group.orders.chase)?.fleet.name.split(' · ')[0] ?? 'a fleet'} · stop`)) : '',
         h('p', { class: 'small' }, shipsText(group.ships)),
@@ -211,7 +213,7 @@ export class StarInfoPanel {
         h('p', { class: 'notice' }, touchFirst()
           ? 'Press and hold a star, or anywhere in empty space, to send this fleet there. Pinch to zoom.'
           : 'Right-click a star, or anywhere in empty space, to send this fleet there. Right-drag to orbit the camera.'))
-        : h('div', {}, h('p', { class: 'small muted' }, fleet.owner.startsWith('alien:') ? 'Hostile alien fleet.' : fleet.status ? `Another empire's fleet: ${fleet.status}.` : 'Another empire\'s fleet.'), this.chaseView(fleet)),
+        : h('div', {}, this.foreignBattle(fleet), h('p', { class: 'small muted' }, fleet.owner.startsWith('alien:') ? 'Hostile alien fleet.' : fleet.status ? `Another empire's fleet: ${fleet.status}.` : 'Another empire\'s fleet.'), this.chaseView(fleet)),
       h('div', { class: 'actions' },
         h('button', { class: 'btn', title: 'Centre the camera on this fleet', onclick: () => this.actions.focusFleet(fleet.id) }, icon('locate'), ' Centre'),
         h('button', { class: 'btn', title: 'Zoom in to the ship', onclick: () => this.actions.focusFleet(fleet.id, true) }, icon('focus'), ' Zoom'),
@@ -238,6 +240,15 @@ export class StarInfoPanel {
         !to && canLoad ? h('button', { class: 'chip', onclick: () => this.actions.loadGoods(g.id) }, 'Load goods') : null,
         !to && sale ? h('button', { class: 'chip', onclick: () => this.actions.sellGoods(g.id) }, `Sell here · ${fmt(sale)} cr`) : null,
         !to && market && !sale ? h('button', { class: 'chip', title: `Load goods at your nearest colony and sell them at ${market.name}, again and again`, onclick: () => this.actions.tradeRun(g.id, at) }, `Trade run to ${market.name}`) : null));
+  }
+
+  /** Another player's fleet in a battle at sea: anyone who sees it can watch. */
+  private foreignBattle(fleet: FleetView): HTMLElement | string {
+    const b = fleet.id.includes(':') ? this.q.battleOf(fleet.id) : null;
+    if (!b) return '';
+    return h('div', { class: 'battle-banner' },
+      h('div', {}, h('b', {}, `In battle: round ${b.round}`), h('div', { class: 'small' }, `Against ${b.foeName} of ${b.foeEmpire}.`)),
+      h('div', { class: 'banner-actions' }, h('button', { class: 'btn watch', title: 'Watch the battle', onclick: () => this.actions.watchBattle(fleet.id) }, icon('battle'), ' Watch battle')));
   }
 
   /** Another player's fleet: send one of your warship fleets after it. */

@@ -8,7 +8,16 @@ import type { TerritoryClaim } from '../render/map/TerritoryLayer';
 import { WorldClock } from './WorldClock';
 import type { SaveGame } from './SaveGame';
 import { capacity } from '../core/fleet/Logistics';
-import { isStationed, type ForeignFleet } from '../core/fleet/Presence';
+import { inBattle, isStationed, type ForeignFleet } from '../core/fleet/Presence';
+import { flipRecord, type BattleRecord } from '../core/combat/BattleRecord';
+import { classDesign } from '../core/ships/ClassDesign';
+import type { ShipDesign } from '../core/ships/ShipDesign';
+import type { FleetMovement } from '../core/fleet/Fleet';
+import type { BattleLayer, BattleSide, BattleTarget } from '../render/battle/BattleLayer';
+import type { StageEnding } from '../render/battle/BattleStage';
+import type { BattleMarkerLayer } from '../render/map/BattleMarkerLayer';
+import type { ForeignBattle } from './ServerSync';
+import { ownClaim } from './ServerSync';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { StarSystem } from '../core/galaxy/GalaxyModel';
 import { Planet } from '../core/galaxy/Planets';
@@ -49,6 +58,27 @@ export interface ViewDeps {
   readonly system: SystemLayer;
   /** The planet close-up below planet view. */
   readonly surface: SurfaceLayer;
+  /** The battle view, and the map's markers of battles you can watch. */
+  readonly battle: BattleLayer;
+  readonly battleMarkers: BattleMarkerLayer;
+}
+
+/** A battle at sea you can see: one of its fleets (yours first) and the round it is at. */
+interface Sighting {
+  /** Both fleets, sorted: the battle's id. */
+  readonly key: string;
+  /** The fleet seen in it, and its foe (`${ownerId}:${fleetId}`). */
+  readonly fleet: string;
+  readonly foe: string;
+  /** Your own fleet's id, when it is yours. */
+  readonly fleetId: string | null;
+  readonly tick: number;
+  readonly round: number;
+  readonly name: string;
+  readonly foeName: string;
+  readonly foeEmpire: string;
+  readonly record: BattleRecord | null;
+  readonly movement: FleetMovement;
 }
 
 /** Camera altitude (ly) that frames a whole star system. */
@@ -78,6 +108,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     view.hexGrid.setHome(this.deps.world.home.hex.q, this.deps.world.home.hex.r);
     this.deps.store.subscribe((s, prev) => {
       if (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts) view.fleets.setFleets(this.fleetViews());
+      if (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts || s.turn !== prev.turn) this.refreshBattles();
       if (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts || s.explored !== prev.explored || s.turn !== prev.turn) this.refreshSurveyPlans();
       // A finished building or a new colony shows up on the planet being viewed.
       if (s.selectedPlanet !== prev.selectedPlanet || s.economy.colonies !== prev.economy.colonies || s.explored !== prev.explored) this.refreshSurface();
@@ -91,6 +122,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     for (const [id, panel] of Object.entries(view.panels)) panel.onChange(() => view.topBar.setActivePanel(this.openPanelId() ?? (panel.opened ? (id as PanelId) : null)));
     view.fleets.setTime(this.fleetTime());
     view.fleets.setFleets(this.fleetViews());
+    this.refreshBattles();
     // Zooming in close pulls the view onto the nearest star, so you land in its system.
     view.map.controller.attractor = (ground, width, touch) => {
       if (width > 25) return null;
@@ -124,10 +156,137 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     return f ? { name: f.name.split(' · ')[0], empire: f.owner, movement: f.movement } : super.foreignFleet(key);
   }
 
-  /** Show other players' fleets (from the server) on the map. */
-  setOtherFleets(fleets: FleetView[]): void {
+  /** Show other players' fleets (from the server) on the map, and the battles they are in. */
+  setOtherFleets(fleets: FleetView[], battles: readonly ForeignBattle[] = []): void {
     this.others = fleets;
+    this.otherBattles = battles;
     this.view.fleets.setFleets(this.fleetViews());
+    this.refreshBattles();
+  }
+
+  // ── Battles at sea: markers and the battle view ───────────────────
+
+  private otherBattles: readonly ForeignBattle[] = [];
+
+  private get myKey(): string {
+    return this.me;
+  }
+
+  /** Every battle at sea you can see now (fought this year or last), yours first, one per battle. */
+  private sightings(): Sighting[] {
+    const s = this.state, out = new Map<string, Sighting>();
+    const pair = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+    for (const f of s.fleets) {
+      const b = s.loadouts[f.id]?.battle;
+      if (!b || !inBattle(b, s.turn)) continue;
+      const fleet = `${this.myKey}:${f.id}`, key = pair(fleet, b.foe);
+      out.set(key, { key, fleet, foe: b.foe, fleetId: f.id, tick: b.tick, round: b.round, name: f.name, foeName: b.foeName, foeEmpire: b.foeEmpire, record: b.view ?? null, movement: f.movement });
+    }
+    for (const b of [...this.otherBattles].sort((x, y) => (x.fleet < y.fleet ? -1 : 1))) {
+      if (b.tick < s.turn - 1) continue;
+      const v = this.others.find((x) => x.id === b.fleet);
+      if (!v) continue;
+      const key = pair(b.fleet, b.foe);
+      const seen = out.get(key);
+      // Keep the newest round; between equals, the view from your own fleet (or the first fleet).
+      if (seen && (seen.tick > b.tick || (seen.tick === b.tick && seen.round >= b.round))) {
+        if (!seen.record && b.view) out.set(key, { ...seen, record: flipRecord(b.view) });
+        continue;
+      }
+      out.set(key, { key, fleet: b.fleet, foe: b.foe, fleetId: null, tick: b.tick, round: b.round, name: v.name.split(' · ')[0], foeName: b.foeName, foeEmpire: b.foeEmpire, record: b.view ?? (seen?.record ? flipRecord(seen.record) : null), movement: v.movement });
+    }
+    return [...out.values()];
+  }
+
+  /** A fleet's battle you can watch (yours by id, another player's by `${ownerId}:${fleetId}`). */
+  battleOf = (fleetId: string): { round: number; foeName: string; foeEmpire: string } | null => {
+    const key = fleetId.includes(':') ? fleetId : `${this.myKey}:${fleetId}`;
+    const sg = this.sightings().find((x) => x.fleet === key || x.foe === key);
+    if (!sg) return null;
+    return sg.fleet === key ? { round: sg.round, foeName: sg.foeName, foeEmpire: sg.foeEmpire } : { round: sg.round, foeName: sg.name, foeEmpire: this.sideOf(sg.fleet, sg.name, '').empire };
+  };
+
+  /** Open the battle view on a fleet's battle. */
+  watchBattle(fleetId: string): void {
+    const key = fleetId.includes(':') ? fleetId : `${this.myKey}:${fleetId}`;
+    const sg = this.sightings().find((x) => x.fleet === key || x.foe === key);
+    if (sg) this.openBattle(sg.key);
+  }
+
+  /** Open the battle view on a battle by its id (a map marker). */
+  openBattle(key: string): void {
+    const target = this.battleTarget(key);
+    if (!target) return this.dispatch('No round of that battle to show yet: it is drawn once a round has been fought.');
+    this.view.battle.open(target);
+  }
+
+  leaveBattle(): void {
+    this.view.battle.close();
+  }
+
+  private battleTarget(key: string): BattleTarget | null {
+    const sg = this.sightings().find((x) => x.key === key);
+    if (!sg?.record) return null;
+    const star = this.deps.galaxy.starAt(hexAt(sg.movement, sg.tick));
+    return {
+      key: sg.key, tick: sg.tick, record: sg.record, fleetId: sg.fleetId, place: star?.name ?? 'deep space',
+      sides: [this.sideOf(sg.fleet, sg.name, ''), this.sideOf(sg.foe, sg.foeName, sg.foeEmpire)],
+    };
+  }
+
+  /** A fleet of a battle as the view draws it: name, empire, colour and ship designs. */
+  private sideOf(fleetKey: string, name: string, empire: string): BattleSide {
+    const s = this.state;
+    if (fleetKey.startsWith(`${this.myKey}:`)) {
+      const id = fleetKey.slice(fleetKey.indexOf(':') + 1);
+      return { key: fleetKey, name: s.fleets.find((f) => f.id === id)?.name ?? name, empire: s.identity?.name ?? s.playerName, color: ownClaim(s).color, design: (c) => this.effectiveDesign(c) };
+    }
+    const v = this.others.find((x) => x.id === fleetKey);
+    const base: ShipDesign = v?.design ?? { ...DEFAULT_DESIGN, colors: { primary: '#8a3a4f', secondary: '#25121b', accent: '#ff5d8f' } };
+    const memo = new Map<string, ShipDesign>();
+    return {
+      key: fleetKey, name: v ? v.name.split(' · ')[0] : name, empire: v?.owner ?? empire, color: v?.color ?? '#ff5d8f',
+      design: (classId) => {
+        if (!memo.has(classId)) { const c = this.classById.get(classId); memo.set(classId, c ? classDesign(base, c) : base); }
+        return memo.get(classId)!;
+      },
+    };
+  }
+
+  /** Who is breaking off (sailing away from the battle's hex) and who gives chase. */
+  battleEnding = (target: BattleTarget): StageEnding => {
+    const s = this.state;
+    const movementOf = (key: string): FleetMovement | null => {
+      if (key.startsWith(`${this.myKey}:`)) return s.fleets.find((f) => f.id === key.slice(key.indexOf(':') + 1))?.movement ?? null;
+      return this.others.find((x) => x.id === key)?.movement ?? null;
+    };
+    const chaseOf = (key: string): string | undefined => {
+      if (key.startsWith(`${this.myKey}:`)) return s.loadouts[key.slice(key.indexOf(':') + 1)]?.orders?.chase;
+      return this.otherBattles.find((b) => b.fleet === key)?.chase;
+    };
+    const m0 = movementOf(target.sides[0].key);
+    const here = m0 ? hexAt(m0, target.tick) : null;
+    const away = (key: string) => {
+      const m = movementOf(key);
+      return !!m && !!here && !hexEquals(m.route[m.route.length - 1], here);
+    };
+    const [a, b] = [target.sides[0].key, target.sides[1].key];
+    return { flee: [away(a), away(b)], chase: [chaseOf(a) === b, chaseOf(b) === a] };
+  };
+
+  /** Markers for the battles you can see; the open view follows its battle's newest round. */
+  refreshBattles(): void {
+    if (!this.view) return;
+    const list = this.sightings();
+    this.view.battleMarkers.setBattles(list.map((sg) => {
+      const p = hexToWorld(hexAt(sg.movement, sg.tick));
+      return { key: sg.key, x: p.x, z: p.z, round: sg.round, title: `${sg.name} against ${sg.foeName} of ${sg.foeEmpire}` };
+    }));
+    const open = this.view.battle.current;
+    if (open) {
+      const next = this.battleTarget(open.key);
+      if (next) this.view.battle.setTarget(next);
+    }
   }
 
   private npcFleets: FleetView[] = [];

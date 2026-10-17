@@ -257,4 +257,23 @@ describe('public empire view', async () => {
     expect(v.fleets.map((f) => [f.id, f.armed, f.stance])).toEqual([['a', true, 'aggressive'], ['b', false, undefined], ['c', false, undefined]]);
     expect('stance' in v.fleets[1]).toBe(false);
   });
+
+  it('keeps a fleet\'s battle and its round record, bounded, so anyone can watch it', () => {
+    const view = {
+      round: 3, before: [{ ships: [{ classId: 'lancer', count: 4 }, { classId: '<b>', count: 2 }], damage: { lancer: 12 } }, { ships: [{ classId: 'brawler', count: 3 }] }],
+      lostBy: [{ lancer: 1 }, {}], takenBy: [{}, { brawler: 1 }], by: [{ long: 80 }, { short: 40 }], jam: [1, 0.9], flak: [0, 2],
+      hull: [{ lancer: 40 }, { brawler: 90 }], wounds: [{ lancer: 10 }, {}], start: [500, 600],
+    };
+    const v = publicView({ fleets: [
+      { id: 'a', name: 'A', battle: { foe: 'p2:f1', tick: 9, round: 3, foeName: 'Third <Lance>', foeEmpire: 'Tessaly', view } },
+      { id: 'b', name: 'B', battle: { foe: 'p2:f2', tick: 9, view: { round: 'x' } } },
+      { id: 'c', name: 'C', battle: { foe: 7, tick: 9 } },
+    ] });
+    const b = v.fleets[0].battle;
+    expect(b).toMatchObject({ foe: 'p2:f1', tick: 9, round: 3, foeName: 'Third Lance' });
+    expect(b.view.before[0].ships).toEqual([{ classId: 'lancer', count: 4 }]);
+    expect(b.view.flak).toEqual([0, 0.6]);
+    expect(v.fleets[1].battle).toEqual({ foe: 'p2:f2', tick: 9 });
+    expect(v.fleets[2].battle).toBeUndefined();
+  });
 });

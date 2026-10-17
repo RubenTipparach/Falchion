@@ -28,6 +28,8 @@ interface ClaimSet {
 
 /** Height of an empire name marker (CSS px), for keeping them apart. */
 const MARKER_H = 26;
+/** Longest a marker's name shows before it is cut short with an ellipsis (about 240px). */
+const MARKER_CHARS = 26;
 
 const HEX_GEO = new THREE.CircleGeometry(HEX_SIZE * 0.96, 6).rotateX(-Math.PI / 2);
 
@@ -101,7 +103,11 @@ export class TerritoryLayer implements MapLayer {
         dot.className = 'dot';
         dot.style.background = claim.color;
       }
-      el.append(dot, document.createTextNode(claim.name)); // player names are untrusted: no innerHTML
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = claim.name; // player names are untrusted: no innerHTML
+      el.title = claim.name;
+      el.append(dot, name);
       if (claim.id) {
         el.classList.add('clickable');
         el.title = `${claim.name}: show in Players`;
@@ -140,7 +146,7 @@ export class TerritoryLayer implements MapLayer {
       for (const mk of set.markers) {
         if (!showMarkers) { mk.visible = false; continue; }
         mk.getWorldPosition(p).project(view.camera);
-        const at = { x: (p.x * cssW) / 2, y: (-p.y * cssH) / 2, w: 34 + 8 * (mk.element.textContent?.length ?? 8) };
+        const at = { x: (p.x * cssW) / 2, y: (-p.y * cssH) / 2, w: 34 + 8 * Math.min(MARKER_CHARS, mk.element.textContent?.length ?? 8) };
         mk.visible = !placed.some((o) => Math.abs(o.y - at.y) < MARKER_H && Math.abs(o.x - at.x) < (o.w + at.w) / 2);
         if (mk.visible) placed.push(at);
       }

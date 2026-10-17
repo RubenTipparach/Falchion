@@ -56,6 +56,7 @@ h4 { font-size: 11px; font-weight: 600; letter-spacing: 0.18em; text-transform: 
 .quadrant-label { font: 600 22px var(--font-display); letter-spacing: 0.5em; text-transform: uppercase; color: rgba(160, 215, 235, 0.75); text-shadow: 0 0 14px #000; white-space: nowrap; }
 .ring-label { font: 11px var(--font-mono); color: rgba(127, 211, 230, 0.7); white-space: nowrap; }
 .empire-marker { font: 600 11px var(--font-display); letter-spacing: 0.06em; padding: 3px 9px 3px 7px; border-radius: 3px; background: rgba(5, 8, 16, 0.82); border: 1px solid var(--line); white-space: nowrap; transform: translateY(-24px); display: flex; gap: 6px; align-items: center; }
+.empire-marker .name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
 .empire-marker .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px currentColor; }
 .empire-marker.player { border-color: var(--brass); color: var(--brass); }
 .empire-marker.alien { color: #ffb3b3; }

@@ -1,5 +1,5 @@
 import { SHIP_STYLES } from '../content/shipStyles';
-import { EmpireIdentity, Flag, HeraldryTables, NAME_MAX, cleanIdentity, randomEmpireName, randomFlag } from '../core/empire/Identity';
+import { EMPIRE_NAME_MAX, EmpireIdentity, Flag, HeraldryTables, NAME_MAX, cleanIdentity, randomEmpireName, randomFlag } from '../core/empire/Identity';
 import { Rng } from '../core/rng/Rng';
 import { FLAG_EMBLEMS, FLAG_FIELDS } from '../content/heraldry';
 import { h } from './dom';
@@ -24,7 +24,7 @@ export function showFounding(start: EmpireIdentity, t: HeraldryTables, mode: 'fo
       setFlag({ colors });
     };
 
-    const nameIn = h('input', { class: 'input', maxlength: NAME_MAX, 'aria-label': 'Empire name' });
+    const nameIn = h('input', { class: 'input', maxlength: EMPIRE_NAME_MAX, 'aria-label': 'Empire name' });
     const rulerIn = h('input', { class: 'input', maxlength: NAME_MAX, 'aria-label': 'Ruler name' });
     const capitalIn = h('input', { class: 'input', maxlength: NAME_MAX, 'aria-label': 'Capital world name' });
     const titleSel = h('select', { class: 'input', 'aria-label': 'Ruler title' }, ...t.titles.map((x) => h('option', { value: x }, x)));

@@ -116,7 +116,7 @@ export function createActivity(deps) {
       id: `${now().toString(36)}-${(++seq).toString(36)}`,
       at: now(),
       player: { id: user.id, name: cleanText(user.name, 64) || 'Commander' },
-      empire: e && cleanText(e.name, 40) ? { name: cleanText(e.name, 40), color: HEX_COLOR.test(e.color) ? e.color : '#e6b450' } : null,
+      empire: e && cleanText(e.name, 100) ? { name: cleanText(e.name, 100), color: HEX_COLOR.test(e.color) ? e.color : '#e6b450' } : null,
       kind,
       text: cleanText(text, MAX_TEXT),
       ...(place ? { place } : {}),
@@ -150,7 +150,7 @@ export function createActivity(deps) {
   /** The server saw a player's first save: their empire is founded. */
   async function founded(user, pub) {
     if (foundRecently(user.id)) return null;
-    const name = cleanText(pub?.empire?.name, 40);
+    const name = cleanText(pub?.empire?.name, 100);
     const home = pub?.home;
     const capital = cleanText(pub?.empire?.capital, MAX_PLACE_NAME);
     const text = name ? `founded the ${name}${capital ? ` at ${capital}` : ''}` : 'founded an empire';

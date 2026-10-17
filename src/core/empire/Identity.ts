@@ -35,6 +35,8 @@ export interface HeraldryTables {
 }
 
 export const NAME_MAX = 40;
+/** Empire names may run longer than other names. */
+export const EMPIRE_NAME_MAX = 100;
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const PART_ID = /^[a-z][a-z-]{0,23}$/;
 
@@ -72,7 +74,7 @@ export function cleanText(s: unknown, max = NAME_MAX): string {
 export function cleanIdentity(raw: unknown, t: HeraldryTables): EmpireIdentity | null {
   const r = raw as Partial<EmpireIdentity> | null;
   if (!r || typeof r !== 'object') return null;
-  const name = cleanText(r.name);
+  const name = cleanText(r.name, EMPIRE_NAME_MAX);
   if (!name) return null;
   const color = typeof r.color === 'string' && HEX_COLOR.test(r.color) ? r.color.toLowerCase() : t.colors[0];
   return {

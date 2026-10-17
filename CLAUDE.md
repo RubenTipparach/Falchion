@@ -10,7 +10,7 @@ Hex-based, at-scale 4X MMO (three.js + TypeScript, Discord integration planned).
 - `npx openspec list` / `npx openspec validate --all` — spec-driven workflow
 
 ## CI
-GitHub Actions (`.github/workflows/ci.yml`) runs typecheck, tests, spec validation and build on every push to `main` and on every pull request.
+GitHub Actions (`.github/workflows/ci.yml`) runs typecheck, tests, spec validation and build on every push (any branch) and pull request. Every pushed commit that passes deploys `dist/` to GitHub Pages; the site always shows the most recent push.
 
 ## Workflow
 Spec first: use `/opsx:propose` → `/opsx:apply` → `/opsx:archive`. Specs live in `openspec/`.

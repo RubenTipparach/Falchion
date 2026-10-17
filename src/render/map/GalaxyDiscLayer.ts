@@ -13,8 +13,10 @@ export class GalaxyDiscLayer implements MapLayer {
   readonly object3d: THREE.Mesh;
   private readonly material: THREE.ShaderMaterial;
 
-  constructor(p: GalaxyParams) {
+  /** `lite` (phones): fewer noise octaves. */
+  constructor(p: GalaxyParams, lite = false) {
     this.material = new THREE.ShaderMaterial({
+      defines: lite ? { DISC_OCTAVES: 4 } : {},
       transparent: false, // additive background, drawn in the opaque pass before planets
       depthWrite: false,
       blending: THREE.AdditiveBlending,
@@ -34,7 +36,10 @@ export class GalaxyDiscLayer implements MapLayer {
         float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + uSeed) * 43758.5453); }
         float noise(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
           return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y); }
-        float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 6; i++) { v += a * noise(p); p = p * 2.07 + 13.1; a *= 0.5; } return v; }
+        #ifndef DISC_OCTAVES
+        #define DISC_OCTAVES 6
+        #endif
+        float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < DISC_OCTAVES; i++) { v += a * noise(p); p = p * 2.07 + 13.1; a *= 0.5; } return v; }
 
         void main() {
           vec2 p = vWorld + uOrigin;

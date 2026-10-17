@@ -11,7 +11,8 @@ export class HexGridLayer implements MapLayer {
   readonly object3d: THREE.Mesh;
   private readonly material: THREE.ShaderMaterial;
 
-  constructor(galaxyRadius: number) {
+  /** `lite` (phones): the quad stops just past where the grid fades out, so no pixels are shaded only to be discarded. */
+  constructor(galaxyRadius: number, private readonly lite = false) {
     this.material = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -87,7 +88,7 @@ export class HexGridLayer implements MapLayer {
     const opacity = fade(view.visibleWidth, 120, 420) * fadeIn(view.visibleWidth, 5, 11);
     this.object3d.visible = opacity > 0.01;
     if (!this.object3d.visible) return;
-    const size = view.visibleWidth * 4;
+    const size = view.visibleWidth * (this.lite ? 3 : 4);
     this.object3d.position.set(view.focus.x, 0, view.focus.z);
     this.object3d.scale.set(size, 1, size);
     const u = this.material.uniforms;

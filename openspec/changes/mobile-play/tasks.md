@@ -4,7 +4,7 @@
 - [x] 1.3 The map takes every touch gesture: no browser zoom, scroll or bounce
 
 ## 2. Performance
-- [x] 2.1 Nebula and galaxy disc at a third of the resolution on touch screens; pixel ratio capped at 1.5
+- [x] 2.1 Touch screens only: nebula and galaxy disc at a quarter of the resolution, 4 noise octaves, redrawn only when the view moves (10/s for the drift); smaller hex-grid quad; pixel ratio capped at 1.5
 
 ## 3. Phone layout
 - [x] 3.1 Slim top bar with a swipeable resource strip and the year

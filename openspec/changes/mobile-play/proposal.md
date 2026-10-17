@@ -19,8 +19,12 @@ Players open Falchion from Discord on their phones. On a phone the game was hard
   - news shows briefly as a toast.
 - The page cannot be zoomed or bounced by the browser, respects the notch (safe areas) and can run
   full screen from the home screen.
-- Phones render lighter: the nebula and galaxy-disc shaders draw into a buffer a third the size and are
-  stretched over the screen, and the map renders at most 1.5 device pixels per CSS pixel.
+- Phones render lighter (desktop is unchanged):
+  - the nebula and galaxy-disc shaders draw into a buffer a quarter the size, with fewer noise
+    octaves, redrawn only when the view moves (ten times a second for the drift), and stretched
+    over the screen;
+  - the hex grid's quad stops where the grid fades out;
+  - the map renders at most 1.5 device pixels per CSS pixel.
 - Touch screens get touch hints (press and hold, twist, slide) instead of mouse ones.
 
 ## Impact

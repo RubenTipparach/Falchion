@@ -77,7 +77,11 @@ export const NEBULA_GLSL = /* glsl */ `
   }
   float noise(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
     return mix(mix(nebHash(i), nebHash(i + vec2(1, 0)), u.x), mix(nebHash(i + vec2(0, 1)), nebHash(i + vec2(1, 1)), u.x), u.y); }
-  float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 6; i++) { v += a * noise(p); p = p * 2.03 + 17.0; a *= 0.5; } return v; }
+  // Phones define NEB_OCTAVES 4 (the last two octaves add 1/32 and 1/64: invisible at their resolution).
+  #ifndef NEB_OCTAVES
+  #define NEB_OCTAVES 6
+  #endif
+  float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < NEB_OCTAVES; i++) { v += a * noise(p); p = p * 2.03 + 17.0; a *= 0.5; } return v; }
   // One cloud layer at noise coordinates p: rgb and coverage.
   vec4 cloudLayer(vec2 p, float t) {
     vec2 q = vec2(fbm(p + vec2(0.0, t)), fbm(p + vec2(5.2, 1.3) - t));

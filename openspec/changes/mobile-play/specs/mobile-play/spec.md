@@ -32,9 +32,11 @@ cards. Nothing SHALL be cut off above the top bar.
 - **THEN** its card opens as a bottom sheet above the tab bar, with its header visible and its contents scrollable
 
 ### Requirement: The map stays smooth on phones
-On touch screens the heavy nebula and galaxy-disc shaders SHALL render at reduced resolution
-(about a third per axis) and be stretched over the screen, and the map SHALL render at no more
-than 1.5 device pixels per CSS pixel.
+On touch screens only (desktop rendering is unchanged) the heavy nebula and galaxy-disc shaders
+SHALL render at reduced resolution (a quarter per axis) with fewer noise octaves, be redrawn only
+when the view moves or a few times a second for their slow drift, and be stretched over the
+screen; the hex grid SHALL shade no pixels beyond where it fades out; and the map SHALL render at
+no more than 1.5 device pixels per CSS pixel.
 
 #### Scenario: Galaxy view on a phone
 - **WHEN** the player zooms out to the nebula and galaxy views on a phone

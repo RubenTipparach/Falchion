@@ -150,9 +150,9 @@ async function bootstrap(): Promise<void> {
   const map = new MapView({ container: mapEl, galaxyRadius: galaxy.params.radius, onClick: controller.handleClick, onRightClick: controller.handleRightClick, onHover: controller.handleHover, onFrame: controller.onFrame, lite });
 
   map.layers.add(new StarfieldLayer(galaxy.params.seed));
-  const nebula = new NebulaLayer(galaxy.params.seed);
-  const disc = new GalaxyDiscLayer(galaxy.params);
-  if (lite) map.layers.add(new LowResBackground([nebula, disc], 0.35));
+  const nebula = new NebulaLayer(galaxy.params.seed, lite);
+  const disc = new GalaxyDiscLayer(galaxy.params, lite);
+  if (lite) map.layers.add(new LowResBackground([nebula, disc], 0.25));
   else map.layers.add(nebula);
   // System view: the star (or a followed ship in deep space) sits inside the map's nebula.
   map.layers.add(new NebulaSkyboxLayer(galaxy.params.seed, (x, z) => {
@@ -167,7 +167,7 @@ async function bootstrap(): Promise<void> {
   const territory = map.layers.add(new TerritoryLayer(world.claims.filter((c) => c.kind !== 'player')));
   territory.setOwn(ownClaim(store.state));
   store.subscribe((s, prev) => { if (s.identity !== prev.identity || s.economy.colonies !== prev.economy.colonies) territory.setOwn(ownClaim(s)); });
-  const hexGrid = map.layers.add(new HexGridLayer(galaxy.params.radius));
+  const hexGrid = map.layers.add(new HexGridLayer(galaxy.params.radius, lite));
   const nearStars = map.layers.add(new NearStarLayer(galaxy));
   nearStars.surveyed = controller.surveyedPercent;
   const system = map.layers.add(new SystemLayer(galaxy, { isHome: (s) => s.id === world.home.id, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet) }));

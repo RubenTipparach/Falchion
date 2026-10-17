@@ -18,8 +18,10 @@ export class NebulaLayer implements MapLayer {
   readonly object3d: THREE.Mesh;
   private readonly material: THREE.ShaderMaterial;
 
-  constructor(seed: number) {
+  /** `lite` (phones): fewer noise octaves; see LowResBackground for the rest. */
+  constructor(seed: number, lite = false) {
     this.material = new THREE.ShaderMaterial({
+      defines: lite ? { NEB_OCTAVES: 4 } : {},
       transparent: false, // additive background, drawn in the opaque pass before planets
       depthWrite: false,
       depthTest: false,

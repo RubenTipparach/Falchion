@@ -10,6 +10,9 @@ import type { MapLayer, ViewState } from './MapLayer';
  * The wrapped layers must blend additively over the background (they do): the buffer then
  * holds exactly what they would have added, and the full-screen quad adds it back.
  */
+/** With the view still, the drifting clouds are redrawn this often (ms). */
+const REDRAW_STILL_MS = 100;
+
 export class LowResBackground implements MapLayer {
   readonly object3d: THREE.Mesh;
   private readonly scene = new THREE.Scene();
@@ -18,6 +21,11 @@ export class LowResBackground implements MapLayer {
   private target: THREE.WebGLRenderTarget | null = null;
   private readonly composite: THREE.ShaderMaterial;
   private readonly size = new THREE.Vector2();
+  /** The camera the buffer was last drawn with, and when: it is only redrawn when the view moves, or a few times a second for the slow drift. */
+  private readonly lastCam = new THREE.Matrix4();
+  private readonly lastProj = new THREE.Matrix4();
+  private lastDrawn = -Infinity;
+  private readonly lastOrigin = new THREE.Vector3();
 
   /** `scale`: buffer size as a fraction of the drawing buffer, per axis (e.g. 0.35). */
   constructor(private readonly layers: readonly MapLayer[], private readonly scale: number) {
@@ -53,6 +61,14 @@ export class LowResBackground implements MapLayer {
     if (!this.object3d.visible) return;
     renderer.getDrawingBufferSize(this.size);
     const w = Math.max(1, Math.round(this.size.x * this.scale)), h = Math.max(1, Math.round(this.size.y * this.scale));
+    const now = performance.now();
+    const still = this.target?.width === w && this.target.height === h
+      && this.lastCam.equals(camera.matrixWorld) && this.lastProj.equals(camera.projectionMatrix) && this.world.position.equals(this.lastOrigin);
+    if (still && now - this.lastDrawn < REDRAW_STILL_MS) return;
+    this.lastCam.copy(camera.matrixWorld);
+    this.lastProj.copy(camera.projectionMatrix);
+    this.lastOrigin.copy(this.world.position);
+    this.lastDrawn = now;
     if (!this.target) {
       // Half floats where the GPU can render to them: soft gradients without 8-bit banding.
       const half = renderer.extensions.has('EXT_color_buffer_half_float') || renderer.extensions.has('EXT_color_buffer_float');

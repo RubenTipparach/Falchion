@@ -33,7 +33,7 @@ export class MapView {
     // stencil: the selected ship masks itself so its outline is drawn only around its silhouette.
     // Phones (lite): no kept drawing buffer, and at most 1.5 device pixels per CSS pixel.
     const lite = opts.lite ?? false;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: !lite, stencil: true, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: !lite, stencil: true, ...(lite ? { powerPreference: 'high-performance' as const } : {}) });
     this.renderer.setPixelRatio(Math.min(lite ? 1.5 : 2, window.devicePixelRatio));
     this.renderer.setClearColor('#03060d');
     opts.container.appendChild(this.renderer.domElement);

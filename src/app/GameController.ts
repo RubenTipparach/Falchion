@@ -63,6 +63,8 @@ export interface ViewDeps {
   readonly system: SystemLayer;
 }
 
+/** Camera altitude (ly) that frames a whole star system. */
+const SYSTEM_ALTITUDE = 0.45;
 const BASE_SPEED = 1; // ly per year (one year = one minute)
 /** At most a week of missed years is simulated on return; older years only move fleets. */
 const MAX_CATCH_UP = 7 * 24 * 60;
@@ -79,6 +81,7 @@ export class GameController implements GameActions, GameQueries {
   private view!: ViewDeps;
   private readonly classById = new Map(SHIP_CLASSES.map((c) => [c.id, c]));
   private readonly targetStars = new Map<string, StarSystem>();
+  private lastClick: { id: string; at: number } | null = null;
 
   constructor(private readonly deps: ControllerDeps) {}
 
@@ -92,6 +95,12 @@ export class GameController implements GameActions, GameQueries {
     for (const [id, panel] of Object.entries(view.panels)) panel.onChange(() => view.topBar.setActivePanel(this.openPanelId() ?? (panel.opened ? (id as PanelId) : null)));
     view.fleets.setTime(this.state.turn + this.deps.clock.fraction());
     view.fleets.setFleets(this.fleetViews());
+    // Zooming in close pulls the view onto the nearest star, so you land in its system.
+    view.map.controller.attractor = (ground, width) => {
+      if (width > 25) return null;
+      const star = this.deps.galaxy.nearestStar(worldToHex(ground.x, ground.z), Math.max(1, Math.round(width * 0.15)));
+      return star ? star.position : null;
+    };
     this.updateContact();
   }
 
@@ -302,9 +311,9 @@ export class GameController implements GameActions, GameQueries {
     this.view.map.controller.zoom.setTargetAltitude(altitude);
   }
 
+  /** Fly to a star; closeUp dives into its system view. */
   flyTo(star: StarSystem, closeUp = false): void {
-    const p = hexToWorld(star.hex);
-    this.view.map.controller.flyTo(p.x, p.z, closeUp ? 30 : undefined);
+    this.view.map.controller.flyTo(star.position.x, star.position.z, closeUp ? SYSTEM_ALTITUDE : undefined);
   }
 
   select(star: StarSystem | null): void {
@@ -326,14 +335,14 @@ export class GameController implements GameActions, GameQueries {
     const cam = this.view.map.controller;
     if (!planet) {
       this.clearPlanetFocus();
-      cam.flyTo(star.position.x, star.position.z, 0.45);
+      cam.flyTo(star.position.x, star.position.z, SYSTEM_ALTITUDE);
       return;
     }
     this.deps.store.update({ selectedPlanet: planet });
     this.view.system.setSelected(planet.id);
     if (cam.zoom.targetAltitude > 2) {
       // From afar: fly to the system first; follow once it has been built.
-      cam.flyTo(star.position.x, star.position.z, 0.45);
+      cam.flyTo(star.position.x, star.position.z, SYSTEM_ALTITUDE);
       setTimeout(() => this.followPlanet(planet), 900);
     } else this.followPlanet(planet);
   }
@@ -938,7 +947,17 @@ export class GameController implements GameActions, GameQueries {
       return;
     }
     const reach = Math.min(6, Math.max(1, Math.round(v.visibleWidth * 0.012)));
-    this.select(this.deps.galaxy.nearestStar(h, reach));
+    const star = this.deps.galaxy.nearestStar(h, reach);
+    // Double-click a star to dive into its system.
+    const now = performance.now();
+    if (star && this.lastClick && this.lastClick.id === star.id && now - this.lastClick.at < 400) {
+      this.lastClick = null;
+      this.select(star);
+      this.flyTo(star, true);
+      return;
+    }
+    this.lastClick = star ? { id: star.id, at: now } : null;
+    this.select(star);
   };
 
   handleHover = (world: THREE.Vector3 | null, ray: THREE.Raycaster): void => {

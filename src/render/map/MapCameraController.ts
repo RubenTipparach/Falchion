@@ -22,6 +22,15 @@ export class MapCameraController {
   yaw = Math.PI;
   tilt = 0.75;
   private flyTarget: THREE.Vector2 | null = null;
+  /** Altitude a fly-to descends to once the pan is nearly done (pan first, then dive). */
+  private flyAltitude: number | null = null;
+  /** Wheel zoom eases; this keeps the ground point under the cursor fixed while it does. */
+  private zoomAnchor: { x: number; y: number; world: THREE.Vector3 } | null = null;
+  /**
+   * Optional magnet for zooming in close: returns a point (e.g. the nearest star) to
+   * centre on instead of the cursor, given the ground point and the target view width.
+   */
+  attractor: ((ground: THREE.Vector3, viewWidth: number) => { x: number; z: number } | null) | null = null;
   private follow: (() => THREE.Vector3 | null) | null = null;
   private drag: { button: number; x: number; y: number; moved: number } | null = null;
   private readonly raycaster = new THREE.Raycaster();
@@ -46,14 +55,21 @@ export class MapCameraController {
 
   flyTo(x: number, z: number, altitude?: number): void {
     this.follow = null;
+    this.zoomAnchor = null;
     this.flyTarget = new THREE.Vector2(x, z);
-    if (altitude !== undefined) this.zoom.setTargetAltitude(altitude);
+    this.flyAltitude = null;
+    if (altitude === undefined) return;
+    // Zoom out at once if needed, but only dive in once the target is nearly in view.
+    if (altitude >= this.zoom.targetAltitude) this.zoom.setTargetAltitude(altitude);
+    else this.flyAltitude = altitude;
   }
 
   /** Keep the camera centred on a moving target (absolute coords) until the user pans. */
   followTarget(get: (() => THREE.Vector3 | null) | null, altitude?: number): void {
     this.follow = get;
     this.flyTarget = null;
+    this.flyAltitude = null;
+    this.zoomAnchor = null;
     if (altitude !== undefined) this.zoom.setTargetAltitude(altitude);
   }
 
@@ -63,14 +79,29 @@ export class MapCameraController {
 
   /** Advance easing and place the camera. */
   update(dt: number): void {
-    this.zoom.step(dt);
+    const zooming = this.zoom.step(dt);
+    if (this.zoomAnchor) {
+      // Keep the anchored ground point under the cursor as the zoom eases.
+      this.place();
+      const after = this.groundAt(this.zoomAnchor.x, this.zoomAnchor.y);
+      if (after) {
+        this.focus.x += this.zoomAnchor.world.x - after.x;
+        this.focus.y += this.zoomAnchor.world.z - after.z;
+        this.clampFocus();
+      }
+      if (!zooming) this.zoomAnchor = null;
+    }
+    if (this.flyTarget && this.flyAltitude !== null && this.focus.distanceTo(this.flyTarget) < this.visibleWidth() * 0.35) {
+      this.zoom.setTargetAltitude(this.flyAltitude);
+      this.flyAltitude = null;
+    }
     if (this.follow) {
       const p = this.follow();
       if (p) this.focus.lerp(new THREE.Vector2(p.x, p.z), 1 - Math.exp(-10 * dt));
       else this.follow = null;
     } else if (this.flyTarget) {
       this.focus.lerp(this.flyTarget, 1 - Math.exp(-6 * dt));
-      if (this.focus.distanceTo(this.flyTarget) < this.zoom.altitude * 0.001) this.flyTarget = null;
+      if (this.focus.distanceTo(this.flyTarget) < this.zoom.altitude * 0.001 && this.flyAltitude === null) this.flyTarget = null;
     }
     this.place();
   }
@@ -122,29 +153,30 @@ export class MapCameraController {
 
   private readonly handleWheel = (e: WheelEvent): void => {
     e.preventDefault();
-    this.flyTarget = null;
+    this.flyAltitude = null;
     const delta = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-    if (this.follow) {
-      // Keep the followed planet centred; just zoom.
-      this.zoom.wheel(delta);
+    this.zoom.wheel(delta);
+    if (this.follow) return; // Keep the followed planet centred; just zoom.
+    const ground = this.groundAt(e.clientX, e.clientY);
+    if (!ground) return;
+    // Zooming in close: let a nearby star pull the view to centre on it, so you land in its system.
+    const targetWidth = this.visibleWidth() * (this.zoom.targetAltitude / this.zoom.altitude);
+    const magnet = delta < 0 ? this.attractor?.(ground, targetWidth) : null;
+    if (magnet) {
+      this.zoomAnchor = null;
+      this.flyTarget = new THREE.Vector2(magnet.x, magnet.z);
       return;
     }
-    // Zoom toward the cursor: keep the ground point under it fixed.
-    const before = this.groundAt(e.clientX, e.clientY);
-    this.zoom.wheel(delta);
-    this.zoom.snap();
-    this.place();
-    const after = this.groundAt(e.clientX, e.clientY);
-    if (before && after) {
-      this.focus.x += before.x - after.x;
-      this.focus.y += before.z - after.z;
-      this.clampFocus();
-    }
+    // Otherwise zoom toward the cursor, easing, with the point under it held fixed.
+    this.flyTarget = null;
+    if (!this.zoomAnchor || this.zoomAnchor.x !== e.clientX || this.zoomAnchor.y !== e.clientY) this.zoomAnchor = { x: e.clientX, y: e.clientY, world: ground };
   };
 
   private readonly handleDown = (e: PointerEvent): void => {
     this.drag = { button: e.button, x: e.clientX, y: e.clientY, moved: 0 };
     this.flyTarget = null;
+    this.flyAltitude = null;
+    this.zoomAnchor = null;
   };
 
   private readonly handleMove = (e: PointerEvent): void => {

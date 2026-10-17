@@ -1,3 +1,5 @@
+import { RESOURCES, Resource } from '../content/resources';
+
 /** Inline SVG icons (stroke-based, inherit currentColor). */
 const svg = (body: string, size = 16) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
@@ -35,6 +37,41 @@ export const ICONS = {
 } as const;
 
 export type IconName = keyof typeof ICONS;
+
+/** One glyph per resource, drawn in the resource's colour. */
+const RESOURCE_ICONS: Readonly<Record<Resource, string>> = {
+  // Credits: a stamped coin.
+  credits: svg('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="5"/><path d="M12 9v6M10.5 10.5h2.2a1.3 1.3 0 0 1 0 2.6h-1.4a1.3 1.3 0 0 0 0 2.6h2.2"/>'),
+  // Influence: a laurel-crowned star.
+  influence: svg('<path d="M12 5l1.9 3.9 4.3.6-3.1 3 .7 4.3L12 14.8l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/><path d="M5 18c2 1.6 4.4 2.2 7 2.2s5-.6 7-2.2"/>'),
+  // Faith: a flame inside a halo.
+  faith: svg('<path d="M12 20c-3 0-5-2-5-4.8 0-3 3.2-4.6 3.6-8.2 2.4 1.6 3.4 3.4 3.4 5.2.8-.6 1.2-1.4 1.4-2.4 1.2 1.2 1.6 3 1.6 4.4 0 3-2 5.8-5 5.8z"/><ellipse cx="12" cy="4" rx="4" ry="1.4"/>'),
+  // Food: an ear of grain.
+  food: svg('<path d="M12 21V8"/><path d="M12 9c-2.6-.4-3.6-2.4-3.6-4.6 2.4.2 3.6 2 3.6 4.6zM12 9c2.6-.4 3.6-2.4 3.6-4.6-2.4.2-3.6 2-3.6 4.6z"/><path d="M12 14c-2.6-.4-3.8-2.4-3.8-4.4 2.4.2 3.8 1.9 3.8 4.4zM12 14c2.6-.4 3.8-2.4 3.8-4.4-2.4.2-3.8 1.9-3.8 4.4z"/><path d="M12 19c-2.6-.4-3.8-2.4-3.8-4.4 2.4.2 3.8 1.9 3.8 4.4zM12 19c2.6-.4 3.8-2.4 3.8-4.4-2.4.2-3.8 1.9-3.8 4.4z"/>'),
+  // Metals: stacked ingots.
+  metals: svg('<path d="M4 18l2-4h6l2 4z"/><path d="M10 18l2-4h6l2 4z"/><path d="M7 14l2-4h6l2 4"/>'),
+  // Volatiles: a gas canister venting.
+  volatiles: svg('<rect x="7" y="8" width="10" height="13" rx="3"/><path d="M10 8V6h4v2"/><path d="M15 4c1-.8 2.4-.8 3.4 0M16.5 2.2c.8-.4 1.8-.4 2.6 0"/><path d="M7 13h10"/>'),
+  // Ice: a snowflake.
+  ice: svg('<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M10 5l2 2 2-2M10 19l2-2 2 2M5 10.3l2.7.4-.9 2.6M19 13.7l-2.7-.4.9-2.6"/>'),
+  // Crystals: a faceted gem cluster.
+  crystals: svg('<path d="M9 21l-3-7 3-9 3 9z"/><path d="M15 21l-3-6 3-7 3 7z"/><path d="M6 14h6M12 15h6"/>'),
+  // Rare earths: sifted grains in a pan.
+  rareEarths: svg('<path d="M3 13h18l-2 5H5z"/><circle cx="8" cy="10" r="1.2"/><circle cx="12" cy="8.5" r="1.4"/><circle cx="16" cy="10" r="1.1"/><circle cx="10" cy="5.5" r=".9"/><circle cx="14.5" cy="5.8" r=".8"/>'),
+  // Exotic matter: an unstable atom.
+  exotics: svg('<circle cx="12" cy="12" r="1.8" fill="currentColor"/><ellipse cx="12" cy="12" rx="9" ry="3.6"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(120 12 12)"/>'),
+  // Dark matter: a void with an accretion swirl.
+  darkMatter: svg('<circle cx="12" cy="12" r="3" fill="currentColor"/><path d="M12 4a8 8 0 0 1 8 8M20 12a8 8 0 0 1-8 8M12 20a8 8 0 0 1-8-8M4 12a8 8 0 0 1 8-8" stroke-dasharray="3 3"/>'),
+};
+
+/** Resource glyph in the resource's own colour. */
+export function resourceIcon(id: Resource, size = 16): HTMLSpanElement {
+  const span = document.createElement('span');
+  span.className = 'ico res-ico';
+  span.innerHTML = RESOURCE_ICONS[id].replace('width="16" height="16"', `width="${size}" height="${size}"`);
+  span.style.color = RESOURCES.find((r) => r.id === id)?.color ?? 'currentColor';
+  return span;
+}
 
 export function icon(name: IconName): HTMLSpanElement {
   const span = document.createElement('span');

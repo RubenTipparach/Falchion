@@ -3,12 +3,14 @@ import type { Store } from '../../app/Store';
 import { RESOURCES } from '../../content/resources';
 import { FACTIONS, GOVERNMENTS, POLICIES, TENETS } from '../../content/society';
 import {
-  bonusOf, EconomyTables, factionApproval, upkeepOf, hasGrant, maxPolicies, maxRoutes, maxSpies, routeValue, sciencePerTurn, stabilityOf, tradePctOf,
+  bonusOf, Colony, colonyYield, EconomyTables, factionApproval, upkeepOf, hasGrant, maxPolicies, maxRoutes, maxSpies, routeValue, sciencePerTurn, stabilityOf, tradePctOf,
 } from '../../core/economy/Economy';
 import { Drawer } from '../Drawer';
 import type { GameActions, GameQueries } from '../GameActions';
-import { colonyView, locateButton } from '../widgets';
+import { icon, resourceIcon } from '../icons';
 import { BIOMES } from '../../content/biomes';
+import { slotsOf } from '../../content/buildings';
+import type { Planet } from '../../core/galaxy/Planets';
 import { clear, fmt, h } from '../dom';
 
 type Tab = 'overview' | 'colonies' | 'trade' | 'politics' | 'religion' | 'intel';
@@ -20,8 +22,8 @@ export class EmpirePanel extends Drawer {
   private readonly tabsEl = h('div', { class: 'seg' });
   private readonly content = h('div', { class: 'empire-content' });
 
-  constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly t: EconomyTables, private readonly empires: string[]) {
-    super('empire', 'Empire', 'Colonies and their buildings, trade, politics, religion and espionage. Income arrives every year: one minute.', true);
+  constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly t: EconomyTables, private readonly empires: string[], private readonly thumb: (p: Planet) => string) {
+    super('empire', 'Empire', 'Colonies, trade, politics, religion and espionage. Income arrives every year: one minute.');
     this.body.append(this.tabsEl, this.content);
     store.subscribe((s, prev) => { if (this.opened && (s.economy !== prev.economy || s.empire !== prev.empire || s.lastReport !== prev.lastReport || s.fleets !== prev.fleets || s.turn !== prev.turn || s.construction !== prev.construction)) this.render(); });
   }
@@ -39,21 +41,32 @@ export class EmpirePanel extends Drawer {
     this.content.append(...views[this.tab]());
   }
 
+  /** One summary row per colony; click a row to open the planet, where its buildings are managed. */
   private colonies(): HTMLElement[] {
     const s = this.store.state;
+    const open = (c: Colony) => {
+      const star = c.starId ? this.q.starById(c.starId) : null;
+      const planet = c.planetId ? this.q.planetById(c.planetId) : null;
+      if (star && planet) this.actions.focusPlanet(star, planet);
+      else if (star) this.actions.flyTo(star, true);
+    };
     return [
-      h('p', { class: 'muted' }, 'Every colony is a planet with building slots (bigger worlds hold more). Farms feed your colonies, mines boost minerals, trade hubs earn credits, labs add science, temples faith, and shipyards build ships in that system. Settle new worlds with a Colony Ark on station.'),
-      ...s.economy.colonies.map((c) => {
-        const star = c.starId ? this.q.starById(c.starId) : null;
-        return h('section', { class: 'card colony-card' },
-          h('div', { class: 'row-between' },
-            h('h4', {}, c.name, h('span', { class: 'muted small' }, ` · ${BIOMES.find((b) => b.id === c.biome)?.name ?? c.biome}${c.size ? ` · size ${c.size}` : ''}${star ? ` · ${star.name}` : ''}`)),
-            star ? locateButton(`Zoom to ${c.name}`, () => {
-              const planet = c.planetId ? this.q.planetById(c.planetId) : null;
-              if (planet) this.actions.focusPlanet(star, planet); else this.actions.flyTo(star, true);
-            }) : ''),
-          c.planetId ? colonyView(c, s.empire.materials, (b) => this.actions.build(c.planetId!, b), this.t, this.q.jobs(c.planetId), s.turn) : h('p', { class: 'small muted' }, 'Captured world: no building slots yet.'));
-      }),
+      h('p', { class: 'small muted' }, 'Click a colony to open it and manage its buildings.'),
+      h('div', { class: 'colony-list' }, ...s.economy.colonies.map((c) => {
+        const y = colonyYield(c, this.t);
+        const out = Object.entries(y.income).filter(([, n]) => n).map(([r, n]) => `${n! > 0 ? '+' : ''}${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`);
+        if (y.science) out.push(`+${y.science} SCI`);
+        const built = (c.buildings ?? []).length;
+        const queued = c.planetId ? this.q.jobs(c.planetId).length : 0;
+        const slots = c.planetId ? slotsOf(c.size ?? 3, c.capital) : 0;
+        const planet = c.planetId ? this.q.planetById(c.planetId) : null;
+        return h('button', { class: 'colony-row', title: `Open ${c.name}`, onclick: () => open(c) },
+          planet ? h('img', { class: 'planet-thumb cr-thumb', src: this.thumb(planet), alt: `${c.name}, ${c.biome}` }) : h('span', { class: 'cr-thumb' }),
+          h('span', { class: 'cr-name' }, h('b', {}, c.name), h('small', { class: 'muted' }, `${BIOMES.find((b) => b.id === c.biome)?.name ?? c.biome}${c.size ? ` · size ${c.size}` : ''}`)),
+          h('span', { class: 'cr-out small' }, out.join('  ') || '—'),
+          h('span', { class: 'cr-slots mono small', title: 'Buildings / slots' }, slots ? `${built}/${slots}` : '—', queued ? h('span', { class: 'tag' }, `+${queued} building`) : ''),
+          icon('locate'));
+      })),
     ];
   }
 
@@ -69,7 +82,7 @@ export class EmpirePanel extends Drawer {
     const caps = this.q.caps();
     return [
       h('div', { class: 'stock-grid' }, ...RESOURCES.map((res) => h('div', { class: 'stock' },
-        h('span', { class: 'swatch-dot', style: `background:${res.color}` }),
+        resourceIcon(res.id),
         h('span', { class: 'stock-name' }, res.name),
         h('b', { class: `mono ${caps[res.id] !== undefined && s.empire.materials[res.id] >= caps[res.id]! ? 'red' : ''}`, title: caps[res.id] !== undefined ? `Storage ${fmt(caps[res.id]!)}` : '' }, fmt(s.empire.materials[res.id]), caps[res.id] !== undefined ? h('span', { class: 'muted small' }, ` / ${fmt(caps[res.id]!)}`) : ''),
         r && r.income[res.id] ? h('span', { class: `delta ${r.income[res.id]! > 0 ? 'up' : 'down'}` }, `${r.income[res.id]! > 0 ? '+' : ''}${r.income[res.id]}`) : h('span', { class: 'delta' }, ''),

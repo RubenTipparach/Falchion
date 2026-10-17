@@ -2,7 +2,7 @@ import type { Store } from '../app/Store';
 import type { GameState } from '../app/GameState';
 import type { GameActions, PanelId } from './GameActions';
 import { h, fmt } from './dom';
-import { icon, IconName } from './icons';
+import { icon, IconName, resourceIcon } from './icons';
 import type { WorldClock } from '../app/WorldClock';
 import type { Resource } from '../content/resources';
 
@@ -90,8 +90,8 @@ export class TopBar {
     this.stats.replaceChildren(...items.map(([label, r]) => {
       const cap = caps[r];
       const full = cap !== undefined && m[r] >= cap;
-      return h('div', { class: `stat ${full ? 'full' : ''}`, title: cap !== undefined ? `${label}: ${fmt(m[r])} of ${fmt(cap)} storage${full ? ' (full: income is lost)' : ''}` : label },
-        h('span', { class: 'stat-label' }, label), h('span', { class: 'stat-value' }, fmt(m[r])));
+      return h('div', { class: `stat ${full ? 'full' : ''}`, title: cap !== undefined ? `${label}: ${fmt(m[r])} of ${fmt(cap)} storage${full ? ' (full: income is lost)' : ''}` : label, 'aria-label': `${label} ${fmt(m[r])}` },
+        resourceIcon(r, 18), h('span', { class: 'stat-value' }, fmt(m[r])));
     }));
   }
 }

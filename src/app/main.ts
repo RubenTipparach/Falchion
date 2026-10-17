@@ -138,7 +138,7 @@ async function bootstrap(): Promise<void> {
   map.layers.add(new NearStarLayer(galaxy));
   const system = map.layers.add(new SystemLayer(galaxy, { isHome: (s) => s.id === world.home.id, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet) }));
   const selection = map.layers.add(new SelectionLayer());
-  const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK)));
+  const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK), (h) => galaxy.starAt(h)?.position ?? hexToWorld(h)));
 
   const zoomCfg = map.controller.zoom.config;
   const topBar = new TopBar(store, controller, identity.displayName, clock, controller.caps);
@@ -156,7 +156,7 @@ async function bootstrap(): Promise<void> {
       buildDiscount: () => Math.min(40, controller.bonus('build')),
     }),
     research: new ResearchPanel(store, controller, tree, BRANCHES, DOMAINS, economyTables),
-    empire: new EmpirePanel(store, controller, controller, economyTables, world.neighbours.map((n) => n.name)),
+    empire: new EmpirePanel(store, controller, controller, economyTables, world.neighbours.map((n) => n.name), thumb),
     war: new WarRoomPanel(store, controller, controller),
     explore: new ExplorePanel(store, controller, controller, controller.planets, tree, thumb),
     fleets: new FleetsPanel(store, controller, controller),

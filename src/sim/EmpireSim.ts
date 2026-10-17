@@ -39,7 +39,6 @@ export interface SimDeps {
   readonly encounters: EncounterResolver;
   readonly world: World;
   readonly economy: EconomyTables;
-  /** Share notable news (battles, colonies, depots) with the server's Discord channel. */
   /** Share notable news (founding, battles, colonies, depots, surveyed systems) with the galaxy feed and Discord. */
   readonly report?: (kind: ReportKind, text: string, place?: ActivityPlace) => void;
 }
@@ -737,17 +736,37 @@ export class EmpireSim {
           }
         }
       }
-      if (!star) continue;
+      // Out of supply: back to the nearest friendly system to refill. Explorers always do this
+      // (and carry on surveying once full); other fleets when ordered to return to resupply.
       const now = this.state.loadouts[f.id];
-      const atHome = star.id === s.home.id;
-      const cap = capacity(now?.ships ?? [], specOf).supply;
-      const stuck = now && !atHome && !this.isFriendly(star) && now.supply < cap && !left().some((p) => exploreCost(p) <= now.supply);
-      if (l.orders.autoReturn && stuck) {
-        this.moveFleet(f.id, s.home, true);
-        news.push(`${f.name} is heading home to resupply`);
+      if (!now || (star && this.isFriendly(star))) continue;
+      const here = hexAt(f.movement, s.turn);
+      const cap = capacity(now.ships, specOf).supply;
+      const canSurveyHere = left().some((p) => exploreCost(p) <= now.supply);
+      const outOfSupply = l.orders.autoExplore
+        ? !canSurveyHere && (left().length > 0 || now.supply < MIN_SURVEY_SUPPLY)
+        : now.supply < cap && !canSurveyHere;
+      if ((l.orders.autoExplore || l.orders.autoReturn) && outOfSupply) {
+        const refuge = this.nearestFriendly(here);
+        if (hexEquals(refuge.hex, here)) continue;
+        this.moveFleet(f.id, refuge, true);
+        news.push(`${f.name} is low on supply: returning to ${refuge.name} to resupply${l.orders.autoExplore ? ', then surveying on' : ''}`);
       }
     }
     return news;
+  }
+
+  /** The closest system where fleets resupply (a colony system or a supply depot); home if none is closer. */
+  nearestFriendly(from: Hex): StarSystem {
+    let best = this.state.home;
+    let bestD = hexDistance(from, best.hex);
+    for (const id of [...this.colonyStars(), ...this.state.depots]) {
+      const star = this.starById(id);
+      if (!star) continue;
+      const d = hexDistance(from, star.hex);
+      if (d < bestD || (d === bestD && star.id < best.id)) { best = star; bestD = d; }
+    }
+    return best;
   }
 
   toggleTrait(traitId: string): void {

@@ -155,6 +155,25 @@ Notifications need the bot token (`DISCORD_BOT_TOKEN`, see *Channel notification
 Chat keeps the last 300 global messages and 200 per conversation in `/data/chat.json`.
 Each player may send 5 messages every 10 seconds.
 
+## Other players and the galaxy feed
+
+Signed-in players have a **Players** tab:
+
+- **Empires**: every empire in the galaxy with its flag, ruler, Discord name, who is online
+  now (green dot), colony systems, fleets, when they were last seen and how far their home is
+  from yours. Locate a home or any of their fleets (double-click zooms in), or click **DM** to
+  open a private chat. Clicking an empire's name on the map opens it here.
+- **Galaxy feed**: what everyone is doing, newest first: empires founded, colonies settled,
+  supply depots, battles, systems fully surveyed, and players coming and going. Star names are
+  links that fly the camera there. News from other players also pops up briefly at the bottom
+  of the map.
+
+Other players' fleets and territory update **within seconds**: each save is pushed to
+everyone else over the same live connection as chat (a move order, colony, depot or founding
+is saved within a moment; other changes at most every 10 seconds). Each player may report at
+most 20 events every 10 minutes; battles, colonies and depots still go to the Discord channel
+(12 an hour) as before.
+
 ## Running it locally
 
 ```sh
@@ -182,7 +201,7 @@ One file per player at `/data/<discord id>.json`: their Discord id, name and ava
 saved empire, and a public view (home, colony stars, fleets) that other players receive
 from `/api/players`. Stockpiles, research and orders are never sent to other players.
 Chat history is in `/data/chat.json`; direct messages are only ever sent to the two
-players in them.
+players in them. The galaxy feed (the last 300 events) is in `/data/activity.json`.
 
 ## Not built yet
 

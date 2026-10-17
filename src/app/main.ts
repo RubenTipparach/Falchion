@@ -53,7 +53,7 @@ import type { PanelId } from '../ui/GameActions';
 import { GameController, tradePartners } from './GameController';
 import type { GameState } from './GameState';
 import { GUEST, probeSession } from './identity';
-import { colorFor, othersOnMap, ownClaim, publicEmpire, ServerSaves } from './ServerSync';
+import { colorFor, notableChange, ownClaim, publicEmpire, ServerSaves } from './ServerSync';
 import { cleanIdentity, suggestIdentity } from '../core/empire/Identity';
 import { HERALDRY } from '../content/heraldry';
 import { showFounding } from '../ui/Founding';
@@ -61,6 +61,8 @@ import { showSignIn } from '../ui/SignIn';
 import { Store } from './Store';
 import { createWorld } from './World';
 import { setupChat } from './ChatSetup';
+import { setupPlayers } from './PlayersSetup';
+import { reportActivity } from './GalaxyApi';
 
 /** Composition root: build the pure services, the views, and wire them together. */
 async function bootstrap(): Promise<void> {
@@ -131,8 +133,8 @@ async function bootstrap(): Promise<void> {
   const store = new Store<GameState>(saved ? { ...fresh, ...saved, home: world.home, identity: cleanIdentity(saved.identity, HERALDRY) } : fresh);
 
   const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame,
-    // Signed-in players' notable news goes to the Discord channel (the server rate-limits it).
-    report: signedIn ? (kind, text) => { void fetch('./api/events', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, text }) }).catch(() => {}); } : undefined,
+    // Signed-in players' notable news goes to the galaxy feed and the Discord channel (the server rate-limits it).
+    report: signedIn ? reportActivity : undefined,
   });
 
   // ── Views ──
@@ -190,10 +192,15 @@ async function bootstrap(): Promise<void> {
   app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, dispatches.el, ...Object.values(panels).map((p) => p.el));
 
   controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system });
-  // In-game chat (global + DMs, location links, @mentions): see ChatSetup.
-  const chat = setupChat({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, panels: Object.values(panels) });
+  // Other players, live: the Players drawer, Galaxy feed, toasts and their fleets and territory (see PlayersSetup).
+  const players = setupPlayers({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, store, territory,
+    fetchPlayers: serverSaves && (() => serverSaves.players()), message: (id) => chat.openThread(id) });
+  // In-game chat (global + DMs, location links, @mentions): see ChatSetup. Its stream also carries the players' live events.
+  const chat = setupChat({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, panels: Object.values(panels), live: players.live });
+  players.alongside([...Object.values(panels), chat]);
+  topBar.addTab(players.panel.tab);
   topBar.addTab(chat.tab);
-  app.append(chat.el);
+  app.append(chat.el, players.panel.el, players.toasts.el);
 
   // ── Start ──
   const home = hexToWorld(world.home.hex);
@@ -212,13 +219,8 @@ async function bootstrap(): Promise<void> {
     if (import.meta.env.DEV && e.key === 'Enter' && tag !== 'BUTTON') controller.skipYear();
   });
   // The world runs on: one year per minute, pushed by the server when there is one.
-  // Other players in the shared galaxy: their territory and fleets, refreshed every year.
-  const refreshOthers = async () => {
-    if (!serverSaves) return;
-    const { fleets, claims } = othersOnMap(await serverSaves.players());
-    controller.setOtherFleets(fleets);
-    territory.setDynamic(claims);
-  };
+  // Other players in the shared galaxy: live over the stream, and polled every year as a fallback.
+  const refreshOthers = () => players.refresh();
   void refreshOthers();
   clock.onTick((tick) => { controller.advanceTo(tick); void refreshOthers(); });
   // Saved journeys planned at other speeds continue at the empire's speed, then the missed years run.
@@ -226,20 +228,27 @@ async function bootstrap(): Promise<void> {
   controller.advanceTo(clock.tick());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) controller.advanceTo(clock.tick()); });
   let saveTimer = 0;
+  // A move order, colony, depot or founding is news for other players' maps: push it within seconds.
+  let urgent = false;
   const persist = () => {
     saveGame.save(store.state);
     // The server copy starts once the empire is founded, so the galaxy (and the Discord channel)
     // first hears of a new player with their chosen name and flag.
-    if (serverSaves && store.state.identity && !saveGame.stoppedSaving) serverSaves.push(saveGame.snapshot(store.state), publicEmpire(store.state, colorFor(identity.id)));
+    if (serverSaves && store.state.identity && !saveGame.stoppedSaving) serverSaves.push(saveGame.snapshot(store.state), publicEmpire(store.state, colorFor(identity.id)), urgent);
+    urgent = false;
   };
-  store.subscribe(() => { clearTimeout(saveTimer); saveTimer = window.setTimeout(persist, 1500); });
+  store.subscribe((s, prev) => {
+    if (notableChange(prev, s)) urgent = true;
+    clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(persist, urgent ? 300 : 1500);
+  });
   // Leaving or reloading: write the local save and send the server copy now, so another device
   // (or this one after a reload) picks up exactly where this tab left off.
-  const persistNow = () => { clearTimeout(saveTimer); persist(); serverSaves?.flush(); };
-  window.addEventListener('pagehide', persistNow);
+  const persistNow = (closing = false) => { clearTimeout(saveTimer); persist(); serverSaves?.flush(closing); };
+  window.addEventListener('pagehide', () => persistNow(true));
   // A new version on the server: save, say so, and reload onto it.
   clock.onNewVersion(() => {
-    persistNow();
+    persistNow(true);
     hud.setContact('Falchion was updated. Saving and reloading…');
     setTimeout(() => location.reload(), 2_500);
   });

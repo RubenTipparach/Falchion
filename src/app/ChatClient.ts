@@ -8,16 +8,20 @@ export interface ChatEvents {
   status(live: boolean): void;
 }
 
+/** Handlers for other events on the same live stream (e.g. `player`, `activity`), by event name. */
+export type StreamTaps = Readonly<Record<string, (data: unknown) => void>>;
+
 /**
  * Talks to the Falchion server's chat: history from /api/chat, live messages and presence
  * from the /api/chat/stream SSE stream (reconnecting with backoff), posts with the CSRF header.
+ * That stream is the player's one live connection: `taps` receive its other events.
  */
 export class ChatClient implements ChatBackend {
   private es: EventSource | null = null;
   private retryMs = 1_000;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly events: ChatEvents, private readonly base = './api') {}
+  constructor(private readonly events: ChatEvents, private readonly base = './api', private readonly taps: StreamTaps = {}) {}
 
   start(): void {
     this.connect();
@@ -41,6 +45,15 @@ export class ChatClient implements ChatBackend {
     });
     es.addEventListener('message', (e) => this.events.messages([JSON.parse((e as MessageEvent).data) as ChatMessage], false));
     es.addEventListener('presence', (e) => this.events.presence((JSON.parse((e as MessageEvent).data) as { online: ChatUser[] }).online));
+    for (const [name, fn] of Object.entries(this.taps)) {
+      es.addEventListener(name, (e) => {
+        try {
+          fn(JSON.parse((e as MessageEvent).data));
+        } catch {
+          // A malformed event: ignore it.
+        }
+      });
+    }
     es.addEventListener('error', () => {
       if (this.es !== es) return; // stopped or replaced
       this.events.status(false);

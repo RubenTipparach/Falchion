@@ -7,6 +7,8 @@ import type { MapLayer, ViewState } from './MapLayer';
 import { fade, fadeIn } from './ZoomModel';
 
 export interface TerritoryClaim {
+  /** Another player's id: their marker can be clicked (see onMarkerClick). */
+  readonly id?: string;
   readonly name: string;
   readonly color: string;
   readonly kind: 'player' | 'other-player' | 'alien';
@@ -36,6 +38,8 @@ export class TerritoryLayer implements MapLayer {
   private readonly fixed: ClaimSet;
   private dynamic: ClaimSet | null = null;
   private own: ClaimSet | null = null;
+  /** Called when the name marker of a claim with an id (another player) is clicked. */
+  onMarkerClick: ((claim: TerritoryClaim) => void) | null = null;
 
   constructor(claims: readonly TerritoryClaim[]) {
     this.fixed = this.build(claims);
@@ -89,6 +93,12 @@ export class TerritoryLayer implements MapLayer {
         dot.style.background = claim.color;
       }
       el.append(dot, document.createTextNode(claim.name)); // player names are untrusted: no innerHTML
+      if (claim.id) {
+        el.classList.add('clickable');
+        el.title = `${claim.name}: show in Players`;
+        el.addEventListener('pointerdown', (e) => e.stopPropagation()); // a click here is not a map drag
+        el.addEventListener('click', (e) => { e.stopPropagation(); this.onMarkerClick?.(claim); });
+      }
       const marker = new CSS2DObject(el);
       const hp = hexToWorld(claim.home);
       marker.position.set(hp.x, 0, hp.z);

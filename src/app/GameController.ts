@@ -338,7 +338,10 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     if (shipUnder) {
       const f = this.state.fleets.find((x) => x.id === shipUnder);
       this.view.map.canvas.style.cursor = 'pointer';
-      this.view.hud.setHover(`${f?.name ?? 'Fleet'}  ·  ${f?.owner === this.state.playerName ? 'click to select, then right-click a star or empty space to move' : f?.owner.replace('alien:', '') ?? ''}`);
+      const other = f ? null : this.others.find((x) => x.id === shipUnder);
+      // Another player's fleet: its name (labelled "name · empire" on the map) and the owning empire.
+      if (other) this.view.hud.setHover(`${other.name.replace(` · ${other.owner}`, '')}  ·  fleet of the ${other.owner}`);
+      else this.view.hud.setHover(`${f?.name ?? 'Fleet'}  ·  ${f?.owner === this.state.playerName ? 'click to select, then right-click a star or empty space to move' : f?.owner.replace('alien:', '') ?? ''}`);
       return;
     }
     const v0 = this.view.map.view;

@@ -9,6 +9,7 @@ import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpie
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
 import { addHaul, Collected, crateMaterials, Haul, planetCache } from '../core/encounters/PlanetCache';
 import type { Card } from '../core/encounters/types';
+import type { ActivityPlace, ReportKind } from '../core/social/Activity';
 import { arrivalTurn, hexAt, planMovement, positionAt, retime, travelTurns } from '../core/fleet/Fleet';
 import { catchUpTicks, formatDuration } from '../core/time/WorldTime';
 import { capacity, clampStores, exploreCost, firepower, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
@@ -39,7 +40,8 @@ export interface SimDeps {
   readonly world: World;
   readonly economy: EconomyTables;
   /** Share notable news (battles, colonies, depots) with the server's Discord channel. */
-  readonly report?: (kind: 'battle' | 'colony' | 'depot', text: string) => void;
+  /** Share notable news (founding, battles, colonies, depots, surveyed systems) with the galaxy feed and Discord. */
+  readonly report?: (kind: ReportKind, text: string, place?: ActivityPlace) => void;
 }
 
 const BASE_SPEED = 1; // ly per year (one year = one minute)
@@ -278,8 +280,10 @@ export class EmpireSim {
     const designs = Object.fromEntries(Object.entries(s.designs).map(([k, d]) => [k, livery(d)]));
     const colonies = s.economy.colonies.map((c) => (c.capital ? { ...c, name: id.capital } : c));
     this.deps.store.update({ identity: id, fleets, designs, economy: { ...s.economy, colonies } });
-    if (founding) this.dispatch(`The ${id.name} is founded. ${id.title} ${id.ruler} rules from ${id.capital}.`, 'good');
-    else this.dispatch(`The empire is now known as the ${id.name}.`);
+    if (founding) {
+      this.dispatch(`The ${id.name} is founded. ${id.title} ${id.ruler} rules from ${id.capital}.`, 'good');
+      this.deps.report?.('found', `founded the ${id.name} at ${s.home.name}`, placeOf(s.home));
+    } else this.dispatch(`The empire is now known as the ${id.name}.`);
   }
 
   /** Every fleet moves at its empire's speed (1 ly a year to start): re-time saved journeys made at other speeds. */
@@ -422,6 +426,8 @@ export class EmpireSim {
     this.adjustGroup(g.id, [], { supply: g.stores.supply - exploreCost(planet) });
     const now = this.state;
     this.deps.store.update({ explored: { ...now.explored, [planet.id]: result }, empire: applyCost(now.empire, result) });
+    const star = this.starOfPlanet(planet);
+    if (star && this.unsurveyed(star).length === 0) this.deps.report?.('survey', `finished surveying ${star.name}`, placeOf(star));
     return true;
   }
 
@@ -613,7 +619,7 @@ export class EmpireSim {
     const colony: Colony = { name: planet.name, biome: planet.biome, planetId: planet.id, starId: star.id, size: planet.size, buildings: [] };
     this.deps.store.update((st) => ({ economy: { ...st.economy, colonies: [...st.economy.colonies, colony] } }));
     this.dispatch(`${planet.name} settled: a new colony with ${slotsOf(planet.size)} building slots`, 'good');
-    this.deps.report?.('colony', `settled ${planet.name} in ${star.name}`);
+    this.deps.report?.('colony', `settled ${planet.name} in ${star.name}`, placeOf(star));
   }
 
   buildDepot(star: StarSystem): void {
@@ -626,7 +632,7 @@ export class EmpireSim {
     this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, cost) }, depots: [...s.depots, star.id] });
     this.adjustGroup(g.id, [{ classId: 'construction-tender', count: -1 }]);
     this.dispatch(`Supply depot built at ${star.name}: fleets there resupply and rearm`, 'good');
-    this.deps.report?.('depot', `built a supply depot at ${star.name}`);
+    this.deps.report?.('depot', `built a supply depot at ${star.name}`, placeOf(star));
   }
 
   build(planetId: string, buildingId: string): void {
@@ -850,7 +856,7 @@ export class EmpireSim {
     this.deps.store.update({ empire: { ...s.empire, research }, engaged: [...s.engaged, targetId], economy: { ...s.economy, colonies } });
     this.adjustGroup(groupId, delta, { ammo: group.stores.ammo - fire.spent });
     this.dispatch(outcome.summary, /Victory|captured/.test(outcome.summary) ? 'good' : 'bad');
-    this.deps.report?.('battle', `${outcome.summary} at ${at.name}`);
+    this.deps.report?.('battle', `${outcome.summary} at ${at.name}`, placeOf(at));
     return outcome;
   }
 
@@ -934,3 +940,6 @@ export class EmpireSim {
     this.deps.store.update((s) => ({ dispatches: [{ turn: s.turn, text, tone }, ...s.dispatches].slice(0, 40) }));
   }
 }
+
+/** A star as a link target for news. */
+const placeOf = (star: StarSystem): ActivityPlace => ({ name: star.name, q: star.hex.q, r: star.hex.r });

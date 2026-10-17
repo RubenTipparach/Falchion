@@ -8,9 +8,11 @@ import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createActivity } from './activity.mjs';
 import { adminIds, createAdmin } from './admin.mjs';
 import { createAuth } from './auth.mjs';
 import { createChat } from './chat.mjs';
+import { createPlayerFeed } from './live.mjs';
 import { createNotifier } from './notifier.mjs';
 import { createStore } from './store.mjs';
 
@@ -45,7 +47,24 @@ export const notifier = createNotifier({
   ...(process.env.DISCORD_API_BASE ? { api: process.env.DISCORD_API_BASE } : {}),
 });
 // In-game chat (global + direct messages), presence, and Discord pings for @mentions (server/chat.mjs).
-export const chat = createChat({ auth, file: join(store.dir, 'chat.json'), players: () => store.players(), notifier });
+// Its stream is each signed-in player's one live connection: galaxy activity and other players'
+// public views travel on it too.
+export const chat = createChat({
+  auth, file: join(store.dir, 'chat.json'), players: () => store.players(), notifier,
+  onPresence: (user, online) => activity.presence(user, online),
+});
+// Galaxy activity feed: everyone's notable news, live (server/activity.mjs).
+export const activity = createActivity({
+  auth, file: join(store.dir, 'activity.json'),
+  empireOf: async (id) => {
+    const pub = (await store.load(id))?.public;
+    return pub ? { name: pub.empire?.name ?? '', color: pub.color } : null;
+  },
+  broadcast: (event, data) => chat.broadcast(event, data),
+  forward: (user, kind, text) => notifier.report(user, kind, text),
+});
+// Each save's public view reaches the other players at once (server/live.mjs).
+export const playerFeed = createPlayerFeed({ broadcast: (event, data, opts) => chat.broadcast(event, data, opts) });
 const admin = createAdmin({
   auth, store, admins, notifier,
   info: () => ({ version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, notifications: notifier.mode, notificationsProblem: notifier.problem, uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000) }),
@@ -105,20 +124,17 @@ async function api(req, res, pathname) {
       const body = await readJson(req, MAX_SAVE_BYTES);
       if (!body || typeof body.save !== 'object' || !Number.isInteger(body.save?.turn)) return json(res, 400, { error: 'bad save' });
       const isNew = !(await store.load(user.id));
-      await store.save(user.id, { player: user, save: body.save, public: publicView(body.public), updatedAt: Date.now() });
-      if (isNew) void notifier.joined(user.name, body.public?.empire?.name);
+      const pub = publicView(body.public);
+      const updatedAt = Date.now();
+      await store.save(user.id, { player: user, save: body.save, public: pub, updatedAt });
+      playerFeed.publish({ ...pub, id: user.id, name: user.name, avatar: user.avatar ?? null, updatedAt });
+      if (isNew) {
+        void notifier.joined(user.name, body.public?.empire?.name);
+        void activity.founded(user, pub);
+      }
       return json(res, 200, { ok: true });
     } catch (err) {
       return json(res, err.status ?? 400, { error: err.status === 413 ? 'save too large' : 'bad save' });
-    }
-  }
-  // A player's own news for the Discord channel (battles, colonies, depots); rate-limited.
-  if (pathname === '/api/events' && req.method === 'POST') {
-    try {
-      const { kind, text } = await readJson(req, 2_048);
-      return json(res, 200, { posted: await notifier.report(user, kind, text) });
-    } catch {
-      return json(res, 400, { error: 'bad event' });
     }
   }
   if (pathname === '/api/players' && req.method === 'GET') {
@@ -207,16 +223,18 @@ export const server = createServer(async (req, res) => {
   if (pathname === '/auth/discord') return auth.enabled ? auth.login(res, new URL(req.url ?? '/', 'http://localhost').searchParams.get('next') ?? '/') : send(res, 404, 'Discord sign-in is not configured on this server (see docs/discord.md).');
   if (await admin(req, res, pathname)) return;
   if (await chat.handle(req, res, pathname)) return;
+  // A player's own news (POST /api/events) and the galaxy activity feed (GET /api/activity).
+  if (await activity.handle(req, res, pathname)) return;
   if (pathname === '/auth/discord/callback') return auth.enabled ? auth.callback(req, res, new URL(req.url ?? '/', 'http://localhost')) : send(res, 404, 'not configured');
   if (pathname === '/auth/logout') return auth.logout(res);
-  if (pathname === '/api/me' || pathname === '/api/save' || pathname === '/api/players' || pathname === '/api/events') return api(req, res, pathname);
+  if (pathname === '/api/me' || pathname === '/api/save' || pathname === '/api/players') return api(req, res, pathname);
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed');
   return serveStatic(pathname, res);
 });
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   scheduleTick();
-  // Write pending chat before the machine stops (deploys send SIGINT/SIGTERM).
-  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { void chat.flush().finally(() => process.exit(0)); });
+  // Write pending chat and activity before the machine stops (deploys send SIGINT/SIGTERM).
+  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { void Promise.all([chat.flush(), activity.flush()]).finally(() => process.exit(0)); });
   server.listen(PORT, () => console.log(`falchion server on :${PORT} serving ${STATIC_DIR} (${VERSION}), world year ${worldTick}, 1 year per ${CLOCK.msPerTick / 1000}s`));
 }

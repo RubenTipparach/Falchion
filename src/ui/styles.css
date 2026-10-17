@@ -583,3 +583,44 @@ button.chat-mention:hover { filter: brightness(1.25); }
 .survey-row:hover { background: var(--raise); }
 .survey-row small { justify-self: end; }
 .survey-num { width: 18px; height: 18px; border-radius: 9px; border: 1px solid var(--brass); font: 600 10px/16px var(--font-mono); text-align: center; }
+
+/* ── Players drawer, Galaxy feed and toasts ── */
+.drawer-body .seg { flex: none; align-items: center; }
+.players-online { margin-left: auto; padding-right: 6px; display: inline-flex; align-items: center; gap: 4px; }
+.players-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+.player-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; box-shadow: 0 0 8px currentColor; }
+.player-card { border: 1px solid var(--line); border-left: 3px solid var(--empire, var(--chart)); border-radius: 6px; padding: 10px 12px; background: rgba(12, 19, 38, 0.6); display: grid; gap: 6px; transition: box-shadow 0.3s, background 0.3s; }
+.player-card:not(.on):not(.you) { opacity: 0.86; }
+.player-card.you { background: rgba(230, 180, 80, 0.06); }
+.player-card.flash { box-shadow: 0 0 0 2px var(--empire, var(--chart)), 0 0 24px rgba(127, 211, 230, 0.25); background: rgba(28, 40, 68, 0.75); }
+.player-card header { display: flex; align-items: center; gap: 10px; }
+.player-id { flex: 1; min-width: 0; }
+.player-name { display: flex; align-items: center; gap: 8px; }
+.player-name b { font: 600 15px var(--font-display); letter-spacing: 0.04em; color: var(--empire, var(--text)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-name .tag { font: 700 9px var(--font-display); letter-spacing: 0.18em; color: var(--brass); border: 1px solid var(--brass-deep); border-radius: 3px; padding: 0 4px; }
+.player-discord { color: var(--text); opacity: 0.8; }
+.player-facts { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.player-expand { justify-self: start; background: none; border: 0; padding: 0; color: var(--chart); font-family: var(--font-mono); }
+.player-expand:hover { color: #fff; }
+.player-fleets li { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; background: rgba(5, 8, 16, 0.45); }
+.player-fleets li b { font-size: 13px; font-weight: 600; }
+.feed { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.feed-entry { display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; padding: 6px 6px; border-radius: 4px; }
+.feed-entry:hover { background: rgba(28, 40, 68, 0.35); }
+.feed-entry > .player-dot { margin: 4px 7px; }
+.feed-body { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.feed-who { background: none; border: 0; padding: 0; font: 600 13px var(--font-display); letter-spacing: 0.03em; }
+.feed-who:hover { text-decoration: underline; }
+.feed-meta { display: flex; gap: 10px; font-size: 10px; }
+.feed-kind { font: 600 9px var(--font-display); letter-spacing: 0.16em; text-transform: uppercase; }
+.feed-entry.battle .feed-kind { color: var(--bad); }
+.feed-entry.colony .feed-kind, .feed-entry.found .feed-kind { color: var(--good); }
+.feed-entry.survey .feed-kind, .feed-entry.depot .feed-kind { color: var(--chart); }
+.feed-entry.online .feed-body, .feed-entry.offline .feed-body { opacity: 0.75; }
+.empire-marker.clickable { pointer-events: auto; cursor: pointer; }
+.empire-marker.clickable:hover { border-color: var(--line-strong); background: rgba(20, 30, 50, 0.95); }
+.toasts { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 14; width: min(440px, calc(100vw - 32px)); display: flex; flex-direction: column-reverse; gap: 6px; pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-left: 3px solid var(--empire, var(--chart)); border-radius: 4px; background: rgba(5, 8, 16, 0.9); backdrop-filter: blur(6px); font-size: 13px; animation: toast-in 0.25s ease-out both; transition: opacity 0.35s, transform 0.35s; }
+.toast.clickable { cursor: pointer; }
+.toast.leaving { opacity: 0; transform: translateY(8px); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }

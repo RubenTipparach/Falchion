@@ -26,6 +26,7 @@ import { hashSeed } from '../core/rng/Rng';
 import type { TechTree } from '../core/research/TechTree';
 import { normalizeDesign, ShipDesign } from '../core/ships/ShipDesign';
 import type { EmpireIdentity } from '../core/empire/Identity';
+import type { ActivityPlace, ReportKind } from '../core/social/Activity';
 import type { FleetLayer, FleetView } from '../render/map/FleetLayer';
 import type { HexGridLayer } from '../render/map/HexGridLayer';
 import type { ViewState } from '../render/map/MapLayer';
@@ -51,8 +52,8 @@ export interface ControllerDeps {
   readonly economy: EconomyTables;
   readonly clock: WorldClock;
   readonly save: SaveGame;
-  /** Share notable news (battles, colonies, depots) with the server's Discord channel. */
-  readonly report?: (kind: 'battle' | 'colony' | 'depot', text: string) => void;
+  /** Share notable news (founding, battles, colonies, depots, surveyed systems) with the galaxy feed and Discord. */
+  readonly report?: (kind: ReportKind, text: string, place?: ActivityPlace) => void;
 }
 
 export interface ViewDeps {
@@ -367,8 +368,10 @@ export class GameController implements GameActions, GameQueries {
     const designs = Object.fromEntries(Object.entries(s.designs).map(([k, d]) => [k, livery(d)]));
     const colonies = s.economy.colonies.map((c) => (c.capital ? { ...c, name: id.capital } : c));
     this.deps.store.update({ identity: id, fleets, designs, economy: { ...s.economy, colonies } });
-    if (founding) this.dispatch(`The ${id.name} is founded. ${id.title} ${id.ruler} rules from ${id.capital}.`, 'good');
-    else this.dispatch(`The empire is now known as the ${id.name}.`);
+    if (founding) {
+      this.dispatch(`The ${id.name} is founded. ${id.title} ${id.ruler} rules from ${id.capital}.`, 'good');
+      this.deps.report?.('found', `founded the ${id.name} at ${s.home.name}`, placeOf(s.home));
+    } else this.dispatch(`The empire is now known as the ${id.name}.`);
   }
 
   /** Every fleet moves at its empire's speed (1 ly a year to start): re-time saved journeys made at other speeds. */
@@ -582,6 +585,8 @@ export class GameController implements GameActions, GameQueries {
     this.adjustGroup(g.id, [], { supply: g.stores.supply - exploreCost(planet) });
     const now = this.state;
     this.deps.store.update({ explored: { ...now.explored, [planet.id]: result }, empire: applyCost(now.empire, result) });
+    const star = this.starOfPlanet(planet);
+    if (star && this.unsurveyed(star).length === 0) this.deps.report?.('survey', `finished surveying ${star.name}`, placeOf(star));
     return true;
   }
 
@@ -765,7 +770,7 @@ export class GameController implements GameActions, GameQueries {
     const colony: Colony = { name: planet.name, biome: planet.biome, planetId: planet.id, starId: star.id, size: planet.size, buildings: [] };
     this.deps.store.update((st) => ({ economy: { ...st.economy, colonies: [...st.economy.colonies, colony] } }));
     this.dispatch(`${planet.name} settled: a new colony with ${slotsOf(planet.size)} building slots`, 'good');
-    this.deps.report?.('colony', `settled ${planet.name} in ${star.name}`);
+    this.deps.report?.('colony', `settled ${planet.name} in ${star.name}`, placeOf(star));
   }
 
   buildDepot(star: StarSystem): void {
@@ -778,7 +783,7 @@ export class GameController implements GameActions, GameQueries {
     this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, cost) }, depots: [...s.depots, star.id] });
     this.adjustGroup(g.id, [{ classId: 'construction-tender', count: -1 }]);
     this.dispatch(`Supply depot built at ${star.name}: fleets there resupply and rearm`, 'good');
-    this.deps.report?.('depot', `built a supply depot at ${star.name}`);
+    this.deps.report?.('depot', `built a supply depot at ${star.name}`, placeOf(star));
   }
 
   build(planetId: string, buildingId: string): void {
@@ -1035,7 +1040,7 @@ export class GameController implements GameActions, GameQueries {
     this.deps.store.update({ empire: { ...s.empire, research }, engaged: [...s.engaged, targetId], economy: { ...s.economy, colonies } });
     this.adjustGroup(groupId, delta, { ammo: group.stores.ammo - fire.spent });
     this.dispatch(outcome.summary, /Victory|captured/.test(outcome.summary) ? 'good' : 'bad');
-    this.deps.report?.('battle', `${outcome.summary} at ${at.name}`);
+    this.deps.report?.('battle', `${outcome.summary} at ${at.name}`, placeOf(at));
     return outcome;
   }
 
@@ -1207,8 +1212,11 @@ export class GameController implements GameActions, GameQueries {
     const shipUnder = this.view.fleets.pick(ray);
     if (shipUnder) {
       const f = this.state.fleets.find((x) => x.id === shipUnder);
+      const other = f ? null : this.others.find((x) => x.id === shipUnder);
       this.view.map.canvas.style.cursor = 'pointer';
-      this.view.hud.setHover(`${f?.name ?? 'Fleet'}  ·  ${f?.owner === this.state.playerName ? 'click to select, then right-click a star or empty space to move' : f?.owner.replace('alien:', '') ?? ''}`);
+      // Another player's fleet: its name (labelled "name · empire" on the map) and the owning empire.
+      if (other) this.view.hud.setHover(`${other.name.replace(` · ${other.owner}`, '')}  ·  fleet of the ${other.owner}`);
+      else this.view.hud.setHover(`${f?.name ?? 'Fleet'}  ·  ${f?.owner === this.state.playerName ? 'click to select, then right-click a star or empty space to move' : f?.owner.replace('alien:', '') ?? ''}`);
       return;
     }
     const v0 = this.view.map.view;
@@ -1249,6 +1257,9 @@ export class GameController implements GameActions, GameQueries {
     this.view.hud.setScale(view.visibleWidth, pxPerLy, mode, view.altitude);
   };
 }
+
+/** A star as a link target for news. */
+const placeOf = (star: StarSystem): ActivityPlace => ({ name: star.name, q: star.hex.q, r: star.hex.r });
 
 /** Trade partners derived from the world, with distances from home. */
 export function tradePartners(world: World, home: StarSystem): TradePartner[] {

@@ -48,6 +48,7 @@ const visibleTo = (m, uid) => m.to === 'global' || m.to === uid || m.from.id ===
  *   file: string,
  *   players: () => Promise<Array<{ id: string, name: string, avatar?: string | null }>>,
  *   notifier?: { mention: (m: object) => Promise<unknown> },
+ *   onPresence?: (user: { id: string, name: string, avatar: string | null }, online: boolean) => void,
  *   now?: () => number,
  *   rate?: { max: number, windowMs: number },
  *   keep?: { global: number, dm: number },
@@ -57,7 +58,7 @@ const visibleTo = (m, uid) => m.to === 'global' || m.to === uid || m.from.id ===
  */
 export function createChat(deps) {
   const {
-    auth, file, players, notifier, now = () => Date.now(),
+    auth, file, players, notifier, onPresence = () => {}, now = () => Date.now(),
     rate = { max: 5, windowMs: 10_000 }, keep = { global: 300, dm: 200 }, saveDelayMs = 1_000, keepAliveMs = 20_000,
   } = deps;
 
@@ -148,14 +149,22 @@ export function createChat(deps) {
     if (!entry) clients.set(user.id, (entry = { user: me, conns: new Set() }));
     entry.user = me;
     entry.conns.add(res);
-    if (arrived) broadcastPresence();
+    if (arrived) { broadcastPresence(); onPresence(me, true); }
     else send(res, 'presence', { online: online() });
     req.on('close', () => {
       const e = clients.get(user.id);
       if (!e) return;
       e.conns.delete(res);
-      if (e.conns.size === 0) { clients.delete(user.id); broadcastPresence(); }
+      if (e.conns.size === 0) { clients.delete(user.id); broadcastPresence(); onPresence(e.user, false); }
     });
+  }
+
+  /**
+   * The chat stream is every signed-in player's one live connection: other systems (galaxy
+   * activity, other players' public views) send their events through it. `except` skips one player.
+   */
+  function broadcast(event, data, { except } = {}) {
+    for (const [uid, { conns }] of clients) if (uid !== except) for (const res of conns) send(res, event, data);
   }
 
   // ── Posting ──
@@ -245,7 +254,7 @@ export function createChat(deps) {
   }
 
   return {
-    handle, post, history, online, flush,
+    handle, post, history, online, flush, broadcast,
     /** Resolves when Discord notifications for the latest message are done. */
     settled: () => pending,
     loaded: () => loaded,

@@ -1,4 +1,5 @@
 import { cleanIdentity, type EmpireIdentity } from '../core/empire/Identity';
+import type { FleetMovement } from '../core/fleet/Fleet';
 import type { Hex } from '../core/hex/Hex';
 import { HERALDRY } from '../content/heraldry';
 import type { TerritoryClaim } from '../render/map/TerritoryLayer';
@@ -17,11 +18,22 @@ export interface PublicEmpire {
   readonly fleets: ReadonlyArray<Pick<FleetView, 'id' | 'name' | 'movement' | 'design'>>;
 }
 
-/** Another player in the shared galaxy, as /api/players returns them. */
+/** Another player in the shared galaxy, as /api/players returns them (and the live stream pushes them). */
 export interface OtherPlayer extends PublicEmpire {
   readonly id: string;
   readonly name: string;
   readonly avatar: string | null;
+  /** Wall-clock ms of their last save. */
+  readonly updatedAt?: number;
+}
+
+const isHex = (h: unknown): h is Hex => !!h && Number.isInteger((h as Hex).q) && Number.isInteger((h as Hex).r);
+
+/** Another player's fleet movement is untrusted input: integer hexes, turn and speed, a bounded route. */
+export function isFleetMovement(m: unknown): m is FleetMovement {
+  const x = m as FleetMovement | null;
+  return !!x && Array.isArray(x.route) && x.route.length > 0 && x.route.length <= 100_000 && x.route.every(isHex)
+    && Number.isInteger(x.departTurn) && Number.isInteger(x.speed) && x.speed >= 1;
 }
 
 /** Fallback colours for players who have not founded their empire yet. */
@@ -71,16 +83,42 @@ export function othersOnMap(players: readonly OtherPlayer[]): { fleets: FleetVie
     const id = p.empire ? cleanIdentity({ ...p.empire, color: p.color }, HERALDRY) : null;
     const color = id?.color ?? colorFor(p.id);
     const name = id?.name ?? p.name;
-    if (p.home) claims.push({ name, color, kind: 'other-player', home: p.home, flag: id?.flag, colonies: [{ hex: p.home, radius: HOME_RADIUS }, ...p.colonies.map((hex) => ({ hex, radius: COLONY_RADIUS }))] });
-    for (const f of p.fleets) if (f.movement?.route?.length) fleets.push({ ...f, id: `${p.id}:${f.id}`, name: `${f.name} · ${name}`, owner: name, color });
+    if (isHex(p.home)) claims.push({ id: p.id, name, color, kind: 'other-player', home: p.home, flag: id?.flag, colonies: [{ hex: p.home, radius: HOME_RADIUS }, ...(p.colonies ?? []).filter(isHex).map((hex) => ({ hex, radius: COLONY_RADIUS }))] });
+    for (const f of p.fleets ?? []) if (isFleetMovement(f.movement)) fleets.push({ ...f, id: `${p.id}:${f.id}`, name: `${f.name} · ${name}`, owner: name, color });
   }
   return { fleets, claims };
+}
+
+/** Routine saves reach the server at most every 10 s; news other players should see, every 2.5 s. */
+export const PUSH_GAP_MS = 10_000;
+export const URGENT_PUSH_GAP_MS = 2_500;
+
+/** Milliseconds to wait before the next push, given the last one (never sooner than its gap). */
+export function pushDelay(now: number, lastPush: number, urgent: boolean): number {
+  return Math.max(0, lastPush + (urgent ? URGENT_PUSH_GAP_MS : PUSH_GAP_MS) - now);
+}
+
+const ownFleets = (s: GameState) => s.fleets.filter((f) => f.owner === s.playerName);
+const colonyKey = (s: GameState) => s.economy.colonies.map((c) => c.starId ?? '').join('|');
+
+/**
+ * A change other players should see on their maps soon: one of your fleets set a new course
+ * (or left or docked), a colony or depot appeared, or the empire was founded or renamed.
+ */
+export function notableChange(prev: GameState, next: GameState): boolean {
+  if (next.identity !== prev.identity || next.depots !== prev.depots) return true;
+  if (next.economy.colonies !== prev.economy.colonies && colonyKey(next) !== colonyKey(prev)) return true;
+  if (next.fleets === prev.fleets) return false;
+  const a = ownFleets(prev);
+  const b = ownFleets(next);
+  return a.length !== b.length || b.some((f, i) => f.id !== a[i].id || f.movement !== a[i].movement);
 }
 
 /** Saves for a signed-in player live on the server, so they follow them between devices. */
 export class ServerSaves {
   private lastPush = 0;
   private pending: ReturnType<typeof setTimeout> | null = null;
+  private pendingAt = 0;
   private latest: string | null = null;
 
   async load(): Promise<SavedGame | null> {
@@ -92,20 +130,32 @@ export class ServerSaves {
     }
   }
 
-  /** Push at most every 10 s (the latest state wins). */
-  push(save: object, pub: PublicEmpire): void {
+  /**
+   * Push at most every 10 s, or every 2.5 s when `urgent` (a change other players should see
+   * soon, such as a move order). The latest state wins; a sooner push already waiting is kept.
+   */
+  push(save: object, pub: PublicEmpire, urgent = false): void {
     this.latest = JSON.stringify({ save, public: pub });
-    if (this.pending) clearTimeout(this.pending);
-    const wait = Math.max(0, 10_000 - (Date.now() - this.lastPush));
-    this.pending = setTimeout(() => this.send(false), wait);
+    this.schedule(pushDelay(Date.now(), this.lastPush, urgent));
   }
 
   /**
-   * Send a waiting push now: when the page is closing or reloading, or after a change that
-   * must reach other devices at once. keepalive lets the request finish after the page goes.
+   * Send a waiting push now. `closing`: the page is going away (keepalive lets the request
+   * finish after it); otherwise the push still keeps 2.5 s from the previous one.
    */
-  flush(): void {
-    if (this.pending) this.send(true);
+  flush(closing = false): void {
+    if (!this.pending) return;
+    const wait = pushDelay(Date.now(), this.lastPush, true);
+    if (closing || wait === 0) this.send(closing);
+    else this.schedule(wait);
+  }
+
+  private schedule(wait: number): void {
+    const at = Date.now() + wait;
+    if (this.pending && this.pendingAt <= at) return;
+    if (this.pending) clearTimeout(this.pending);
+    this.pendingAt = at;
+    this.pending = setTimeout(() => this.send(false), wait);
   }
 
   private send(keepalive: boolean): void {

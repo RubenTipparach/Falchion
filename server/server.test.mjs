@@ -142,23 +142,20 @@ describe('sign-in redirect', async () => {
 
 describe('discord channel notifications', async () => {
   const { createNotifier } = await import('./notifier.mjs');
-  const URL_ = 'https://discord.com/api/webhooks/123456789012345678/abc-DEF_123';
   const sent = [];
   const fakeFetch = async (url, init) => { sent.push({ url, ...JSON.parse(init.body), auth: init.headers.Authorization }); return { ok: true, status: 200 }; };
-  const make2 = (extra = {}) => createNotifier({ webhookUrl: URL_, fetchImpl: fakeFetch, ...extra });
+  const make2 = (extra = {}) => createNotifier({ token: 'bot-token', channelId: '123456789012345678', fetchImpl: fakeFetch, ...extra });
 
-  it('is off without a valid Discord webhook URL', () => {
-    expect(createNotifier({}).enabled).toBe(false);
-    expect(createNotifier({ webhookUrl: 'https://evil.example/api/webhooks/1/x' }).enabled).toBe(false);
+  it('is off without a token and a channel id', () => {
+    expect(createNotifier({ token: 'x' }).enabled).toBe(false);
     expect(make2().enabled).toBe(true);
   });
 
-  it('posts through the webhook and never pings anyone', async () => {
+  it('posts as the bot to the channel and never pings anyone', async () => {
     sent.length = 0;
     await make2().joined('Ruben');
-    expect(sent[0].url).toBe(`${URL_}?wait=true`);
-    expect(sent[0].auth).toBeUndefined();
-    expect(sent[0].username).toBe('Falchion');
+    expect(sent[0].url).toBe('https://discord.com/api/v10/channels/123456789012345678/messages');
+    expect(sent[0].auth).toBe('Bot bot-token');
     expect(sent[0].content).toContain('**Ruben** founded an empire');
     expect(sent[0].allowed_mentions).toEqual({ parse: [] });
   });
@@ -175,15 +172,27 @@ describe('discord channel notifications', async () => {
     expect(await n.report({ id: '2', name: 'Friend' }, 'depot', 'built a depot')).toBe(true);
   });
 
-  it('admin test explains a deleted webhook', async () => {
+  it('posts through a channel webhook without a bot token', async () => {
+    sent.length = 0;
+    const url = 'https://discord.com/api/webhooks/123456789012345678/abc-DEF_123';
+    const n = createNotifier({ webhookUrl: url, fetchImpl: fakeFetch });
+    expect(n.mode).toBe('webhook');
+    await n.joined('Ruben');
+    expect(sent[0].url).toBe(`${url}?wait=true`);
+    expect(sent[0].auth).toBeUndefined();
+    expect(sent[0].allowed_mentions).toEqual({ parse: [] });
+    expect(createNotifier({ webhookUrl: 'https://evil.example/api/webhooks/1/x' }).enabled).toBe(false);
+  });
+
+  it('admin test explains a missing channel permission', async () => {
     const { adminIds, createAdmin } = await import('./admin.mjs');
     const auth = make();
     const store = createStore(mkdtempSync(join(tmpdir(), 'falchion-n-')));
-    const notifier = createNotifier({ webhookUrl: URL_, fetchImpl: async () => ({ ok: false, status: 404 }) });
+    const notifier = createNotifier({ token: 't', channelId: '123456789012345678', fetchImpl: async () => ({ ok: false, status: 403 }) });
     const admin = createAdmin({ auth, store, admins: adminIds({ ADMIN_DISCORD_ID: '123456789012345678' }), notifier, info: () => ({}) });
     const res = fakeRes();
     await admin({ method: 'POST', headers: { cookie: `fal_session=${encodeURIComponent(auth.issue({ id: '123456789012345678', name: 'R' }))}`, 'x-falchion-admin': '1' } }, res, '/api/admin/notify-test');
     expect(res.status).toBe(502);
-    expect(JSON.parse(res.body).error).toContain('DISCORD_WEBHOOK_URL');
+    expect(JSON.parse(res.body).error).toContain('Send Messages');
   });
 });

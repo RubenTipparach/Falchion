@@ -34,11 +34,15 @@ const MAX_SAVE_BYTES = 3 * 1024 * 1024;
 const STARTED_AT = Date.now();
 // Same secret as High Frontier: ADMIN_DISCORD_ID (or ADMIN_DISCORD_IDS), comma-separated.
 export const admins = adminIds(process.env);
-// Channel notifications (optional): a Discord channel webhook.
-export const notifier = createNotifier({ webhookUrl: process.env.DISCORD_WEBHOOK_URL });
+// Channel notifications (optional): DISCORD_WEBHOOK_URL, or DISCORD_BOT_TOKEN + DISCORD_CHANNEL_ID.
+export const notifier = createNotifier({
+  webhookUrl: process.env.DISCORD_WEBHOOK_URL,
+  token: process.env.DISCORD_BOT_TOKEN,
+  channelId: process.env.DISCORD_CHANNEL_ID,
+});
 const admin = createAdmin({
   auth, store, admins, notifier,
-  info: () => ({ version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, notifications: notifier.enabled, uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000) }),
+  info: () => ({ version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, notifications: notifier.mode, uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000) }),
 });
 
 function json(res, status, body) {

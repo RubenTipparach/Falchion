@@ -101,13 +101,34 @@ Falchion posts game news to one channel in your Discord server: new players foun
 empire, admin announcements, battle results, new colonies and supply depots. It never
 pings anyone, and each player's reports are limited to 12 an hour.
 
+### Easiest: a channel webhook (no bot token)
+
 1. In Discord: the channel → **Edit Channel → Integrations → Webhooks → New Webhook**.
    Name it *Falchion* if you like, then **Copy Webhook URL**.
 2. Add the GitHub secret `DISCORD_WEBHOOK_URL` with that URL and redeploy.
-3. Open `/admin` and click **Send test message**. If it fails, the page says why.
+3. Open `/admin` and click **Send test message**.
 
 Anyone with the URL can post to that channel, so keep it secret like a password.
-No bot token is needed (sign-in uses only the client id and secret).
+
+### Or: as the bot
+
+Use this if you want the posts to come from the bot user itself.
+
+1. **Add the bot to your server** (once): Developer Portal → your app → **OAuth2 → URL
+   Generator**, tick the **bot** scope and **View Channels** + **Send Messages**, open
+   the URL, pick the server and authorize.
+2. **Bot token**: app → **Bot** → **Reset Token**. This is *not* the OAuth2 client
+   secret: the two are different values, and Discord rejects the client secret here.
+   Discord only shows a bot token once, so if you never copied it you have to reset it
+   (resetting does not affect sign-in).
+3. **Channel id**: Discord **Settings → Advanced → Developer Mode**, then right-click the
+   channel → **Copy Channel ID**.
+4. Give the bot *View Channel* and *Send Messages* in that channel.
+5. GitHub secrets `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID`, redeploy, then **Send test
+   message** in `/admin`.
+
+If both are set, the webhook is used. When the test fails, `/admin` says why (missing
+permission, wrong channel id, rejected token, deleted webhook).
 
 ## Running it locally
 
@@ -139,6 +160,6 @@ from `/api/players`. Stockpiles, research and orders are never sent to other pla
 ## Not built yet
 
 - Launching Falchion as a **Discord Activity** inside a voice channel.
-- Direct messages to individual players (notifications go to one channel only).
+- Direct messages to individual players (the bot posts in one channel only).
 
 Both are in the `mmo-core-systems` OpenSpec change.

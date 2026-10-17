@@ -94,10 +94,13 @@ export function createAdmin({ auth, store, admins, notifier, info }) {
       return true;
     }
     if (pathname === '/api/admin/notify-test' && req.method === 'POST') {
-      if (!notifier?.enabled) { json(res, 409, { ok: false, error: 'Set DISCORD_WEBHOOK_URL first (docs/discord.md).' }); return true; }
+      if (!notifier?.enabled) { json(res, 409, { ok: false, error: 'Set DISCORD_WEBHOOK_URL (or DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID) first (docs/discord.md).' }); return true; }
       const r = await notifier.post(`✅ Falchion notifications are working (test by ${user.name}).`);
-      const hint = r.status === 404 || r.status === 401
-        ? 'The webhook is gone or its URL is wrong: copy the URL again and update DISCORD_WEBHOOK_URL.' : '';
+      const hint = notifier.mode === 'webhook'
+        ? (r.status === 404 || r.status === 401 ? 'The webhook is gone or its URL is wrong: copy the URL again and update DISCORD_WEBHOOK_URL.' : '')
+        : r.status === 403 ? 'The bot cannot post there: give it View Channel and Send Messages in that channel.'
+        : r.status === 404 ? 'Channel not found: check DISCORD_CHANNEL_ID, and that the bot is in that server.'
+        : r.status === 401 ? 'The bot token was rejected. DISCORD_BOT_TOKEN is the token from the Bot page (not the OAuth2 client secret); or use DISCORD_WEBHOOK_URL instead.' : '';
       json(res, r.ok ? 200 : 502, { ok: r.ok, status: r.status, error: hint || undefined });
       return true;
     }
@@ -156,8 +159,8 @@ async function load() {
   }
   document.getElementById('ann').value = o.announcement && o.announcement.text ? o.announcement.text : '';
   document.getElementById('notifyState').textContent = o.notifications
-    ? 'On: new players, announcements, battles, colonies and depots are posted to the channel.'
-    : 'Off: set DISCORD_WEBHOOK_URL (see docs/discord.md).';
+    ? 'On (' + o.notifications + '): new players, announcements, battles, colonies and depots are posted to the channel.'
+    : 'Off: set DISCORD_WEBHOOK_URL, or DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID (see docs/discord.md).';
   document.getElementById('notifyTest').disabled = !o.notifications;
   const rows = await (await fetch('/api/admin/players')).json();
   const body = document.getElementById('players'); body.replaceChildren();

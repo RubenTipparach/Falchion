@@ -9,6 +9,8 @@ export interface MapViewOptions {
   readonly galaxyRadius: number;
   readonly onClick: (world: THREE.Vector3, ray: THREE.Raycaster) => void;
   readonly onHover: (world: THREE.Vector3 | null, ray: THREE.Raycaster) => void;
+  /** Right-click without dragging (RTS move order). */
+  readonly onRightClick?: (world: THREE.Vector3, ray: THREE.Raycaster) => void;
   readonly onFrame?: (view: ViewState, dt: number) => void;
 }
 
@@ -47,6 +49,7 @@ export class MapView {
         this.world.updateMatrixWorld(true);
       },
     );
+    this.controller.onRightClick = opts.onRightClick ?? null;
     window.addEventListener('resize', this.resize);
     this.resize();
   }

@@ -6,7 +6,7 @@ import type { ShipDesign } from '../../core/ships/ShipDesign';
 import type { ShipFactory } from '../ships/ShipFactory';
 import type { ShipModel } from '../ships/ShipKit';
 import type { MapLayer, ViewState } from './MapLayer';
-import { fade } from './ZoomModel';
+import { fade, fadeIn } from './ZoomModel';
 
 /** Height of routes and ships above the galactic plane (ly): close to it, so they meet stars cleanly. */
 const LIFT = 0.0004;
@@ -57,7 +57,37 @@ export class FleetLayer implements MapLayer {
     private readonly formatEta: (turns: number) => string,
     /** Where a route hex is drawn: its star if it has one, else the hex centre. */
     private readonly pointAt: (h: Hex) => { readonly x: number; readonly z: number } = hexToWorld,
+    /** Called when a fleet's map label is clicked. */
+    private readonly onSelect: (fleetId: string) => void = () => {},
   ) {}
+
+  private origin = { x: 0, z: 0 };
+  private selectedId: string | null = null;
+
+  /** Highlight one fleet (its label) as selected. */
+  setSelected(id: string | null): void {
+    this.selectedId = id;
+  }
+
+  /** Absolute galaxy position of a fleet's ship right now (for the camera to follow). */
+  positionOf(id: string): THREE.Vector3 | null {
+    const v = this.visuals.get(id);
+    if (!v) return null;
+    return v.root.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(this.origin.x, 0, this.origin.z));
+  }
+
+  /** Fleet whose ship lies within `maxAngle` (radians) of a pointer ray, closest in angle. */
+  pick(ray: THREE.Raycaster, maxAngle = 0.02): string | null {
+    let best: string | null = null, bestA = maxAngle;
+    const p = new THREE.Vector3();
+    for (const [id, v] of this.visuals) {
+      if (!v.root.visible) continue;
+      v.root.getWorldPosition(p).sub(ray.ray.origin);
+      const a = p.angleTo(ray.ray.direction);
+      if (a < bestA) { bestA = a; best = id; }
+    }
+    return best;
+  }
 
   /** World time in years, fractional: ships glide between yearly ticks. */
   setTime(time: number): void {
@@ -76,6 +106,7 @@ export class FleetLayer implements MapLayer {
   }
 
   update(view: ViewState): void {
+    this.origin = view.origin;
     const dt = Math.min(0.1, Math.max(0, view.time - this.lastTime));
     this.lastTime = view.time;
     const ease = 1 - Math.exp(-4 * dt);
@@ -85,6 +116,11 @@ export class FleetLayer implements MapLayer {
     // Dashes rescale in power-of-two steps so routes read as dashed lines at any zoom.
     const dash = 2 ** Math.round(Math.log2(Math.max(1e-3, view.visibleWidth * 0.012)));
     const park = fade(view.visibleWidth, 4, 12);
+    // Inside a star system routes are clutter: they fade out as the system fills the view,
+    // and only fleets actually in (or near) the system stay drawn.
+    const routeOpacity = 0.8 * fadeIn(view.visibleWidth, 4, 12);
+    const local = view.visibleWidth < 9;
+    const fx = view.focus.x, fz = view.focus.z; // ship roots are in absolute galaxy coordinates
     for (const v of this.visuals.values()) {
       const target = progressAtTime(v.fleet.movement, this.time);
       v.shown += (target - v.shown) * ease;
@@ -103,9 +139,14 @@ export class FleetLayer implements MapLayer {
       const remaining = arrivalTurn(v.fleet.movement) - this.time;
       const mat = v.line.material as THREE.LineDashedMaterial;
       if (mat.dashSize !== dash) { mat.dashSize = dash; mat.gapSize = dash * 0.7; }
+      mat.opacity = routeOpacity;
+      v.line.visible = routeOpacity > 0.01;
+      const near = !local || Math.hypot(v.root.position.x - fx, v.root.position.z - fz) < Math.max(1, view.visibleWidth * 1.5);
+      v.root.visible = near;
       const html = `<b>${v.fleet.name}</b><br>${remaining > 0 ? `ETA ${this.formatEta(remaining)}` : 'Arrived'}${v.fleet.status ? `<br><small>${v.fleet.status}</small>` : ''}`;
       if (v.label.element.innerHTML !== html) v.label.element.innerHTML = html;
-      v.label.visible = view.visibleWidth < 4_000;
+      v.label.element.classList.toggle('selected', v.fleet.id === this.selectedId);
+      v.label.visible = near && view.visibleWidth < 4_000;
     }
   }
 
@@ -138,6 +179,9 @@ export class FleetLayer implements MapLayer {
     const el = document.createElement('div');
     el.className = 'fleet-label';
     el.style.borderColor = fleet.color;
+    el.title = `Select ${fleet.name}`;
+    el.addEventListener('pointerdown', (e) => e.stopPropagation());
+    el.addEventListener('click', (e) => { e.stopPropagation(); this.onSelect(fleet.id); });
     const label = new CSS2DObject(el);
     label.center.set(-0.15, 1.2);
     root.add(label);

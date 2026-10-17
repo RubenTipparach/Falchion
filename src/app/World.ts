@@ -1,5 +1,5 @@
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
-import { Hex, hexAdd, hexDistance, worldToHex } from '../core/hex/Hex';
+import { Hex, hexAdd, worldToHex } from '../core/hex/Hex';
 import { Rng, hashSeed } from '../core/rng/Rng';
 import type { TerritoryClaim } from '../render/map/TerritoryLayer';
 
@@ -56,11 +56,4 @@ export function createWorld(galaxy: GalaxyModel): World {
     })),
   ];
   return { home, claims, neighbours };
-}
-
-/** Fleets of two players within this many ly enter a lockstep encounter zone. */
-export const LOCKSTEP_RADIUS = 6;
-
-export function inContact(a: Hex, b: Hex): boolean {
-  return hexDistance(a, b) <= LOCKSTEP_RADIUS;
 }

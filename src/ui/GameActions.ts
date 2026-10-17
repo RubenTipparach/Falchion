@@ -5,6 +5,7 @@ import type { StarSystem } from '../core/galaxy/GalaxyModel';
 import type { ShipDesign } from '../core/ships/ShipDesign';
 
 import type { Capacity, Stores } from '../core/fleet/Logistics';
+import type { FleetView } from '../render/map/FleetLayer';
 import type { Colony } from '../core/economy/Economy';
 import type { Job } from '../core/construction/Construction';
 import type { FleetOrders } from '../core/fleet/Presence';
@@ -30,6 +31,19 @@ export interface FleetGroup {
   readonly orders?: FleetOrders;
 }
 
+/** What the fleet card shows about any fleet, yours or not. */
+export interface FleetInfo {
+  readonly fleet: FleetView;
+  /** Your group (ships, supply, ammunition, orders); null for other empires' fleets. */
+  readonly group: FleetGroup | null;
+  /** Star it is on station at, if any. */
+  readonly at: StarSystem | null;
+  readonly dest: StarSystem | null;
+  /** Years (minutes) to arrival. */
+  readonly eta: number;
+  readonly mine: boolean;
+}
+
 /** Read-only game queries the panels use (implemented by the app layer). */
 export interface GameQueries {
   groups(): FleetGroup[];
@@ -49,6 +63,7 @@ export interface GameQueries {
   pendingCaches(star: StarSystem): Array<{ planet: Planet; cache: Haul }>;
   cacheOf(planet: Planet): Haul;
   planetById(id: string): Planet | null;
+  fleetInfo(fleetId: string): FleetInfo | null;
   /** Construction queued at a site (planet id), or everywhere. */
   jobs(site?: string): Job[];
   /** Storage caps for each resource. */
@@ -75,6 +90,8 @@ export interface GameActions {
   /** Merge a fleet at home back into the dock. */
   dockFleet(fleetId: string): void;
   focusFleet(fleetId: string): void;
+  /** Select a fleet and follow its ship with the camera; null clears. */
+  selectFleet(fleetId: string | null): void;
   /** Standing orders a fleet follows on its own. */
   setOrders(fleetId: string, orders: FleetOrders): void;
   /** Settle an explored planet with a Colony Ark on station. */

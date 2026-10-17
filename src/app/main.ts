@@ -111,7 +111,7 @@ async function bootstrap(): Promise<void> {
     },
     designs: { prospector: { ...houseDesign, name: 'Prospector Skiff', style: 'utilitarian', seed: 4, length: 0.8, bulk: 0.8, engines: 2, weapons: 0 } },
     shipyardClass: 'prospector', hiddenTraits: [], home: world.home,
-    selected: null, selectedPlanet: null, explored: {}, openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0, ammo: 0 }, depots: [], construction: [], contact: null, playerName: identity.displayName,
+    selected: null, selectedFleet: null, selectedPlanet: null, explored: {}, openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0, ammo: 0 }, depots: [], construction: [], playerName: identity.displayName,
     lastReport: null, engaged: [],
     dispatches: [{ turn: t0, text: 'Welcome, Commander. One year passes every minute. Survey Group Alpha is on station nearby: explore its planets and collect what you find. Ships need supply to explore and ammunition to fight; both refill in friendly systems.' }],
   };
@@ -125,7 +125,7 @@ async function bootstrap(): Promise<void> {
   const mapEl = document.createElement('div');
   mapEl.className = 'map';
   app.append(mapEl);
-  const map = new MapView({ container: mapEl, galaxyRadius: galaxy.params.radius, onClick: controller.handleClick, onHover: controller.handleHover, onFrame: controller.onFrame });
+  const map = new MapView({ container: mapEl, galaxyRadius: galaxy.params.radius, onClick: controller.handleClick, onRightClick: controller.handleRightClick, onHover: controller.handleHover, onFrame: controller.onFrame });
 
   map.layers.add(new StarfieldLayer(galaxy.params.seed));
   map.layers.add(new NebulaLayer(galaxy.params.seed));
@@ -138,7 +138,7 @@ async function bootstrap(): Promise<void> {
   map.layers.add(new NearStarLayer(galaxy));
   const system = map.layers.add(new SystemLayer(galaxy, { isHome: (s) => s.id === world.home.id, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet) }));
   const selection = map.layers.add(new SelectionLayer());
-  const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK), (h) => galaxy.starAt(h)?.position ?? hexToWorld(h)));
+  const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK), (h) => galaxy.starAt(h)?.position ?? hexToWorld(h), (id) => controller.selectFleet(id)));
 
   const zoomCfg = map.controller.zoom.config;
   const topBar = new TopBar(store, controller, identity.displayName, clock, controller.caps);
@@ -176,6 +176,7 @@ async function bootstrap(): Promise<void> {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     if (e.key === 'g' || e.key === 'G') controller.toggleView();
+    if (e.key === 'Escape' && store.state.selectedFleet) { controller.selectFleet(null); return; }
     if (e.key === 'Escape') { if (store.state.selectedPlanet && store.state.selected) controller.focusPlanet(store.state.selected, null); else controller.select(null); }
     if (e.key === 'h' || e.key === 'H') controller.flyTo(world.home, true);
     if (import.meta.env.DEV && e.key === 'Enter' && tag !== 'BUTTON') controller.skipYear();
@@ -214,7 +215,6 @@ function initialFleets(galaxy: GalaxyModel, world: ReturnType<typeof createWorld
     { id: 'scout-1', name: 'Scout Wing I', owner: player, color: '#e6b450', movement: planMovement(home, target.hex, t0 - 2, 4), design: house('Scout', 7, 'technological') },
     { id: 'survey-1', name: 'Survey Group Alpha', owner: player, color: '#e6b450', movement: planMovement(home, survey.hex, t0 - 6, 3), design: house('Survey', 9, 'technological') },
     { id: 'strike-1', name: '1st Strike Group', owner: player, color: '#e6b450', movement: planMovement(home, raiders.hex, t0 + 3 - hexDistance(home, raiders.hex), 1), design: house('Strike', 21, 'classic') },
-    // Nova's survey fleet is heading to the same star: contact a few minutes in.
     { id: 'nova-1', name: 'Nova Survey Group', owner: 'Nova Collective', color: '#4fd1ff', movement: planMovement(nova.home.hex, target.hex, t0 + 7 - travelTurns(hexDistance(nova.home.hex, target.hex), 3), 3),
       design: { ...DEFAULT_DESIGN, name: 'Nova', style: 'geometric', seed: 31, colors: { primary: '#e8f6ff', secondary: '#1b4b6b', accent: '#4fd1ff' } } },
     { id: 'vossk-1', name: 'Vossk Raiders', owner: 'alien:Vossk', color: '#ff5d5d', movement: planMovement(vossk.home.hex, world.home.hex, t0 - 10, 2),

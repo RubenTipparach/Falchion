@@ -31,6 +31,8 @@ export class MapCameraController {
    * centre on instead of the cursor, given the ground point and the target view width.
    */
   attractor: ((ground: THREE.Vector3, viewWidth: number) => { x: number; z: number } | null) | null = null;
+  /** Right-click without dragging: an RTS-style command at that ground point. Right-drag still rotates. */
+  onRightClick: ((world: THREE.Vector3, ray: THREE.Raycaster) => void) | null = null;
   private follow: (() => THREE.Vector3 | null) | null = null;
   private drag: { button: number; x: number; y: number; moved: number } | null = null;
   private readonly raycaster = new THREE.Raycaster();
@@ -70,7 +72,10 @@ export class MapCameraController {
     this.flyTarget = null;
     this.flyAltitude = null;
     this.zoomAnchor = null;
-    if (altitude !== undefined) this.zoom.setTargetAltitude(altitude);
+    if (altitude === undefined) return;
+    // Same as fly-to: pan onto the target first, dive once it is in view.
+    if (altitude >= this.zoom.targetAltitude) this.zoom.setTargetAltitude(altitude);
+    else this.flyAltitude = altitude;
   }
 
   get following(): boolean {
@@ -91,9 +96,13 @@ export class MapCameraController {
       }
       if (!zooming) this.zoomAnchor = null;
     }
-    if (this.flyTarget && this.flyAltitude !== null && this.focus.distanceTo(this.flyTarget) < this.visibleWidth() * 0.35) {
-      this.zoom.setTargetAltitude(this.flyAltitude);
-      this.flyAltitude = null;
+    if (this.flyAltitude !== null) {
+      const p = this.follow?.();
+      const goal = p ? new THREE.Vector2(p.x, p.z) : this.flyTarget;
+      if (goal && this.focus.distanceTo(goal) < this.visibleWidth() * 0.35) {
+        this.zoom.setTargetAltitude(this.flyAltitude);
+        this.flyAltitude = null;
+      }
     }
     if (this.follow) {
       const p = this.follow();
@@ -208,9 +217,10 @@ export class MapCameraController {
   };
 
   private readonly handleUp = (e: PointerEvent): void => {
-    if (this.drag && this.drag.moved < 5 && this.drag.button === 0) {
+    if (this.drag && this.drag.moved < 5 && (this.drag.button === 0 || this.drag.button === 2)) {
       const p = this.groundAt(e.clientX, e.clientY);
-      if (p) this.onClick(p, this.rayAt(e.clientX, e.clientY));
+      if (p && this.drag.button === 0) this.onClick(p, this.rayAt(e.clientX, e.clientY));
+      else if (p) this.onRightClick?.(p, this.rayAt(e.clientX, e.clientY));
     }
     this.drag = null;
   };

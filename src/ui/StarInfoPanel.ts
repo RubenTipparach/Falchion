@@ -5,7 +5,9 @@ import { SPECTRAL_COLORS } from '../core/galaxy/GalaxyModel';
 import type { Planet } from '../core/galaxy/Planets';
 import { BIOMES } from '../content/biomes';
 import { BIOME_YIELDS, RESOURCES } from '../content/resources';
-import type { GameActions, GameQueries } from './GameActions';
+import type { FleetGroup, FleetInfo, GameActions, GameQueries } from './GameActions';
+import { formatDuration } from '../core/time/WorldTime';
+import { CLOCK } from '../app/WorldClock';
 import type { EconomyTables } from '../core/economy/Economy';
 import { exploreCost } from '../core/fleet/Logistics';
 import { countOf } from '../core/fleet/Presence';
@@ -28,13 +30,17 @@ export interface StarDetails {
 export class StarInfoPanel {
   readonly el = h('section', { class: 'star-card frame hidden', 'aria-label': 'Selected system' });
 
-  constructor(store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly describe: (s: StarSystem) => StarDetails, private readonly thumb: (p: Planet) => string, private readonly tables: EconomyTables) {
+  constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly describe: (s: StarSystem) => StarDetails, private readonly thumb: (p: Planet) => string, private readonly tables: EconomyTables) {
     store.subscribe((s, prev) => {
-      if (s.selected !== prev.selected || s.selectedPlanet !== prev.selectedPlanet || s.explored !== prev.explored || s.openedCrates !== prev.openedCrates || s.empire !== prev.empire || s.loadouts !== prev.loadouts || s.turn !== prev.turn || s.economy.colonies !== prev.economy.colonies || s.collectedCaches !== prev.collectedCaches || s.depots !== prev.depots || s.construction !== prev.construction) this.render(s);
+      if (s.selected !== prev.selected || s.selectedPlanet !== prev.selectedPlanet || s.explored !== prev.explored || s.openedCrates !== prev.openedCrates || s.empire !== prev.empire || s.loadouts !== prev.loadouts || s.turn !== prev.turn || s.economy.colonies !== prev.economy.colonies || s.collectedCaches !== prev.collectedCaches || s.depots !== prev.depots || s.construction !== prev.construction || s.selectedFleet !== prev.selectedFleet || s.fleets !== prev.fleets) this.render(s);
     });
   }
 
   private render(s: GameState): void {
+    if (s.selectedFleet) {
+      const info = this.q.fleetInfo(s.selectedFleet);
+      if (info) return this.renderFleet(info);
+    }
     const star = s.selected;
     this.el.classList.toggle('hidden', !star);
     clear(this.el);
@@ -103,5 +109,37 @@ export class StarInfoPanel {
         crateWaiting ? h('button', { class: 'btn primary', onclick: () => this.actions.collectCrate(p.id) }, icon('crate'), ' Open crate') : '',
         h('button', { class: 'btn', onclick: () => this.actions.focusPlanet(star, null) }, 'Back to system')),
     );
+  }
+
+  /** Card for a selected fleet: yours shows stores and orders; right-click a star to move it. */
+  private renderFleet(info: FleetInfo): void {
+    const { fleet, group } = info;
+    this.el.classList.remove('hidden');
+    clear(this.el);
+    const where = info.at ? `On station at ${info.at.name}` : `En route to ${info.dest?.name ?? 'deep space'} · ETA ${formatDuration(info.eta, CLOCK)}`;
+    const owner = fleet.owner.replace(/^alien:/, '');
+    this.el.append(
+      h('header', {},
+        h('span', { class: 'star-dot', style: `background:${fleet.color}` }),
+        h('div', {}, h('span', { class: 'eyebrow' }, info.mine ? 'Your fleet' : `${owner} fleet`), h('h3', {}, fleet.name), h('p', { class: 'muted' }, where)),
+        h('button', { class: 'icon-btn', 'aria-label': 'Deselect fleet', title: 'Deselect (Esc)', onclick: () => this.actions.selectFleet(null) }, icon('close'))),
+      group ? h('div', {},
+        h('p', { class: 'small' }, shipsText(group.ships)),
+        storesView(group),
+        h('div', { class: 'row orders' },
+          this.orderChip(group, 'autoExplore', 'Auto-explore'),
+          this.orderChip(group, 'autoReturn', 'Return to resupply')),
+        h('p', { class: 'notice' }, 'Right-click a star to send this fleet there. Right-drag to orbit the camera.'))
+        : h('p', { class: 'small muted' }, fleet.owner.startsWith('alien:') ? 'Hostile alien fleet.' : 'Another empire\'s fleet.'),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn', onclick: () => this.actions.focusFleet(fleet.id) }, icon('locate'), ' Centre'),
+        info.mine && !(info.at && info.at.id === this.store.state.home.id) ? h('button', { class: 'btn', onclick: () => this.actions.returnHome(fleet.id) }, icon('home'), ' Return home') : '',
+        info.mine ? h('button', { class: 'btn', onclick: () => this.actions.openPanel('fleets') }, icon('fleet'), ' Fleets') : ''),
+    );
+  }
+
+  private orderChip(g: FleetGroup, key: 'autoExplore' | 'autoReturn', label: string): HTMLElement {
+    const on = !!g.orders?.[key];
+    return h('button', { class: `chip ${on ? 'active' : ''}`, 'aria-pressed': String(on), onclick: () => this.actions.setOrders(g.id, { ...g.orders, [key]: !on }) }, on ? `✓ ${label}` : label);
   }
 }

@@ -141,3 +141,14 @@ describe('NebulaSkyPainter', () => {
     expect(ms).toBeLessThan(250); // generous for slow CI; ~10-30 ms in a browser
   });
 });
+
+describe('nebula follows the spiral arms', () => {
+  it('is richer along the arms than in the gaps, sparse in the core and gone past the rim', async () => {
+    const { armPresence } = await import('./nebulaField');
+    const ring = Array.from({ length: 360 }, (_, i) => armPresence(18_000 * Math.cos(i / 57.3), 18_000 * Math.sin(i / 57.3)));
+    expect(Math.max(...ring)).toBeGreaterThan(0.9);
+    expect(Math.min(...ring)).toBeLessThan(0.2);
+    expect(armPresence(0, 0)).toBeLessThan(0.35);
+    expect(armPresence(40_000, 0)).toBe(0);
+  });
+});

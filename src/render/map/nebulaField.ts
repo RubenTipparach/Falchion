@@ -1,3 +1,4 @@
+import { DEFAULT_GALAXY } from '../../core/galaxy/GalaxyModel';
 import { hash01, hashSeed } from '../../core/rng/Rng';
 
 /**
@@ -12,7 +13,8 @@ import { hash01, hashSeed } from '../../core/rng/Rng';
  * drifting clouds is the texture: it only shows inside the large layer's clouds, tinted toward
  * their colour. `detail` (0..1, from `nebulaDetail`) fades the fine texture into a smooth fill as
  * the view zooms out, where it would only alias into speckle. Outside the large clouds space
- * stays dark, apart from a faint haze.
+ * stays dark, apart from a faint haze. The large clouds themselves follow the galaxy's spiral
+ * arms (`armPresence`): rich along the arms, sparse between them and in the old core.
  *
  * `sample()` returns the colour the map draws at a galaxy point: `rgb` with a
  * coverage `alpha`; the map adds `rgb * alpha * 1.3` over the background.
@@ -24,6 +26,22 @@ export const REGION_SCALE = 3_200;
 export const HAZE_SCALE = 1_800;
 /** How strongly the fine clouds keep their own hue against the large layer's colour. */
 const FINE_TINT = 0.35;
+/** The galaxy's spiral (the same arms GalaxyModel places stars on): nebulae gather along them. */
+const { arms: ARMS, pitch: PITCH, radius: GALAXY_R, bulgeRadius: BULGE } = DEFAULT_GALAXY;
+const INV_TAN_PITCH = 1 / Math.tan(PITCH);
+
+/**
+ * How much nebula the galaxy holds at a point, 0..1: full along the spiral arms, thin in the
+ * gaps between them, sparse in the old stellar core and gone past the rim.
+ */
+export function armPresence(x: number, z: number): number {
+  const r = Math.hypot(x, z);
+  const phase = ARMS * (Math.atan2(z, x) - Math.log(Math.max(r, 1) / 1_500) * INV_TAN_PITCH);
+  const arm = Math.pow(0.5 + 0.5 * Math.cos(phase), 1.5);
+  const core = 0.25 + 0.75 * smoothstep(BULGE * 0.8, BULGE * 2.2, r);
+  const edge = 1 - smoothstep(GALAXY_R * 0.82, GALAXY_R * 1.02, r);
+  return (0.12 + 0.88 * smoothstep(0.08, 0.55, arm)) * core * edge;
+}
 /** Added to lattice coordinates so the GPU only ever casts positive ints to unsigned. */
 const LATTICE_OFFSET = 1 << 30;
 /** Shader time (seconds) to drift units: the clouds move very slowly. */
@@ -65,11 +83,20 @@ export const NEBULA_GLSL = /* glsl */ `
     float dust = smoothstep(0.55, 0.75, fbm(p * 2.7 + 40.0)) * 0.55;
     return vec4(col, smoothstep(0.30, 0.85, n) * (1.0 - dust));
   }
+  // Nebula the galaxy holds here (armPresence): along the arms, thin between them.
+  float armPresence(vec2 p) {
+    float r = length(p);
+    float phase = ${ARMS.toFixed(1)} * (atan(p.y, p.x) - log(max(r, 1.0) / 1500.0) * ${INV_TAN_PITCH.toFixed(8)});
+    float arm = pow(0.5 + 0.5 * cos(phase), 1.5);
+    float core = 0.25 + 0.75 * smoothstep(${(BULGE * 0.8).toFixed(1)}, ${(BULGE * 2.2).toFixed(1)}, r);
+    float edge = 1.0 - smoothstep(${(GALAXY_R * 0.82).toFixed(1)}, ${(GALAXY_R * 1.02).toFixed(1)}, r);
+    return (0.12 + 0.88 * smoothstep(0.08, 0.55, arm)) * core * edge;
+  }
   // Map colour at an absolute galaxy point: rgb and coverage.
   vec4 nebulaSample(vec2 hit, float t, float detail) {
     vec4 region = cloudLayer(hit / ${REGION_SCALE.toFixed(1)} + 11.0, t * 0.5);
     vec4 fine = cloudLayer(hit / ${CLOUD_SCALE.toFixed(1)}, t);
-    float mask = smoothstep(0.12, 0.55, region.a);
+    float mask = smoothstep(0.12, 0.55, region.a * (0.35 + 0.95 * armPresence(hit)));
     vec3 col = mix(region.rgb, fine.rgb, ${FINE_TINT});
     float cover = mask * mix(0.6, min(1.0, fine.a * 1.25), detail);
     // Faint two-tone haze, strongest inside the large clouds.
@@ -132,7 +159,7 @@ export class NebulaField {
     const reg = this.region, fin = this.fine;
     this.cloudLayer(x / REGION_SCALE + 11, z / REGION_SCALE + 11, t * 0.5, reg);
     this.cloudLayer(x / CLOUD_SCALE, z / CLOUD_SCALE, t, fin);
-    const mask = smoothstep(0.12, 0.55, reg[3]);
+    const mask = smoothstep(0.12, 0.55, reg[3] * (0.35 + 0.95 * armPresence(x, z)));
     const cover = mask * mix(0.6, Math.min(1, fin[3] * 1.25), detail);
     const hazeN = this.fbm(x / HAZE_SCALE + 3, z / HAZE_SCALE + 3);
     const k = clamp01(cover * 1.6);

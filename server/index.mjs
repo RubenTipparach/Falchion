@@ -42,7 +42,7 @@ export const notifier = createNotifier({
 });
 const admin = createAdmin({
   auth, store, admins, notifier,
-  info: () => ({ version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, notifications: notifier.mode, uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000) }),
+  info: () => ({ version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, notifications: notifier.mode, notificationsProblem: notifier.problem, uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000) }),
 });
 
 function json(res, status, body) {

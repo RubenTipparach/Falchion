@@ -160,7 +160,7 @@ async function load() {
   document.getElementById('ann').value = o.announcement && o.announcement.text ? o.announcement.text : '';
   document.getElementById('notifyState').textContent = o.notifications
     ? 'On (' + o.notifications + '): new players, announcements, battles, colonies and depots are posted to the channel.'
-    : 'Off: set DISCORD_WEBHOOK_URL, or DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID (see docs/discord.md).';
+    : 'Off: ' + (o.notificationsProblem || 'see docs/discord.md');
   document.getElementById('notifyTest').disabled = !o.notifications;
   const rows = await (await fetch('/api/admin/players')).json();
   const body = document.getElementById('players'); body.replaceChildren();

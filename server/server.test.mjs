@@ -146,6 +146,15 @@ describe('discord channel notifications', async () => {
   const fakeFetch = async (url, init) => { sent.push({ url, ...JSON.parse(init.body), auth: init.headers.Authorization }); return { ok: true, status: 200 }; };
   const make2 = (extra = {}) => createNotifier({ token: 'bot-token', channelId: '123456789012345678', fetchImpl: fakeFetch, ...extra });
 
+  it('names the missing setting when off, and trims pasted values', () => {
+    expect(createNotifier({ channelId: '123456789012345678' }).problem).toContain('DISCORD_BOT_TOKEN is missing');
+    expect(createNotifier({ token: 't' }).problem).toContain('DISCORD_CHANNEL_ID is missing');
+    expect(createNotifier({ token: 't', channelId: '#general' }).problem).toContain('numeric id');
+    const n = createNotifier({ token: ' t\n', channelId: '123456789012345678\n' });
+    expect(n.enabled).toBe(true);
+    expect(n.problem).toBeNull();
+  });
+
   it('is off without a token and a channel id', () => {
     expect(createNotifier({ token: 'x' }).enabled).toBe(false);
     expect(make2().enabled).toBe(true);

@@ -142,6 +142,11 @@ jobs:
           for name in DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET SESSION_SECRET ADMIN_DISCORD_ID DISCORD_WEBHOOK_URL DISCORD_BOT_TOKEN DISCORD_CHANNEL_ID; do
             [ -n "${!name}" ] && args+=("$name=${!name}")
           done
+          # Name what is missing for channel notifications (values are never printed).
+          if [ -z "$DISCORD_WEBHOOK_URL" ] && [ -n "$DISCORD_CHANNEL_ID$DISCORD_BOT_TOKEN" ]; then
+            [ -z "$DISCORD_BOT_TOKEN" ] && echo "::warning::DISCORD_CHANNEL_ID is set but the DISCORD_BOT_TOKEN repository secret is empty or missing; channel notifications stay off."
+            [ -z "$DISCORD_CHANNEL_ID" ] && echo "::warning::DISCORD_BOT_TOKEN is set but the DISCORD_CHANNEL_ID repository secret is empty or missing; channel notifications stay off."
+          fi
           if [ ${#args[@]} -eq 0 ]; then
             echo "::notice::Discord secrets not set in GitHub; sign-in stays off. See docs/discord.md."
           elif ! flyctl secrets set --stage -a "$APP" "${args[@]}" > /dev/null; then

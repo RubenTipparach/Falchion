@@ -16,10 +16,19 @@ export const WEBHOOK_URL = /^https:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/
  * @param {{ webhookUrl?: string, token?: string, channelId?: string, api?: string, fetchImpl?: typeof fetch, now?: () => number, perHour?: number }} opts
  */
 export function createNotifier(opts) {
-  const { webhookUrl, token, channelId, api = 'https://discord.com/api/v10', fetchImpl = fetch, now = () => Date.now(), perHour = 12 } = opts;
+  const { api = 'https://discord.com/api/v10', fetchImpl = fetch, now = () => Date.now(), perHour = 12 } = opts;
+  // Secrets pasted with a stray space or newline still work.
+  const webhookUrl = opts.webhookUrl?.trim(), token = opts.token?.trim(), channelId = opts.channelId?.trim();
   const mode = webhookUrl && WEBHOOK_URL.test(webhookUrl) ? 'webhook'
     : token && channelId && /^\d{5,25}$/.test(channelId) ? 'bot' : null;
   const enabled = mode !== null;
+  /** Why notifications are off, naming the setting to fix; null when on. */
+  const problem = enabled ? null
+    : webhookUrl ? 'DISCORD_WEBHOOK_URL is set but is not a Discord webhook URL (https://discord.com/api/webhooks/...).'
+    : token && !channelId ? 'DISCORD_BOT_TOKEN is set; DISCORD_CHANNEL_ID is missing.'
+    : !token && channelId ? 'DISCORD_CHANNEL_ID is set; DISCORD_BOT_TOKEN is missing on the server (check the GitHub secret name, then redeploy).'
+    : token && channelId ? 'DISCORD_CHANNEL_ID must be the channel\'s numeric id (right-click the channel → Copy Channel ID).'
+    : 'Set DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID, or DISCORD_WEBHOOK_URL (see docs/discord.md).';
   const recent = new Map(); // player id -> timestamps of their reports this hour
 
   /** Post a message; never pings anyone. Returns { ok, status }. */
@@ -63,6 +72,7 @@ export function createNotifier(opts) {
     enabled,
     /** 'webhook', 'bot', or null when off. */
     mode,
+    problem,
     post,
     joined: (name) => post(`🚀 **${clean(name, 64)}** founded an empire in the galaxy.`),
     announcement: (text, by) => post(`📣 **Announcement** (${clean(by, 64)}): ${clean(text, 280)}`),

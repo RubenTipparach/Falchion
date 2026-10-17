@@ -139,3 +139,48 @@ describe('sign-in redirect', async () => {
     expect(safeNext('https://evil.example')).toBe('/');
   });
 });
+
+describe('discord channel notifications', async () => {
+  const { createNotifier } = await import('./notifier.mjs');
+  const sent = [];
+  const fakeFetch = async (url, init) => { sent.push({ url, ...JSON.parse(init.body), auth: init.headers.Authorization }); return { ok: true, status: 200 }; };
+  const make2 = (extra = {}) => createNotifier({ token: 'bot-token', channelId: '123456789012345678', fetchImpl: fakeFetch, ...extra });
+
+  it('is off without a token and a channel id', () => {
+    expect(createNotifier({ token: 'x' }).enabled).toBe(false);
+    expect(make2().enabled).toBe(true);
+  });
+
+  it('posts as the bot to the channel and never pings anyone', async () => {
+    sent.length = 0;
+    await make2().joined('Ruben');
+    expect(sent[0].url).toBe('https://discord.com/api/v10/channels/123456789012345678/messages');
+    expect(sent[0].auth).toBe('Bot bot-token');
+    expect(sent[0].content).toContain('**Ruben** founded an empire');
+    expect(sent[0].allowed_mentions).toEqual({ parse: [] });
+  });
+
+  it('accepts only known player news, cleaned and rate-limited per player', async () => {
+    sent.length = 0;
+    const n = make2({ perHour: 2 });
+    const p = { id: '1', name: 'Ruben' };
+    expect(await n.report(p, 'spam', 'hello')).toBe(false);
+    expect(await n.report(p, 'battle', 'Victory\nover ```the``` raiders')).toBe(true);
+    expect(sent[0].content).toBe('⚔️ **Ruben**: Victory over the raiders');
+    expect(await n.report(p, 'colony', 'settled X')).toBe(true);
+    expect(await n.report(p, 'depot', 'built a depot')).toBe(false); // third in an hour
+    expect(await n.report({ id: '2', name: 'Friend' }, 'depot', 'built a depot')).toBe(true);
+  });
+
+  it('admin test explains a missing channel permission', async () => {
+    const { adminIds, createAdmin } = await import('./admin.mjs');
+    const auth = make();
+    const store = createStore(mkdtempSync(join(tmpdir(), 'falchion-n-')));
+    const notifier = createNotifier({ token: 't', channelId: '123456789012345678', fetchImpl: async () => ({ ok: false, status: 403 }) });
+    const admin = createAdmin({ auth, store, admins: adminIds({ ADMIN_DISCORD_ID: '123456789012345678' }), notifier, info: () => ({}) });
+    const res = fakeRes();
+    await admin({ method: 'POST', headers: { cookie: `fal_session=${encodeURIComponent(auth.issue({ id: '123456789012345678', name: 'R' }))}`, 'x-falchion-admin': '1' } }, res, '/api/admin/notify-test');
+    expect(res.status).toBe(502);
+    expect(JSON.parse(res.body).error).toContain('Send Messages');
+  });
+});

@@ -18,7 +18,8 @@ The world is realtime: one tick per minute = one game year (`server/clock.json`,
 The most recent push wins. The Fly job skips
 with a notice until `FLY_API_TOKEN` is set and the `falchion` app exists (see
 `server/fly.toml`). Secrets: `FLY_API_TOKEN`, plus `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` and
-`SESSION_SECRET` for Discord sign-in (CI stages them onto Fly; see `docs/discord.md`). Player saves
+`SESSION_SECRET` for Discord sign-in, optional `ADMIN_DISCORD_ID` (admin portal) and
+`DISCORD_BOT_TOKEN` + `DISCORD_CHANNEL_ID` (channel notifications) (CI stages them onto Fly; see `docs/discord.md`). Player saves
 live on the `falchion_data` Fly volume (one machine).
 Pattern mirrors RubenTipparach/high-frontier-fan-game.
 

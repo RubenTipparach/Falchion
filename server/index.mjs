@@ -10,6 +10,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { adminIds, createAdmin } from './admin.mjs';
 import { createAuth } from './auth.mjs';
+import { createNotifier } from './notifier.mjs';
 import { createStore } from './store.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -33,9 +34,11 @@ const MAX_SAVE_BYTES = 3 * 1024 * 1024;
 const STARTED_AT = Date.now();
 // Same secret as High Frontier: ADMIN_DISCORD_ID (or ADMIN_DISCORD_IDS), comma-separated.
 export const admins = adminIds(process.env);
+// Channel notifications as the Falchion bot (optional: DISCORD_BOT_TOKEN + DISCORD_CHANNEL_ID).
+export const notifier = createNotifier({ token: process.env.DISCORD_BOT_TOKEN, channelId: process.env.DISCORD_CHANNEL_ID });
 const admin = createAdmin({
-  auth, store, admins,
-  info: () => ({ version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000) }),
+  auth, store, admins, notifier,
+  info: () => ({ version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, notifications: notifier.enabled, uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000) }),
 });
 
 function json(res, status, body) {
@@ -76,10 +79,21 @@ async function api(req, res, pathname) {
     try {
       const body = await readJson(req, MAX_SAVE_BYTES);
       if (!body || typeof body.save !== 'object' || !Number.isInteger(body.save?.turn)) return json(res, 400, { error: 'bad save' });
+      const isNew = !(await store.load(user.id));
       await store.save(user.id, { player: user, save: body.save, public: publicView(body.public), updatedAt: Date.now() });
+      if (isNew) void notifier.joined(user.name);
       return json(res, 200, { ok: true });
     } catch (err) {
       return json(res, err.status ?? 400, { error: err.status === 413 ? 'save too large' : 'bad save' });
+    }
+  }
+  // A player's own news for the Discord channel (battles, colonies, depots); rate-limited.
+  if (pathname === '/api/events' && req.method === 'POST') {
+    try {
+      const { kind, text } = await readJson(req, 2_048);
+      return json(res, 200, { posted: await notifier.report(user, kind, text) });
+    } catch {
+      return json(res, 400, { error: 'bad event' });
     }
   }
   if (pathname === '/api/players' && req.method === 'GET') {
@@ -168,7 +182,7 @@ export const server = createServer(async (req, res) => {
   if (await admin(req, res, pathname)) return;
   if (pathname === '/auth/discord/callback') return auth.enabled ? auth.callback(req, res, new URL(req.url ?? '/', 'http://localhost')) : send(res, 404, 'not configured');
   if (pathname === '/auth/logout') return auth.logout(res);
-  if (pathname === '/api/me' || pathname === '/api/save' || pathname === '/api/players') return api(req, res, pathname);
+  if (pathname === '/api/me' || pathname === '/api/save' || pathname === '/api/players' || pathname === '/api/events') return api(req, res, pathname);
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed');
   return serveStatic(pathname, res);
 });

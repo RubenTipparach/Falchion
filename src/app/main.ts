@@ -130,7 +130,10 @@ async function bootstrap(): Promise<void> {
   // A saved empire carries on where it left off; the missed years are caught up below.
   const store = new Store<GameState>(saved ? { ...fresh, ...saved } : fresh);
 
-  const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame });
+  const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame,
+    // Signed-in players' notable news goes to the Discord channel (the server rate-limits it).
+    report: signedIn ? (kind, text) => { void fetch('./api/events', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, text }) }).catch(() => {}); } : undefined,
+  });
 
   // ── Views ──
   const app = document.getElementById('app')!;

@@ -133,9 +133,12 @@ jobs:
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           # Same secret as High Frontier: comma-separated Discord ids for the /admin portal.
           ADMIN_DISCORD_ID: ${{ secrets.ADMIN_DISCORD_ID }}
+          # Channel notifications as the bot (optional).
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
         run: |
           args=()
-          for name in DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET SESSION_SECRET ADMIN_DISCORD_ID; do
+          for name in DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET SESSION_SECRET ADMIN_DISCORD_ID DISCORD_BOT_TOKEN DISCORD_CHANNEL_ID; do
             [ -n "${!name}" ] && args+=("$name=${!name}")
           done
           if [ ${#args[@]} -eq 0 ]; then

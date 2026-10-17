@@ -34,10 +34,10 @@ async function readJson(req, limit = 16_384) {
 }
 
 /**
- * @param {{ auth: any, store: any, admins: Set<string>, info: () => object }} deps
+ * @param {{ auth: any, store: any, admins: Set<string>, notifier?: any, info: () => object }} deps
  * @returns {(req: any, res: any, pathname: string) => Promise<boolean>} handles the request if it is an admin route
  */
-export function createAdmin({ auth, store, admins, info }) {
+export function createAdmin({ auth, store, admins, notifier, info }) {
   const isAdmin = (user) => !!user && admins.has(user.id);
 
   return async function handle(req, res, pathname) {
@@ -86,10 +86,20 @@ export function createAdmin({ auth, store, admins, info }) {
         const clean = String(text ?? '').trim().slice(0, MAX_ANNOUNCEMENT);
         const value = clean ? { text: clean, by: user.name, at: Date.now() } : {};
         await store.setSetting('announcement', value);
+        if (clean && notifier?.enabled) void notifier.announcement(clean, user.name);
         json(res, 200, value);
       } catch {
         json(res, 400, { error: 'bad announcement' });
       }
+      return true;
+    }
+    if (pathname === '/api/admin/notify-test' && req.method === 'POST') {
+      if (!notifier?.enabled) { json(res, 409, { ok: false, error: 'Set DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID first (docs/discord.md).' }); return true; }
+      const r = await notifier.post(`✅ Falchion notifications are working (test by ${user.name}).`);
+      const hint = r.status === 403 ? 'The bot cannot post there: give it View Channel and Send Messages in that channel.'
+        : r.status === 404 ? 'Channel not found: check DISCORD_CHANNEL_ID, and that the bot is in that server.'
+        : r.status === 401 ? 'The bot token was rejected: reset it and update DISCORD_BOT_TOKEN.' : '';
+      json(res, r.ok ? 200 : 502, { ok: r.ok, status: r.status, error: hint || undefined });
       return true;
     }
     json(res, 404, { error: 'not found' });
@@ -124,8 +134,11 @@ textarea { width: 100%; min-height: 64px; background: var(--panel); color: var(-
 const ADMIN_HTML = `<main>
 <div class="row" style="justify-content:space-between"><div><h1>Falchion admin</h1><div class="muted" id="who"></div></div><div class="row"><a href="/">Game</a><a href="/auth/logout">Sign out</a></div></div>
 <h2>Server</h2><div class="cards" id="cards"></div>
+<h2>Discord channel</h2>
+<p class="muted" id="notifyState"></p>
+<div class="row"><button id="notifyTest">Send test message</button><span id="notifyMsg" class="muted"></span></div>
 <h2>Announcement</h2>
-<p class="muted">Shown as a banner to every player (up to 280 characters). Empty clears it.</p>
+<p class="muted">Shown as a banner to every player (up to 280 characters) and posted to the Discord channel. Empty clears it.</p>
 <textarea id="ann" maxlength="280" placeholder="Server maintenance at 20:00 UTC…"></textarea>
 <div class="row"><button id="annSave">Publish</button><button id="annClear">Clear</button><span id="annMsg" class="muted"></span></div>
 <h2>Players</h2>
@@ -143,6 +156,10 @@ async function load() {
     const c = el('div', undefined, 'card'); c.append(el('b', String(value)), el('span', label)); cards.append(c);
   }
   document.getElementById('ann').value = o.announcement && o.announcement.text ? o.announcement.text : '';
+  document.getElementById('notifyState').textContent = o.notifications
+    ? 'The bot posts new players, announcements, battles, colonies and depots to the channel.'
+    : 'Off: set DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID (see docs/discord.md).';
+  document.getElementById('notifyTest').disabled = !o.notifications;
   const rows = await (await fetch('/api/admin/players')).json();
   const body = document.getElementById('players'); body.replaceChildren();
   if (!rows.length) { const tr = el('tr'); const td = el('td', 'No players yet.', 'muted'); td.colSpan = 9; tr.append(td); body.append(tr); }
@@ -167,6 +184,13 @@ async function announce(text) {
   msg.textContent = r.ok ? (text ? 'Published.' : 'Cleared.') : 'Failed: ' + r.status; msg.className = r.ok ? 'ok' : 'err';
   if (r.ok && !text) document.getElementById('ann').value = '';
 }
+document.getElementById('notifyTest').onclick = async () => {
+  const msg = document.getElementById('notifyMsg');
+  const r = await fetch('/api/admin/notify-test', { method: 'POST', headers: H });
+  const b = await r.json().catch(() => ({}));
+  msg.textContent = r.ok ? 'Sent: check the channel.' : 'Failed (' + (b.status || r.status) + '). ' + (b.error || '');
+  msg.className = r.ok ? 'ok' : 'err';
+};
 document.getElementById('annSave').onclick = () => announce(document.getElementById('ann').value);
 document.getElementById('annClear').onclick = () => announce('');
 load().catch((e) => { document.getElementById('players').textContent = 'Failed to load: ' + e.message; });

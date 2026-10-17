@@ -7,7 +7,7 @@ the server reuses it directly. See proposal.md for scope.
 
 ## Goals / Non-Goals
 
-**Goals:** authoritative server, async + lockstep time, PvE combat, expansion, economy, Discord.
+**Goals:** authoritative server, scheduled world turns + lockstep turns, PvE combat, expansion, economy, Discord.
 **Non-Goals:** PvP, monetisation, matchmaking.
 
 ## Decisions
@@ -15,8 +15,9 @@ the server reuses it directly. See proposal.md for scope.
 - **Server**: Node + TypeScript, imports `src/core`. Event-sourced: commands → validated
   → events persisted; state derived. Alternative: snapshot-only DB — rejected, replays
   and lockstep audit need the event log.
-- **Time — extension point `TimeAuthority`**: `AsyncTimeAuthority` schedules events on a
-  priority queue by game time; `LockstepTimeAuthority` owns a zone and advances on
+- **Time — extension point `TimeAuthority`**: the game is turn-based. `WorldTurnAuthority`
+  resolves world turns on a fixed server cadence from the orders submitted so far;
+  `LockstepTimeAuthority` owns a zone and advances its turn on
   all-orders-in or timeout. Entities are assigned to exactly one authority; zone
   detection uses hex distance over a spatial hash of fleets.
 - **Combat — extension point `Ability` registry**: round-based resolver
@@ -41,5 +42,5 @@ the server reuses it directly. See proposal.md for scope.
 ## Risks / Trade-offs
 
 - [Lockstep stalls on idle players] → turn timer with hold-position default.
-- [Long async horizons make balance hard] → simulation harness running years of game time headless.
+- [Long async horizons make balance hard] → simulation harness running thousands of turns headless.
 - [Discord API changes] → isolated behind `IdentityProvider`/`Notifier`.

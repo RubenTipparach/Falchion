@@ -9,7 +9,7 @@ export class Hud {
 
   constructor() {
     this.el = h('div', { class: 'hud' }, this.contact, this.hover, this.scale,
-      h('div', { class: 'hud-help' }, 'Scroll: zoom · Drag: pan · Right-drag: rotate/tilt · G: toggle view · Click star: select'));
+      h('div', { class: 'hud-help' }, 'Scroll: zoom · Drag: pan · Right-drag: rotate/tilt · G: toggle view · Enter: end turn · Click star: select'));
   }
 
   setHover(text: string): void {

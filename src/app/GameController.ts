@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
-import { formatDuration, hexAt, planMovement, travelDays } from '../core/fleet/Fleet';
+import { formatTurns, hexAt, planMovement, travelTurns } from '../core/fleet/Fleet';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
 import { planetsOf, Planet } from '../core/galaxy/Planets';
@@ -41,12 +41,11 @@ export interface ViewDeps {
   readonly panels: Readonly<Record<PanelId, Drawer>>;
 }
 
-const BASE_SPEED = 2; // ly per game day
+const BASE_SPEED = 2; // hexes (ly) per turn
 
 /** Application service: implements UI commands on top of the pure core and the map view. */
 export class GameController implements GameActions {
   private view!: ViewDeps;
-  private contactsSeen = new Set<string>();
 
   constructor(private readonly deps: ControllerDeps) {}
 
@@ -55,8 +54,12 @@ export class GameController implements GameActions {
     view.hexGrid.setHome(this.deps.world.home.hex.q, this.deps.world.home.hex.r);
     this.deps.store.subscribe((s, prev) => {
       if (s.fleets !== prev.fleets) view.fleets.setFleets(s.fleets);
+      if (s.turn !== prev.turn) view.fleets.setTurn(s.turn);
+      if (s.contact !== prev.contact) view.hud.setContact(s.contact);
     });
+    view.fleets.setTurn(this.deps.store.state.turn);
     view.fleets.setFleets(this.deps.store.state.fleets);
+    this.updateContact();
   }
 
   // ── Queries ────────────────────────────────────────────────────────
@@ -86,7 +89,7 @@ export class GameController implements GameActions {
     return {
       address: formatAddress(addressOf(star.hex)),
       distanceFromHome: dist,
-      travel: dist === 0 ? '—' : formatDuration(travelDays(dist, speed)),
+      travel: dist === 0 ? '—' : formatTurns(travelTurns(dist, speed)),
       speed,
       planets: this.planets(star),
       owner: owner?.name ?? null,
@@ -121,11 +124,11 @@ export class GameController implements GameActions {
     const s = this.state;
     const n = s.fleets.filter((f) => f.owner === s.playerName).length + 1;
     const fleet = {
-      id: `player-${n}-${Math.floor(s.day)}`,
+      id: `player-${n}-t${s.turn}`,
       name: `${this.effectiveDesign().name} Wing ${n}`,
       owner: s.playerName,
       color: '#5dff9b',
-      movement: planMovement(s.home.hex, to.hex, s.day, this.fleetSpeed()),
+      movement: planMovement(s.home.hex, to.hex, s.turn, this.fleetSpeed()),
       design: this.effectiveDesign(),
     };
     this.deps.store.update({ fleets: [...s.fleets, fleet], log: [...s.log, `Fleet dispatched to ${to.name}`] });
@@ -168,8 +171,10 @@ export class GameController implements GameActions {
     this.deps.store.update({ hiddenTraits: hidden.includes(traitId) ? hidden.filter((t) => t !== traitId) : [...hidden, traitId] });
   }
 
-  setSpeed(daysPerSecond: number): void {
-    this.deps.store.update({ speed: daysPerSecond });
+  /** Advance the world one turn. Inside a lockstep zone this is the player's turn submission. */
+  endTurn(): void {
+    this.deps.store.update((s) => ({ turn: s.turn + 1 }));
+    this.updateContact();
   }
 
   openPanel(id: PanelId): void {
@@ -205,35 +210,29 @@ export class GameController implements GameActions {
     this.view.hud.setHover(`${formatAddress(addressOf(h))}${star ? ` · ★ ${star.name}` : ''} · ${dist.toLocaleString('en-US')} ly from home`);
   };
 
-  onFrame = (view: ViewState, dt: number): void => {
-    const s = this.state;
-    if (s.speed > 0) this.deps.store.update({ day: s.day + dt * s.speed });
-    this.view.fleets.setDay(this.state.day);
-    this.view.topBar.setDay(this.state.day);
+  onFrame = (view: ViewState): void => {
     this.view.topBar.setGalaxyMode(view.galaxyMode);
     const mode = view.visibleWidth < 420 ? 'Hex view' : view.visibleWidth < 7_000 ? 'Sector view' : 'Galaxy view';
     this.view.hud.setScale(view.visibleWidth, mode);
-    this.checkContacts();
   };
 
-  /** When fleets of different players meet, a lockstep zone takes over (mocked: pause + banner). */
-  private checkContacts(): void {
+  /**
+   * When fleets of different players are within the lockstep radius, that zone
+   * resolves in lockstep: every participant must submit before the turn ends
+   * (mocked here: the other player auto-submits). PvP stays disabled.
+   */
+  private updateContact(): void {
     const s = this.state;
     const mine = s.fleets.filter((f) => f.owner === s.playerName);
     const others = s.fleets.filter((f) => f.owner !== s.playerName && !f.owner.startsWith('alien:'));
     let contact: string | null = null;
     for (const a of mine) {
       for (const b of others) {
-        if (!inContact(hexAt(a.movement, s.day), hexAt(b.movement, s.day))) continue;
-        contact = `Contact with ${b.owner} — lockstep turn mode active (peaceful encounter; PvP disabled)`;
-        const key = `${a.id}|${b.id}`;
-        if (!this.contactsSeen.has(key)) {
-          this.contactsSeen.add(key);
-          this.deps.store.update({ speed: 0 });
+        if (inContact(hexAt(a.movement, s.turn), hexAt(b.movement, s.turn))) {
+          contact = `Contact with ${b.owner} — lockstep: both players submit before the turn resolves (peaceful; PvP disabled)`;
         }
       }
     }
     if (contact !== s.contact) this.deps.store.update({ contact });
-    this.view.hud.setContact(contact);
   }
 }

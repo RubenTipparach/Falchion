@@ -5,9 +5,8 @@ import type { ShipDesign } from '../core/ships/ShipDesign';
 import type { FleetView } from '../render/map/FleetLayer';
 
 export interface GameState {
-  readonly day: number;
-  /** Game days per real second (0 = paused). */
-  readonly speed: number;
+  /** Current world turn. Fleets move a whole number of hexes per turn. */
+  readonly turn: number;
   readonly empire: EmpireState;
   readonly design: ShipDesign;
   /** Research traits the player chose to show on their ships. */
@@ -21,9 +20,6 @@ export interface GameState {
   readonly log: readonly string[];
 }
 
-export const START_YEAR = 3047;
-
-export function formatDate(day: number): string {
-  const year = START_YEAR + Math.floor(day / 365);
-  return `GY ${year} · day ${Math.floor(day % 365) + 1}`;
+export function formatTurn(turn: number): string {
+  return `Turn ${turn.toLocaleString('en-US')}`;
 }

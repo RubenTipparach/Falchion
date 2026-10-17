@@ -13,7 +13,7 @@ encounters must replay identically on every client. Therefore:
    `src/core/rng` seeded from a stable key, e.g. `hashSeed(galaxySeed, q, r)`.
 2. **Derive, don't share.** Give each sub-system its own derived seed
    (`rng.fork('engines')`) so adding a feature doesn't shift every later roll.
-3. **No ambient time.** Pass game time (`tick`, in-game days) as a parameter.
+3. **No ambient time.** The game is turn-based: pass the turn number as a parameter; nothing advances between turns.
 4. **Stable ordering.** Sort by id before iterating sets/maps that affect results.
 5. **Integers for authoritative state.** Shard counts, resources, HP are integers;
    floats are fine for visuals only.

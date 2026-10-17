@@ -14,7 +14,7 @@
 
 - [x] 3.1 Implement `GalaxyModel` density and deterministic `starAt`; verify `galaxy.test.ts` (determinism, rim empty, arms denser, elevation 0, nearest star)
 - [x] 3.2 Implement galactic addressing; verify `address.test.ts` (quadrants, core ring, cell index)
-- [x] 3.3 Implement fleet route and ETA/position; verify `fleet.test.ts` (route length, 730 ly at 2 ly/day = 365 days, midpoint)
+- [x] 3.3 Implement turn-based fleet route, ETA and position; verify `fleet.test.ts` (route length, 730 ly at 2 ly/turn = 365 turns, exactly `speed` hexes per turn, whole turns only)
 
 ## 4. Core: research, shards, encounters
 
@@ -29,6 +29,7 @@
 - [x] 5.1 Implement `ZoomModel` (exponential, clamped); verify `zoom.test.ts`
 - [x] 5.2 Implement `LayerStack` with hex grid, near stars, galaxy cloud, sector overlay, territory and fleet layers; verify visually that hexes appear only zoomed in and quadrants/rings when zoomed out
 - [x] 5.3 Implement view toggle (button + G) and star selection info panel; verify manually by toggling and clicking a star
+- [x] 5.8 Implement End Turn (button + Enter) and straight-line fleet drawing with fixed heading; verify a fleet glides in a straight line one turn at a time and nothing moves between turns
 - [x] 5.4 Implement `ShipGeneratorRegistry` and five style generators plus trait decorators; verify `shipGenerators.test.ts` (five styles, deterministic part layout) and visual preview
 - [x] 5.5 Implement Shipyard panel controls and design code import/export; verify colour change and randomise in the preview
 - [x] 5.6 Implement Research panel (branches, locks, analogs, crossovers, shard progress, shard source buttons); verify manually

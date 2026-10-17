@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { FleetMovement, arrivalDay, progressAt } from '../../core/fleet/Fleet';
+import { FleetMovement, arrivalTurn, progressAt } from '../../core/fleet/Fleet';
 import { hexToWorld } from '../../core/hex/Hex';
 import type { ShipDesign } from '../../core/ships/ShipDesign';
 import type { ShipFactory } from '../ships/ShipFactory';
@@ -22,18 +22,27 @@ interface FleetVisual {
   readonly line: THREE.Line;
   readonly label: CSS2DObject;
   readonly fleet: FleetView;
+  readonly start: THREE.Vector3;
+  readonly end: THREE.Vector3;
+  /** Displayed progress; eases toward the turn's progress so a turn reads as one glide. */
+  shown: number;
 }
 
-/** Moving fleets: route line, procedural ship model and ETA label, positioned from game time. */
+/**
+ * Moving fleets: route line, procedural ship and ETA label. The ship is drawn on
+ * the straight line from origin to destination with a fixed heading; the core
+ * route decides which hex it logically occupies each turn.
+ */
 export class FleetLayer implements MapLayer {
   readonly object3d = new THREE.Group();
   private readonly visuals = new Map<string, FleetVisual>();
-  private day = 0;
+  private turn = 0;
+  private lastTime = 0;
 
-  constructor(private readonly ships: ShipFactory, private readonly formatEta: (days: number) => string) {}
+  constructor(private readonly ships: ShipFactory, private readonly formatEta: (turns: number) => string) {}
 
-  setDay(day: number): void {
-    this.day = day;
+  setTurn(turn: number): void {
+    this.turn = turn;
   }
 
   setFleets(fleets: readonly FleetView[]): void {
@@ -48,38 +57,38 @@ export class FleetLayer implements MapLayer {
   }
 
   update(view: ViewState): void {
+    const dt = Math.min(0.1, Math.max(0, view.time - this.lastTime));
+    this.lastTime = view.time;
+    const ease = 1 - Math.exp(-4 * dt);
     const scale = Math.max(0.4, view.visibleWidth * 0.03);
     for (const v of this.visuals.values()) {
-      const { route } = v.fleet.movement;
-      const t = progressAt(v.fleet.movement, this.day) * (route.length - 1);
-      const i = Math.min(route.length - 2, Math.floor(t));
-      const a = hexToWorld(route[Math.max(0, i)]);
-      const b = hexToWorld(route[Math.min(route.length - 1, i + 1)]);
-      const f = route.length > 1 ? t - i : 0;
-      const x = a.x + (b.x - a.x) * f, z = a.z + (b.z - a.z) * f;
-      v.root.position.set(x, 0.05, z);
-      const end = hexToWorld(route[route.length - 1]);
-      v.model.group.rotation.y = Math.atan2(end.x - x, end.z - z);
+      const target = progressAt(v.fleet.movement, this.turn);
+      v.shown += (target - v.shown) * ease;
+      if (Math.abs(target - v.shown) < 1e-4) v.shown = target;
+      v.root.position.lerpVectors(v.start, v.end, v.shown);
       v.model.group.scale.setScalar(scale / 4);
       v.model.animate(view.time);
-      const remaining = arrivalDay(v.fleet.movement) - this.day;
+      const remaining = arrivalTurn(v.fleet.movement) - this.turn;
       v.label.element.innerHTML = `<b>${v.fleet.name}</b><br>${remaining > 0 ? `ETA ${this.formatEta(remaining)}` : 'Arrived'}`;
       v.label.visible = view.visibleWidth < 4_000;
-      v.label.position.set(0, 0, 0);
     }
   }
 
   private createVisual(fleet: FleetView): FleetVisual {
+    const { route } = fleet.movement;
+    const a = hexToWorld(route[0]);
+    const b = hexToWorld(route[route.length - 1]);
+    const start = new THREE.Vector3(a.x, 0.05, a.z);
+    const end = new THREE.Vector3(b.x, 0.05, b.z);
+
     const root = new THREE.Group();
     const model = this.ships.create(fleet.design);
+    // Fixed heading: forward (+z) points from origin to destination.
+    model.group.rotation.y = Math.atan2(end.x - start.x, end.z - start.z);
     root.add(model.group);
-    const pts = fleet.movement.route.map((h) => {
-      const p = hexToWorld(h);
-      return new THREE.Vector3(p.x, 0.02, p.z);
-    });
-    const ends = [pts[0], pts[pts.length - 1]];
+
     const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(ends),
+      new THREE.BufferGeometry().setFromPoints([start, end]),
       new THREE.LineDashedMaterial({ color: fleet.color, dashSize: 0.6, gapSize: 0.4, transparent: true, opacity: 0.8 }),
     );
     line.computeLineDistances();
@@ -90,7 +99,7 @@ export class FleetLayer implements MapLayer {
     label.center.set(-0.15, 1.2);
     root.add(label);
     this.object3d.add(root, line);
-    return { root, model, line, label, fleet };
+    return { root, model, line, label, fleet, start, end, shown: progressAt(fleet.movement, this.turn) };
   }
 
   private removeVisual(id: string, v: FleetVisual): void {

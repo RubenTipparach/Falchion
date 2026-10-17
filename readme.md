@@ -15,6 +15,7 @@ npm test         # core unit tests
 - **Scroll**: exponential zoom from a single hex (1 ly) to the whole galaxy
 - **Drag**: pan; **right-drag**: tilt/rotate
 - **G**: toggle between hex view and galaxy (quadrant / radial cell) view
+- **Enter** or **End Turn**: advance one turn (the game is turn-based; fleets move a whole number of ly per turn)
 - **Click a star**: select it to see its sector address, distance and travel time
 - Panels: **Shipyard** (procgen ship designer), **Research** (branching tech tree with shards), **Explore** (encounters and loot crates)
 

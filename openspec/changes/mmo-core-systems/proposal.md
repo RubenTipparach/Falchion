@@ -10,7 +10,7 @@ what happens when async players meet, and Discord as the social/identity layer.
 
 - Authoritative, deterministic automated combat against aliens (PvE), including
   bombardment, planetary assault and ship capture that yields tech fragments.
-- Async time by default; when fleets of different players come within an encounter
+- Turn-based, asynchronous world turns by default; when fleets of different players come within an encounter
   radius, a deterministic lockstep turn system takes over that zone.
 - Peaceful player encounters and co-operative attacks on alien targets. **No PvP.**
 - Biome-based expansion: start biome, research unlocks adjacent biomes.
@@ -24,7 +24,7 @@ Out of scope: PvP modes, monetisation, mobile clients.
 
 ### New Capabilities
 - `combat-resolution`: automated deterministic fleet combat, bombardment, assault, capture.
-- `encounter-lockstep`: switching a region from async time to lockstep turns when players meet.
+- `encounter-lockstep`: switching a region from scheduled world turns to lockstep turns when players meet.
 - `player-coexistence`: peaceful contact, co-op targets, shared reward rules.
 - `biome-expansion`: home biome, adjacency graph, colonisation rules.
 - `economy`: resource production, trade, religion and politics income.

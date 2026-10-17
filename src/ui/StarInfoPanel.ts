@@ -42,7 +42,7 @@ export class StarInfoPanel {
       h('dl', {},
         h('dt', {}, 'Address'), h('dd', {}, d.address),
         h('dt', {}, 'From home'), h('dd', {}, `${fmt(d.distanceFromHome)} ly`),
-        h('dt', {}, 'Travel time'), h('dd', {}, `${d.travel} at ${d.speed} ly/day`)),
+        h('dt', {}, 'Travel time'), h('dd', {}, `${d.travel} at ${d.speed} ly/turn`)),
       h('div', { class: 'planet-row' }, ...d.planets.map((p) => {
         const biome = BIOMES.find((b) => b.id === p.biome);
         const done = s.explored[p.id];

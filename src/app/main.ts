@@ -1,7 +1,7 @@
 import '../ui/styles.css';
 import { EncounterResolver } from '../core/encounters/Encounters';
 import { newEmpire } from '../core/empire/Empire';
-import { planMovement } from '../core/fleet/Fleet';
+import { formatTurns, planMovement, travelTurns } from '../core/fleet/Fleet';
 import { DEFAULT_ADDRESS_SCHEME } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel } from '../core/galaxy/GalaxyModel';
 import { hexAdd, hexDistance, hexToWorld } from '../core/hex/Hex';
@@ -20,7 +20,6 @@ import { SectorOverlayLayer } from '../render/map/SectorOverlayLayer';
 import { SelectionLayer } from '../render/map/SelectionLayer';
 import { TerritoryLayer } from '../render/map/TerritoryLayer';
 import { createDefaultShipFactory } from '../render/ships/defaultRegistries';
-import { formatDuration } from '../core/fleet/Fleet';
 import { Hud } from '../ui/Hud';
 import { StarInfoPanel } from '../ui/StarInfoPanel';
 import { TopBar } from '../ui/TopBar';
@@ -56,7 +55,7 @@ async function bootstrap(): Promise<void> {
 
   const fleets = initialFleets(galaxy, world, identity.displayName);
   const store = new Store<GameState>({
-    day: 0, speed: 1, empire, design: DEFAULT_DESIGN, hiddenTraits: [], home: world.home,
+    turn: 1, empire, design: DEFAULT_DESIGN, hiddenTraits: [], home: world.home,
     selected: null, explored: {}, fleets, contact: null, playerName: identity.displayName, log: [],
   });
 
@@ -76,7 +75,7 @@ async function bootstrap(): Promise<void> {
   const hexGrid = map.layers.add(new HexGridLayer(galaxy.params.radius));
   map.layers.add(new NearStarLayer(galaxy));
   const selection = map.layers.add(new SelectionLayer());
-  const fleetLayer = map.layers.add(new FleetLayer(factory, formatDuration));
+  const fleetLayer = map.layers.add(new FleetLayer(factory, formatTurns));
 
   const topBar = new TopBar(store, controller, identity.displayName);
   const hud = new Hud();
@@ -104,13 +103,13 @@ async function bootstrap(): Promise<void> {
   controller.select(world.home);
   const panel = params.get('panel') as PanelId | null;
   if (panel && panel in panels) controller.openPanel(panel);
-  if (params.get('paused')) controller.setSpeed(0);
 
   window.addEventListener('keydown', (e) => {
     if ((e.target as HTMLElement).tagName === 'INPUT') return;
     if (e.key === 'g' || e.key === 'G') controller.toggleView();
     if (e.key === 'Escape') controller.select(null);
     if (e.key === 'h' || e.key === 'H') controller.flyTo(world.home, true);
+    if (e.key === 'Enter') controller.endTurn();
   });
   map.start();
   if (import.meta.env.DEV) Object.assign(window, { falchion: controller });
@@ -122,14 +121,14 @@ function initialFleets(galaxy: GalaxyModel, world: ReturnType<typeof createMockW
   const vossk = world.neighbours.find((n) => n.name === 'Vossk Hegemony')!;
   const arrakai = world.neighbours.find((n) => n.name === 'House Arrakai')!;
   return [
-    { id: 'scout-1', name: 'Scout Wing I', owner: player, color: '#5dff9b', movement: planMovement(world.home.hex, target.hex, -3, 2),
+    { id: 'scout-1', name: 'Scout Wing I', owner: player, color: '#5dff9b', movement: planMovement(world.home.hex, target.hex, -2, 2),
       design: { ...DEFAULT_DESIGN, name: 'Scout', seed: 7 } },
-    // Nova's survey fleet is heading to the same star: contact (lockstep) when they meet.
-    { id: 'nova-1', name: 'Nova Survey Group', owner: 'Nova Collective', color: '#4fd1ff', movement: planMovement(nova.home.hex, target.hex, 12 - hexDistance(nova.home.hex, target.hex) / 3.5, 3.5),
+    // Nova's survey fleet is heading to the same star: contact (lockstep) a few turns in.
+    { id: 'nova-1', name: 'Nova Survey Group', owner: 'Nova Collective', color: '#4fd1ff', movement: planMovement(nova.home.hex, target.hex, 7 - travelTurns(hexDistance(nova.home.hex, target.hex), 3), 3),
       design: { ...DEFAULT_DESIGN, name: 'Nova', style: 'geometric', seed: 31, colors: { primary: '#e8f6ff', secondary: '#1b4b6b', accent: '#4fd1ff' } } },
-    { id: 'vossk-1', name: 'Vossk Raiders', owner: 'alien:Vossk', color: '#ff5d5d', movement: planMovement(vossk.home.hex, world.home.hex, -10, 1.5),
+    { id: 'vossk-1', name: 'Vossk Raiders', owner: 'alien:Vossk', color: '#ff5d5d', movement: planMovement(vossk.home.hex, world.home.hex, -10, 2),
       design: { ...DEFAULT_DESIGN, name: 'Vossk', style: 'organic', seed: 66, colors: { primary: '#5a1f1f', secondary: '#2a0d0d', accent: '#ff3b3b' }, weapons: 4 } },
-    { id: 'arrakai-1', name: 'Arrakai Expedition', owner: 'House Arrakai', color: '#c792ea', movement: planMovement(arrakai.home.hex, world.home.hex, -100, 2.5),
+    { id: 'arrakai-1', name: 'Arrakai Expedition', owner: 'House Arrakai', color: '#c792ea', movement: planMovement(arrakai.home.hex, world.home.hex, -100, 3),
       design: { ...DEFAULT_DESIGN, name: 'Arrakai', style: 'classic', seed: 12, colors: { primary: '#f2f2f2', secondary: '#c9a227', accent: '#7ad7ff' } } },
   ];
 }

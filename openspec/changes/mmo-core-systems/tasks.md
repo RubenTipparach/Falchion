@@ -7,7 +7,7 @@
 
 ## 2. Time
 
-- [ ] 2.1 Implement `AsyncTimeAuthority` scheduling; verify `asyncTime.test.ts` offline arrival
+- [ ] 2.1 Implement `WorldTurnAuthority` (scheduled world turns); verify `worldTurn.test.ts` offline arrival
 - [ ] 2.2 Implement contact detection and `LockstepTimeAuthority`; verify `lockstep.test.ts` (open, timeout, close)
 
 ## 3. Combat and coexistence

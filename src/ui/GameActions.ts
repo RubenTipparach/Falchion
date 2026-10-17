@@ -14,7 +14,7 @@ export interface GameActions {
   grantShards(nodeId: string, sourceId: string, amount: number): void;
   setDesign(design: ShipDesign): void;
   toggleTrait(traitId: string): void;
-  setSpeed(daysPerSecond: number): void;
+  endTurn(): void;
   openPanel(id: PanelId): void;
 }
 

@@ -37,7 +37,9 @@ button { font-family: inherit; color: inherit; }
 .resources { display: flex; gap: 12px; font: 12px var(--mono); }
 .res { color: #bcd0ee; }
 .clock { display: flex; align-items: center; gap: 4px; font: 12px var(--mono); }
-.clock .date { margin-right: 6px; color: var(--gold); }
+.clock .date { margin-right: 8px; color: var(--gold); }
+.btn.end-turn { background: linear-gradient(180deg, #2f7a4a, #1f5a35); border-color: #5dff9b; font-weight: 600; }
+.btn.end-turn.lockstep { background: linear-gradient(180deg, #5b3fb0, #3f2a80); border-color: #9a7bff; }
 .nav { display: flex; gap: 6px; margin-left: auto; }
 .identity { font-size: 12px; display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 14px; background: #5865f222; border: 1px solid #5865f288; }
 .identity .discord { color: #8b95ff; }
@@ -172,6 +174,6 @@ input[type='range'] { accent-color: var(--accent); }
 .inventory { margin-top: 14px; border-top: 1px solid var(--line); }
 
 @media (max-width: 900px) {
-  .resources, .clock .chip { display: none; }
+  .resources { display: none; }
   .star-card { width: calc(100vw - 28px); top: auto; bottom: 90px; }
 }

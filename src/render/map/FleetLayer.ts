@@ -78,7 +78,8 @@ interface FleetVisual {
   readonly end: THREE.Vector3;
   /** Displayed progress; follows the continuous journey, easing over reroutes. */
   shown: number;
-  readonly heading: number;
+  /** Direction of travel (or, holding station, the way it last faced). */
+  heading: number;
   readonly modelLength: number;
   readonly parkPhase: number;
   /** Station-keeping offset from the star (park orbit or the planet being surveyed), eased. */
@@ -90,6 +91,17 @@ interface FleetVisual {
    * course instead of jumping.
    */
   readonly carry: THREE.Vector3;
+  /** The way the ship faces now; it turns toward where it wants to face at TURN_RATE. */
+  yaw: number;
+}
+
+/** How fast a ship turns to a new heading, in radians per second. */
+const TURN_RATE = 1.4;
+
+/** Step an angle toward a target by at most `max`, the short way round. */
+function turnToward(from: number, to: number, max: number): number {
+  const diff = Math.atan2(Math.sin(to - from), Math.cos(to - from));
+  return Math.abs(diff) <= max ? to : from + Math.sign(diff) * max;
 }
 
 /**
@@ -240,6 +252,13 @@ export class FleetLayer implements MapLayer {
       if (existing) this.removeVisual(f.id, existing);
       const v = this.createVisual(f);
       if (was) v.carry.subVectors(was, v.root.position);
+      // New orders: the ship turns onto its new heading from the way it was facing.
+      if (existing) {
+        v.yaw = existing.yaw;
+        v.model.group.rotation.y = v.yaw;
+        // Orders to stay put keep the ship facing the way it was.
+        if (v.start.distanceToSquared(v.end) < 1e-12) v.heading = existing.yaw;
+      }
       this.visuals.set(f.id, v);
       if (f.id === this.selectedId) this.applyOutline();
     }
@@ -274,6 +293,7 @@ export class FleetLayer implements MapLayer {
       // Exactly where the ship is at this moment: no easing, so it glides at a steady speed
       // (easing toward a moving target and snapping when close made it judder up close).
       v.shown = progressAtTime(v.fleet.movement, this.time);
+      let want = v.heading;
       v.root.position.lerpVectors(v.start, v.end, v.shown);
       // Up close, a fleet on station parks in a slow orbit outside the planets instead of
       // sitting inside the star, or flies to the planet it is surveying, gliding between them.
@@ -285,11 +305,12 @@ export class FleetLayer implements MapLayer {
         if (!v.stationSet) { v.station.copy(target); v.stationSet = true; } else v.station.lerp(target, glide);
         v.root.position.x += v.station.x * park;
         v.root.position.z += v.station.z * park;
-        v.model.group.rotation.y = survey ? Math.atan2(target.x - v.station.x, target.z - v.station.z) || v.heading : v.heading + (-a - v.heading) * park;
+        want = survey ? Math.atan2(target.x - v.station.x, target.z - v.station.z) || v.heading : v.heading + (-a - v.heading) * park;
       } else {
         v.stationSet = false;
-        v.model.group.rotation.y = v.heading;
       }
+      v.yaw = turnToward(v.yaw, want, TURN_RATE * dt);
+      v.model.group.rotation.y = v.yaw;
       if (v.carry.lengthSq() > 0) {
         v.carry.multiplyScalar(Math.exp(-2.5 * dt));
         if (v.carry.lengthSq() < 1e-12) v.carry.set(0, 0, 0);
@@ -301,7 +322,8 @@ export class FleetLayer implements MapLayer {
       const mat = v.line.material as THREE.LineDashedMaterial;
       if (mat.dashSize !== dash) { mat.dashSize = dash; mat.gapSize = dash * 0.7; }
       mat.opacity = routeOpacity;
-      v.line.visible = routeOpacity > 0.01;
+      // The nav line shows the way still to go: gone once the fleet has arrived.
+      v.line.visible = routeOpacity > 0.01 && v.shown < 1;
       const near = !local || Math.hypot(v.root.position.x - fx, v.root.position.z - fz) < Math.max(1, view.visibleWidth * 1.5);
       v.root.visible = near;
       // Fleet names can come from other players: always escaped.
@@ -354,7 +376,7 @@ export class FleetLayer implements MapLayer {
     // Spread fleets parked at the same star around the orbit (stable per fleet).
     let h = 0;
     for (const ch of fleet.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return { root, model, line, label, fleet, start, end, heading, modelLength, parkPhase: (h % 360) * (Math.PI / 180), shown: progressAtTime(fleet.movement, this.time), station: new THREE.Vector3(), stationSet: false, carry: new THREE.Vector3() };
+    return { root, model, line, label, fleet, start, end, heading, modelLength, parkPhase: (h % 360) * (Math.PI / 180), shown: progressAtTime(fleet.movement, this.time), station: new THREE.Vector3(), stationSet: false, carry: new THREE.Vector3(), yaw: heading };
   }
 
   private removeVisual(id: string, v: FleetVisual): void {

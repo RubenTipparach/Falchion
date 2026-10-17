@@ -47,9 +47,9 @@ export class ExplorePanel extends Drawer {
     this.body.append(
       h('div', { class: 'row-between' },
         h('p', { class: 'muted' }, `System: `, h('b', {}, star.name), star.id === s.home.id ? ' (home)' : '', ' — select another star on the map to explore it.'),
-        locateButton(`Locate ${star.name}`, () => this.actions.flyTo(star, true))),
+        locateButton(`Locate ${star.name}`, (closeUp) => this.actions.flyTo(star, closeUp))),
       groups.length
-        ? h('div', {}, ...groups.map((g) => h('div', { class: 'group-card' }, h('header', {}, icon('fleet'), h('h4', {}, g.name), locateButton(`Locate ${g.name}`, () => this.actions.focusFleet(g.id))), storesView(g))))
+        ? h('div', {}, ...groups.map((g) => h('div', { class: 'group-card' }, h('header', {}, icon('fleet'), h('h4', {}, g.name), locateButton(`Locate ${g.name}`, (closeUp) => this.actions.focusFleet(g.id, closeUp))), storesView(g))))
         : h('div', { class: 'notice warn' }, `No ships on station in ${star.name}. Exploring needs a ship here with supply; survey ships carry the most.`,
           h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => { this.actions.select(star); this.actions.openPanel('fleets'); } }, icon('fleet'), ' Send a fleet here'))),
       h('div', { class: 'loot-bar' },

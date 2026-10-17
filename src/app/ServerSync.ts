@@ -56,6 +56,7 @@ export function othersOnMap(players: readonly OtherPlayer[]): { fleets: FleetVie
 export class ServerSaves {
   private lastPush = 0;
   private pending: ReturnType<typeof setTimeout> | null = null;
+  private latest: string | null = null;
 
   async load(): Promise<SavedGame | null> {
     try {
@@ -68,15 +69,29 @@ export class ServerSaves {
 
   /** Push at most every 10 s (the latest state wins). */
   push(save: object, pub: PublicEmpire): void {
-    const send = () => {
-      this.pending = null;
-      this.lastPush = Date.now();
-      fetch('./api/save', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ save, public: pub }) })
-        .catch(() => { /* offline: the local save still has it; the next push retries */ });
-    };
+    this.latest = JSON.stringify({ save, public: pub });
     if (this.pending) clearTimeout(this.pending);
     const wait = Math.max(0, 10_000 - (Date.now() - this.lastPush));
-    this.pending = setTimeout(send, wait);
+    this.pending = setTimeout(() => this.send(false), wait);
+  }
+
+  /**
+   * Send a waiting push now: when the page is closing or reloading, or after a change that
+   * must reach other devices at once. keepalive lets the request finish after the page goes.
+   */
+  flush(): void {
+    if (this.pending) this.send(true);
+  }
+
+  private send(keepalive: boolean): void {
+    if (this.pending) clearTimeout(this.pending);
+    this.pending = null;
+    const body = this.latest;
+    if (!body) return;
+    this.lastPush = Date.now();
+    // Browsers cap keepalive bodies at 64 KB; a larger save goes as a normal request.
+    fetch('./api/save', { method: 'PUT', credentials: 'same-origin', keepalive: keepalive && body.length < 60_000, headers: { 'Content-Type': 'application/json' }, body })
+      .catch(() => { /* offline: the local save still has it; the next push retries */ });
   }
 
   async players(): Promise<OtherPlayer[]> {

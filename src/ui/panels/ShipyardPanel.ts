@@ -166,7 +166,7 @@ export class ShipyardPanel extends Drawer {
         h('span', { class: 'roster' }, `In service: ${s.economy.roster[c.id] ?? 0}`)),
       h('p', { class: 'muted' }, c.blurb, ' ', c.doctrine !== 'civilian' ? doc.summary : ''),
       h('div', { class: 'stat-row' },
-        stat('Hull', c.hull), stat('Attack', c.attack), stat('Speed', `${c.speed} ly/min`),
+        stat('Hull', c.hull), stat('Attack', c.attack),
         c.troops ? stat('Troops', c.troops) : null,
         c.mines ? stat('Mines', `+${3} ${RESOURCES.find((r) => r.id === c.mines)!.short}/yr`) : null,
         stat('Supply', logisticsOf(c).supply), logisticsOf(c).ammo ? stat('Ammo', `${logisticsOf(c).ammo} (${logisticsOf(c).ammoUse}/battle)`) : null),

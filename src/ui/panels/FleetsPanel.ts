@@ -53,7 +53,7 @@ export class FleetsPanel extends Drawer {
     return h('section', { class: 'group-card' },
       h('header', {}, icon('fleet'), h('h4', {}, g.name),
         g.friendly ? h('span', { class: 'tag good', title: 'Refills supply and ammunition every year' }, 'RESUPPLYING') : null,
-        locateButton(`Locate ${g.name}`, () => this.actions.focusFleet(g.id))),
+        locateButton(`Locate ${g.name}`, (closeUp) => this.actions.focusFleet(g.id, closeUp))),
       h('div', { class: 'where' }, this.where(g)),
       h('div', { class: 'small' }, shipsText(g.ships)),
       storesView(g),
@@ -90,7 +90,7 @@ export class FleetsPanel extends Drawer {
     });
     updatePreview();
     return h('section', { class: 'group-card' },
-      h('header', {}, icon('home'), h('h4', {}, dock.name), h('span', { class: 'tag good' }, 'RESUPPLYING'), locateButton('Locate home', () => this.actions.focusFleet('dock'))),
+      h('header', {}, icon('home'), h('h4', {}, dock.name), h('span', { class: 'tag good' }, 'RESUPPLYING'), locateButton('Locate home', (closeUp) => this.actions.focusFleet('dock', closeUp))),
       h('div', { class: 'where' }, `${this.where(dock)} · ${shipsText(ships)}`),
       storesView(dock),
       h('h4', {}, 'Form a fleet'),

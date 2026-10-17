@@ -17,6 +17,31 @@ const PARK_ORBIT = 0.046;
 /** A ship's real length (ly): smaller than the smallest planet. */
 const SHIP_LENGTH = 0.0025;
 
+/**
+ * Selection outline: the ship's own geometry drawn again behind it (back faces), pushed out
+ * along its normals in screen space so the rim stays a few pixels wide at any zoom.
+ */
+function outlineMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color('#e6b450') }, uWidth: { value: 3 }, uRes: { value: new THREE.Vector2(1, 1) } },
+    vertexShader: `
+      uniform float uWidth;
+      uniform vec2 uRes;
+      void main() {
+        vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vec3 n = normalize(normalMatrix * normal);
+        vec2 dir = (projectionMatrix * vec4(n, 0.0)).xy;
+        float len = length(dir);
+        if (len > 1e-5) clip.xy += dir / len * uWidth * 2.0 / uRes * clip.w;
+        gl_Position = clip;
+      }`,
+    fragmentShader: `
+      uniform vec3 uColor;
+      void main() { gl_FragColor = vec4(uColor, 1.0); }`,
+    side: THREE.BackSide,
+  });
+}
+
 export interface FleetView {
   readonly id: string;
   readonly name: string;
@@ -62,19 +87,43 @@ export class FleetLayer implements MapLayer {
     private readonly onSelect: (fleetId: string) => void = () => {},
   ) {}
 
-  private origin = { x: 0, z: 0 };
   private selectedId: string | null = null;
+  private readonly outline = outlineMaterial();
+  private outlined: THREE.Mesh[] = [];
 
-  /** Highlight one fleet (its label) as selected. */
+  /** Highlight one fleet as selected: its label, and an outline around its ship. */
   setSelected(id: string | null): void {
     this.selectedId = id;
+    this.applyOutline();
+  }
+
+  /** Outline the selected fleet's ship (again after its model is rebuilt) in its empire colour. */
+  private applyOutline(): void {
+    for (const o of this.outlined) o.removeFromParent();
+    this.outlined = [];
+    const v = this.selectedId ? this.visuals.get(this.selectedId) : undefined;
+    if (!v) return;
+    this.outline.uniforms.uColor.value.set(v.fleet.color);
+    const meshes: THREE.Mesh[] = [];
+    v.model.group.traverse((o) => {
+      // Solid hull parts only: additive glows and sprites would outline as blobs.
+      if (o instanceof THREE.Mesh && o.geometry.getAttribute('normal') && !(o.material as THREE.Material).transparent) meshes.push(o);
+    });
+    for (const m of meshes) {
+      const rim = new THREE.Mesh(m.geometry, this.outline);
+      rim.renderOrder = m.renderOrder;
+      m.add(rim);
+      this.outlined.push(rim);
+    }
   }
 
   /** Absolute galaxy position of a fleet's ship right now (for the camera to follow). */
   positionOf(id: string): THREE.Vector3 | null {
     const v = this.visuals.get(id);
     if (!v) return null;
-    return v.root.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(this.origin.x, 0, this.origin.z));
+    // Ship roots hold absolute galaxy coordinates (this layer sits inside the origin-shifted world),
+    // so no origin arithmetic: mixing in a stale origin made the camera chase a phantom after a rebase.
+    return v.root.position.clone();
   }
 
   /** Fleet whose ship lies within `maxAngle` (radians) of a pointer ray, closest in angle. */
@@ -100,14 +149,15 @@ export class FleetLayer implements MapLayer {
     for (const [id, v] of this.visuals) if (!ids.has(id)) this.removeVisual(id, v);
     for (const f of fleets) {
       const existing = this.visuals.get(f.id);
-      if (existing && existing.fleet.movement === f.movement && existing.fleet.design === f.design) { existing.fleet = f; continue; }
+      if (existing && existing.fleet.movement === f.movement && existing.fleet.design === f.design && existing.fleet.color === f.color) { existing.fleet = f; continue; }
       if (existing) this.removeVisual(f.id, existing);
       this.visuals.set(f.id, this.createVisual(f));
+      if (f.id === this.selectedId) this.applyOutline();
     }
   }
 
   update(view: ViewState): void {
-    this.origin = view.origin;
+    this.outline.uniforms.uRes.value.set(view.viewportHeight * view.camera.aspect, view.viewportHeight);
     // Ships have a real length (smaller than a planet) and only grow on screen as a
     // marker when zoomed out: never bigger than about 1% of the view.
     const length = Math.max(SHIP_LENGTH, view.visibleWidth * 0.01);
@@ -184,6 +234,8 @@ export class FleetLayer implements MapLayer {
     const label = new CSS2DObject(el);
     label.center.set(-0.15, 1.2);
     root.add(label);
+    // Placed at once, so a rebuilt fleet (new orders) never reports the origin as its position.
+    root.position.lerpVectors(start, end, progressAtTime(fleet.movement, this.time));
     this.object3d.add(root, line);
     // Spread fleets parked at the same star around the orbit (stable per fleet).
     let h = 0;
@@ -203,5 +255,6 @@ export class FleetLayer implements MapLayer {
 
   dispose(): void {
     for (const [id, v] of this.visuals) this.removeVisual(id, v);
+    this.outline.dispose();
   }
 }

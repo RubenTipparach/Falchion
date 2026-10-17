@@ -89,7 +89,8 @@ export interface GameActions {
   returnHome(fleetId: string): void;
   /** Merge a fleet at home back into the dock. */
   dockFleet(fleetId: string): void;
-  focusFleet(fleetId: string): void;
+  /** Select and centre on a fleet; closeUp also zooms in to the ship. */
+  focusFleet(fleetId: string, closeUp?: boolean): void;
   /** Select a fleet and follow its ship with the camera; null clears. */
   selectFleet(fleetId: string | null): void;
   /** Standing orders a fleet follows on its own. */

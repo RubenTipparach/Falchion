@@ -10,7 +10,7 @@ in the same galaxy as you:
 - Discord shares only the player's **user id, display name and avatar**. Falchion asks for
   the `identify` scope and nothing else: no email, no servers, no messages.
 
-Without sign-in (or on GitHub Pages, which has no server) the game runs as a **guest**,
+Without sign-in the game runs as a **guest**,
 saved in that browser only.
 
 You need to do this once. It takes about five minutes.
@@ -145,7 +145,7 @@ Saves go to `./data/` (ignored by git).
 
 | You see | Fix |
 |---|---|
-| No sign-in screen, the game starts as a guest | Sign-in is off: check `/api/info` shows `"discord": true` and the three secrets are set. GitHub Pages never has sign-in; use the Fly URL. |
+| No sign-in screen, the game starts as a guest | Sign-in is off: check `/api/info` shows `"discord": true` and the three secrets are set. Use the Fly URL (https://falchion.fly.dev). |
 | Discord says **Invalid OAuth2 redirect_uri** | The redirect in step 1.5 must match `https://falchion.fly.dev/auth/discord/callback` exactly. |
 | "Sign-in failed: the request did not match" | The sign-in took more than 10 minutes, or cookies are blocked. Try again. |
 | Everyone was signed out | `SESSION_SECRET` changed. Sign in again; saves are kept. |

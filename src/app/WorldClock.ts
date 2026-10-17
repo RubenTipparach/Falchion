@@ -17,15 +17,19 @@ export interface WorldClock {
   fraction(): number;
   /** Calls back with the new tick whenever the world advances. */
   onTick(fn: (tick: number) => void): void;
+  /** Calls back once when the server reports a different build than this page loaded with. */
+  onNewVersion(fn: (version: string) => void): void;
 }
 
 export const CLOCK: ClockConfig = clockConfig;
 
 class Clock implements WorldClock {
   private readonly listeners = new Set<(tick: number) => void>();
+  private readonly versionListeners = new Set<(version: string) => void>();
   private last: number;
+  private newVersionSeen = false;
 
-  constructor(readonly config: ClockConfig, readonly source: 'server' | 'local', private offsetMs = 0) {
+  constructor(readonly config: ClockConfig, readonly source: 'server' | 'local', private offsetMs = 0, private readonly version: string | null = null) {
     this.last = this.tick();
     this.scheduleLocal();
   }
@@ -34,9 +38,14 @@ class Clock implements WorldClock {
   tick(): number { return tickAt(this.now(), this.config); }
   fraction(): number { return tickFraction(this.now(), this.config); }
   onTick(fn: (tick: number) => void): void { this.listeners.add(fn); }
+  onNewVersion(fn: (version: string) => void): void { this.versionListeners.add(fn); }
 
-  /** Server-pushed tick (also corrects skew). */
-  serverTick(tick: number, serverNow: number): void {
+  /** Server-pushed tick (also corrects skew, and notices a redeployed server). */
+  serverTick(tick: number, serverNow: number, version?: string): void {
+    if (this.version && version && version !== this.version && !this.newVersionSeen) {
+      this.newVersionSeen = true;
+      this.versionListeners.forEach((l) => l(version));
+    }
     // Small skew changes are slewed in so moving ships don't hop once a minute.
     const offset = serverNow - Date.now();
     this.offsetMs = Math.abs(offset - this.offsetMs) > 1000 ? offset : this.offsetMs + (offset - this.offsetMs) * 0.2;
@@ -67,13 +76,13 @@ export async function connectWorldClock(): Promise<WorldClock> {
     clearTimeout(timer);
     const info = res.ok && res.headers.get('content-type')?.includes('json') ? await res.json() : null;
     if (info && info.msPerTick === CLOCK.msPerTick && info.epochMs === CLOCK.epochMs) {
-      const clock = new Clock(CLOCK, 'server', info.serverNow - Date.now());
+      const clock = new Clock(CLOCK, 'server', info.serverNow - Date.now(), typeof info.version === 'string' ? info.version : null);
       if (typeof EventSource !== 'undefined') {
         const listen = () => {
           const es = new EventSource('./api/ticks');
           es.addEventListener('tick', (e) => {
             const d = JSON.parse((e as MessageEvent).data);
-            clock.serverTick(d.tick, d.serverNow);
+            clock.serverTick(d.tick, d.serverNow, d.version);
           });
           // The browser retries dropped connections itself, but gives up on an error response:
           // reopen then. The local backstop keeps the year moving meanwhile.

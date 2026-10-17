@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hex, hexDistance } from '../hex/Hex';
-import { arrivalTurn, formatTurns, hexAt, planMovement, progressAt, progressAtTime, routeIndexAt, travelTurns } from './Fleet';
+import { arrivalTurn, formatTurns, hexAt, planMovement, progressAt, progressAtTime, retime, routeIndexAt, travelTurns } from './Fleet';
 
 describe('turn-based fleet movement', () => {
   it('route has distance+1 adjacent hexes', () => {
@@ -42,5 +42,24 @@ describe('turn-based fleet movement', () => {
     expect(progressAtTime(m, 1)).toBeCloseTo(progressAt(m, 1));
     expect(progressAtTime(m, 1.5)).toBeCloseTo(0.3);
     expect(progressAtTime(m, 99)).toBe(1);
+  });
+});
+
+describe('retime', () => {
+  const a = { q: 0, r: 0 }, b = { q: 10, r: 0 };
+  it('continues a journey from the hex it has reached, at the new speed', () => {
+    const fast = planMovement(a, b, 0, 4);
+    const slow = retime(fast, 1, 1);
+    expect(slow.route[0]).toEqual({ q: 4, r: 0 });
+    expect(slow.departTurn).toBe(1);
+    expect(arrivalTurn(slow)).toBe(7);
+  });
+  it('keeps an arrived fleet where it is and leaves matching speeds alone', () => {
+    const done = planMovement(a, b, 0, 4);
+    const parked = retime(done, 20, 1);
+    expect(parked.route).toEqual([b]);
+    expect(arrivalTurn(parked)).toBe(20);
+    const same = planMovement(a, b, 0, 1);
+    expect(retime(same, 3, 1)).toBe(same);
   });
 });

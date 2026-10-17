@@ -12,9 +12,15 @@ import { icon } from './icons';
 
 const nameOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)?.name ?? id;
 
-/** Small icon button that flies the camera somewhere. */
-export function locateButton(title: string, onclick: () => void): HTMLElement {
-  return h('button', { class: 'icon-btn locate', title, 'aria-label': title, onclick: (e: Event) => { e.stopPropagation(); onclick(); } }, icon('locate'));
+/**
+ * Small icon button that moves the camera to something: a click centres on it without
+ * zooming all the way in; a double-click (or double-tap) also dives in close.
+ */
+export function locateButton(title: string, go: (closeUp: boolean) => void): HTMLElement {
+  const label = `${title} (double-click to zoom in)`;
+  return h('button', { class: 'icon-btn locate', title: label, 'aria-label': label,
+    onclick: (e: Event) => { e.stopPropagation(); go(false); },
+    ondblclick: (e: Event) => { e.stopPropagation(); go(true); } }, icon('locate'));
 }
 
 /** Supply and ammunition gauges for a group. */

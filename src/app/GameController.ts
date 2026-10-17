@@ -10,7 +10,7 @@ import { CombatBonuses, resolveAssault, resolveBattle, Squadron } from '../core/
 import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn } from '../core/economy/Economy';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
 import { addHaul, Haul, planetCache } from '../core/encounters/PlanetCache';
-import { arrivalTurn, hexAt, planMovement, travelTurns } from '../core/fleet/Fleet';
+import { arrivalTurn, hexAt, planMovement, retime, travelTurns } from '../core/fleet/Fleet';
 import { catchUpTicks, formatDuration } from '../core/time/WorldTime';
 import { CLOCK, WorldClock } from './WorldClock';
 import type { SaveGame } from './SaveGame';
@@ -69,6 +69,10 @@ export interface ViewDeps {
 const SYSTEM_ALTITUDE = 0.45;
 /** Camera altitude (ly) when following a ship: close enough to see the hull. */
 const FLEET_ALTITUDE = 0.03;
+/** Locate buttons pan to their target and come no closer than this (a regional view); double-click dives in. */
+const LOCATE_ALTITUDE = 48;
+/** Two clicks on the same thing within this many ms are a double-click. */
+const DOUBLE_CLICK_MS = 400;
 const BASE_SPEED = 1; // ly per year (one year = one minute)
 /** At most a week of missed years is simulated on return; older years only move fleets. */
 const MAX_CATCH_UP = 7 * 24 * 60;
@@ -155,16 +159,13 @@ export class GameController implements GameActions, GameQueries {
 
   describe = (star: StarSystem): StarDetails => {
     const dist = hexDistance(this.deps.world.home.hex, star.hex);
-    // Fleets travel at their slowest ship's speed: show the range for the hulls you own.
-    const owned = Object.entries(this.state.economy.roster).filter(([, n]) => n > 0).map(([id]) => this.speedOf([{ classId: id, count: 1 }]));
-    const fastest = Math.max(this.fleetSpeed(), ...owned);
+    // Every fleet travels at the empire's speed: 1 ly a year to start, plus drive research.
     const speed = this.fleetSpeed();
     const owner = this.deps.world.claims.find((c) => c.colonies.some((col) => hexDistance(col.hex, star.hex) <= col.radius));
     return {
       address: formatAddress(addressOf(star.hex)),
       distanceFromHome: dist,
-      travel: dist === 0 ? '—' : fastest > speed ? `${formatDuration(travelTurns(dist, fastest), CLOCK)}–${formatDuration(travelTurns(dist, speed), CLOCK)}` : formatDuration(travelTurns(dist, speed), CLOCK),
-      fastest,
+      travel: dist === 0 ? '—' : formatDuration(travelTurns(dist, speed), CLOCK),
       speed,
       planets: this.planets(star),
       owner: owner?.name ?? null,
@@ -321,9 +322,23 @@ export class GameController implements GameActions, GameQueries {
     this.view.map.controller.zoom.setTargetAltitude(altitude);
   }
 
-  /** Fly to a star; closeUp dives into its system view. */
+  /**
+   * Fly to a star. closeUp dives into its system view; otherwise the camera pans there,
+   * coming in only as far as a regional view when it is zoomed far out.
+   */
   flyTo(star: StarSystem, closeUp = false): void {
-    this.view.map.controller.flyTo(star.position.x, star.position.z, closeUp ? SYSTEM_ALTITUDE : undefined);
+    const cam = this.view.map.controller;
+    cam.flyTo(star.position.x, star.position.z, closeUp ? SYSTEM_ALTITUDE : cam.zoom.targetAltitude > LOCATE_ALTITUDE ? LOCATE_ALTITUDE : undefined);
+  }
+
+  /** Every fleet moves at its empire's speed (1 ly a year to start): re-time saved journeys made at other speeds. */
+  retimeFleets(): void {
+    const s = this.state;
+    const fleets = s.fleets.map((f) => {
+      const movement = retime(f.movement, s.turn, s.loadouts[f.id] ? this.fleetSpeed() : BASE_SPEED);
+      return movement === f.movement ? f : { ...f, movement };
+    });
+    if (fleets.some((f, i) => f !== s.fleets[i])) this.deps.store.update({ fleets });
   }
 
   select(star: StarSystem | null): void {
@@ -370,10 +385,6 @@ export class GameController implements GameActions, GameQueries {
 
   // ── Commands: fleets ───────────────────────────────────────────────
 
-  private speedOf(ships: readonly Squadron[]): number {
-    const slowest = Math.min(...ships.map((x) => this.classById.get(x.classId)?.speed ?? BASE_SPEED));
-    return Math.max(1, (Number.isFinite(slowest) ? slowest : BASE_SPEED) + this.bonus('speed'));
-  }
 
   private designOf(ships: readonly Squadron[]): ShipDesign {
     const lead = [...ships].sort((a, b) => (this.classById.get(b.classId)?.hull ?? 0) - (this.classById.get(a.classId)?.hull ?? 0))[0];
@@ -388,7 +399,7 @@ export class GameController implements GameActions, GameQueries {
     const kind = wanted.every((x) => isSurveyClass(this.classById.get(x.classId)!)) ? 'Survey Group' : wanted.some((x) => isWarship(this.classById.get(x.classId)!)) ? 'Task Force' : 'Flotilla';
     const id = `player-${n}-t${s.turn}`;
     const label = name ?? `${kind} ${n}`;
-    const speed = this.speedOf(wanted);
+    const speed = this.fleetSpeed();
     const fleet = { id, name: label, owner: s.playerName, color: '#e6b450', movement: planMovement(s.home.hex, to.hex, s.turn, speed), design: this.designOf(wanted) };
     // Ships leave with full holds: the dock's spending this turn stays with the dock.
     // Survey groups explore and come home for supply on their own by default.
@@ -404,7 +415,7 @@ export class GameController implements GameActions, GameQueries {
     if (!f || !l) return;
     const from = hexAt(f.movement, s.turn);
     if (hexEquals(from, to.hex)) return;
-    const speed = this.speedOf(l.ships);
+    const speed = this.fleetSpeed();
     const moved = { ...f, movement: planMovement(from, to.hex, s.turn, speed) };
     this.deps.store.update({ fleets: s.fleets.map((x) => (x.id === fleetId ? moved : x)) });
     if (!quiet) this.dispatch(`${f.name} sets course for ${to.name} (${formatDuration(travelTurns(hexDistance(from, to.hex), speed), CLOCK)})`);
@@ -429,13 +440,14 @@ export class GameController implements GameActions, GameQueries {
     this.dispatch(`${f.name} docks at ${s.home.name}`);
   }
 
-  focusFleet(fleetId: string): void {
-    if (fleetId === 'dock') return this.flyTo(this.state.home, true);
-    this.selectFleet(fleetId);
+  /** Locate a fleet: select and centre on it; closeUp also zooms in to the ship. */
+  focusFleet(fleetId: string, closeUp = false): void {
+    if (fleetId === 'dock') return this.flyTo(this.state.home, closeUp);
+    this.selectFleet(fleetId, closeUp);
   }
 
   /** Select a fleet and keep the camera centred on its ship (right-drag orbits it); null clears. */
-  selectFleet(fleetId: string | null): void {
+  selectFleet(fleetId: string | null, zoomIn = false): void {
     const cam = this.view.map.controller;
     if (!fleetId) {
       if (this.state.selectedFleet) {
@@ -449,7 +461,8 @@ export class GameController implements GameActions, GameQueries {
     if (this.state.selectedPlanet) { this.deps.store.update({ selectedPlanet: null }); this.view.system.setSelected(null); }
     this.deps.store.update({ selectedFleet: fleetId });
     this.view.fleets.setSelected(fleetId);
-    cam.followTarget(() => this.view.fleets.positionOf(fleetId), FLEET_ALTITUDE);
+    // Selecting keeps the zoom; only a double-click or the Zoom button closes in on the ship.
+    cam.followTarget(() => this.view.fleets.positionOf(fleetId), zoomIn ? FLEET_ALTITUDE : undefined);
   }
 
   fleetInfo = (fleetId: string): FleetInfo | null => {
@@ -463,7 +476,8 @@ export class GameController implements GameActions, GameQueries {
       at: isStationed(m, s.turn) ? this.deps.galaxy.starAt(hexAt(m, s.turn)) : null,
       dest: this.deps.galaxy.starAt(m.route[m.route.length - 1]),
       eta: Math.max(0, arrivalTurn(m) - s.turn),
-      mine: s.fleets.some((f) => f.id === fleetId) && fleet.owner === s.playerName,
+      // Your own deployed fleets are the ones with a loadout (ships, supply, ammunition).
+      mine: !!s.loadouts[fleetId] && s.fleets.some((f) => f.id === fleetId),
     };
   };
 
@@ -974,7 +988,8 @@ export class GameController implements GameActions, GameQueries {
     const v = this.view.map.view;
     if (!v) return;
     const fleet = this.view.fleets.pick(ray);
-    if (fleet) return this.selectFleet(fleet);
+    // Click selects a ship; double-click also zooms in to it.
+    if (fleet) return this.selectFleet(fleet, this.isDoubleClick(`fleet:${fleet}`));
     if (this.state.selectedFleet) this.selectFleet(null);
     if (v.visibleWidth < SYSTEM_VIEW_WIDTH) {
       const planet = this.view.system.pick(ray);
@@ -990,26 +1005,34 @@ export class GameController implements GameActions, GameQueries {
     const reach = Math.min(6, Math.max(1, Math.round(v.visibleWidth * 0.012)));
     const star = this.deps.galaxy.nearestStar(h, reach);
     // Double-click a star to dive into its system.
-    const now = performance.now();
-    if (star && this.lastClick && this.lastClick.id === star.id && now - this.lastClick.at < 400) {
-      this.lastClick = null;
+    if (star && this.isDoubleClick(star.id)) {
       this.select(star);
       this.flyTo(star, true);
       return;
     }
-    this.lastClick = star ? { id: star.id, at: now } : null;
     this.select(star);
   };
+
+  /** Records a click on `id`; true when it is the second click on it within DOUBLE_CLICK_MS. */
+  private isDoubleClick(id: string): boolean {
+    const now = performance.now();
+    const double = !!this.lastClick && this.lastClick.id === id && now - this.lastClick.at < DOUBLE_CLICK_MS;
+    this.lastClick = double ? null : { id, at: now };
+    return double;
+  }
 
   /** RTS move order: right-click with one of your fleets selected sends it there. */
   handleRightClick = (world: THREE.Vector3): void => {
     const id = this.state.selectedFleet;
     const info = id ? this.fleetInfo(id) : null;
-    if (!id || !info?.mine) return;
+    if (!id) return;
+    if (!info?.mine) return this.dispatch(`${info?.fleet.name ?? 'That fleet'} is not yours to command`, 'bad');
+    // Orders go to the star nearest the click, searching wider the further out the view is.
     const v = this.view.map.view;
-    const reach = v ? Math.min(6, Math.max(1, Math.round(v.visibleWidth * 0.02))) : 1;
+    const reach = v ? Math.min(60, Math.max(4, Math.round(v.visibleWidth * 0.05))) : 4;
     const star = this.deps.galaxy.nearestStar(worldToHex(world.x, world.z), reach);
-    if (!star) return this.dispatch('Move orders go to a star: right-click on or near one', 'bad');
+    if (!star) return this.dispatch('No star near there: move orders go to a star', 'bad');
+    if (info.at?.id === star.id) return this.dispatch(`${info.fleet.name} is already at ${star.name}`);
     this.moveFleet(id, star);
     this.view.selection.select({ x: star.position.x, z: star.position.z });
   };

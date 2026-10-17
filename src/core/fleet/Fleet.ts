@@ -60,6 +60,17 @@ export function progressAtTime(m: FleetMovement, time: number): number {
   return Math.min(last, steps) / last;
 }
 
+/**
+ * The same journey at a new speed from `turn` on: a fleet under way continues from the hex
+ * it occupies, one that has arrived stays where it is. Unchanged when the speed matches.
+ */
+export function retime(m: FleetMovement, turn: number, speed: number): FleetMovement {
+  if (m.speed === speed) return m;
+  const dest = m.route[m.route.length - 1];
+  const t = Math.floor(turn);
+  return t >= arrivalTurn(m) ? planMovement(dest, dest, t, speed) : planMovement(hexAt(m, t), dest, t, speed);
+}
+
 export function formatTurns(turns: number): string {
   return turns === 1 ? '1 turn' : `${turns.toLocaleString('en-US')} turns`;
 }

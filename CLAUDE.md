@@ -11,8 +11,8 @@ Hex-based, at-scale 4X MMO (three.js + TypeScript, Discord integration planned).
 
 ## CI / deploy
 `.github/workflows/deploy.yml` runs on every push to every branch: typecheck, tests, spec
-validation, build and a server smoke test, then deploys to **GitHub Pages** (static client)
-and **Fly.io** (`server/`: zero-dependency Node server serving the client + `/healthz` +
+validation, build and a server smoke test, then deploys to **Fly.io**, the one and only server
+(`server/`: zero-dependency Node server serving the client + `/healthz` +
 `/api/info` + the world clock `/api/clock` and tick stream `/api/ticks`; future home of the MMO server).
 The world is realtime: one tick per minute = one game year (`server/clock.json`, shared with the client).
 The most recent push wins. The Fly job skips

@@ -19,9 +19,8 @@ export interface StarDetails {
   readonly address: string;
   readonly distanceFromHome: number;
   readonly travel: string;
+  /** Empire fleet speed (ly per year): 1 to start, raised by drive research. */
   readonly speed: number;
-  /** Fastest speed among hulls the empire owns. */
-  readonly fastest: number;
   readonly planets: readonly Planet[];
   readonly owner: string | null;
 }
@@ -61,7 +60,7 @@ export class StarInfoPanel {
       h('dl', {},
         h('dt', {}, 'Address'), h('dd', {}, d.address),
         h('dt', {}, 'From home'), h('dd', {}, `${fmt(d.distanceFromHome)} ly`),
-        h('dt', {}, 'Travel time'), h('dd', {}, d.fastest > d.speed ? `${d.travel} (${d.fastest} to ${d.speed} ly/min by hull)` : `${d.travel} at ${d.speed} ly/min`)),
+        h('dt', {}, 'Travel time'), h('dd', {}, `${d.travel} at ${d.speed} ly/min`)),
       here.length ? h('div', { class: 'here' }, h('span', { class: 'eyebrow' }, 'On station'), ...here.map((g) => h('div', { class: 'here-group' }, h('b', {}, g.name), h('div', { class: 'small muted' }, shipsText(g.ships)), storesView(g)))) : '',
       friendly && !isHome ? h('p', { class: 'small green' }, 'Friendly system: fleets here resupply and rearm.') : '',
       h('div', { class: 'planet-row' }, ...d.planets.map((p) => {
@@ -129,10 +128,11 @@ export class StarInfoPanel {
         h('div', { class: 'row orders' },
           this.orderChip(group, 'autoExplore', 'Auto-explore'),
           this.orderChip(group, 'autoReturn', 'Return to resupply')),
-        h('p', { class: 'notice' }, 'Right-click a star to send this fleet there. Right-drag to orbit the camera.'))
+        h('p', { class: 'notice' }, 'Right-click near a star to send this fleet there. Right-drag to orbit the camera.'))
         : h('p', { class: 'small muted' }, fleet.owner.startsWith('alien:') ? 'Hostile alien fleet.' : 'Another empire\'s fleet.'),
       h('div', { class: 'actions' },
-        h('button', { class: 'btn', onclick: () => this.actions.focusFleet(fleet.id) }, icon('locate'), ' Centre'),
+        h('button', { class: 'btn', title: 'Centre the camera on this fleet', onclick: () => this.actions.focusFleet(fleet.id) }, icon('locate'), ' Centre'),
+        h('button', { class: 'btn', title: 'Zoom in to the ship', onclick: () => this.actions.focusFleet(fleet.id, true) }, icon('focus'), ' Zoom'),
         info.mine && !(info.at && info.at.id === this.store.state.home.id) ? h('button', { class: 'btn', onclick: () => this.actions.returnHome(fleet.id) }, icon('home'), ' Return home') : '',
         info.mine ? h('button', { class: 'btn', onclick: () => this.actions.openPanel('fleets') }, icon('fleet'), ' Fleets') : ''),
     );

@@ -113,7 +113,8 @@ const tickAt = (ms) => Math.floor((ms - CLOCK.epochMs) / CLOCK.msPerTick);
 const tickStartMs = (tick) => CLOCK.epochMs + tick * CLOCK.msPerTick;
 export const clockInfo = (now = Date.now()) => {
   const tick = tickAt(now);
-  return { ...CLOCK, tick, serverNow: now, nextTickAt: tickStartMs(tick + 1) };
+  // version lets open clients notice a new deploy and reload.
+  return { ...CLOCK, tick, serverNow: now, nextTickAt: tickStartMs(tick + 1), version: VERSION };
 };
 
 // Server-Sent Events: every client hears each tick as it happens.

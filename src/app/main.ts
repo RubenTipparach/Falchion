@@ -206,6 +206,8 @@ async function bootstrap(): Promise<void> {
   };
   void refreshOthers();
   clock.onTick((tick) => { controller.advanceTo(tick); void refreshOthers(); });
+  // Saved journeys planned at other speeds continue at the empire's speed, then the missed years run.
+  controller.retimeFleets();
   controller.advanceTo(clock.tick());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) controller.advanceTo(clock.tick()); });
   let saveTimer = 0;
@@ -214,7 +216,16 @@ async function bootstrap(): Promise<void> {
     if (serverSaves && !saveGame.stoppedSaving) serverSaves.push(saveGame.snapshot(store.state), publicEmpire(store.state, colorFor(identity.id)));
   };
   store.subscribe(() => { clearTimeout(saveTimer); saveTimer = window.setTimeout(persist, 1500); });
-  window.addEventListener('pagehide', () => saveGame.save(store.state));
+  // Leaving or reloading: write the local save and send the server copy now, so another device
+  // (or this one after a reload) picks up exactly where this tab left off.
+  const persistNow = () => { clearTimeout(saveTimer); persist(); serverSaves?.flush(); };
+  window.addEventListener('pagehide', persistNow);
+  // A new version on the server: save, say so, and reload onto it.
+  clock.onNewVersion(() => {
+    persistNow();
+    hud.setContact('Falchion was updated. Saving and reloading…');
+    setTimeout(() => location.reload(), 2_500);
+  });
   // One tab plays the empire: if another tab saves it, this one stops writing and offers to take over.
   // Server announcements (set in the admin portal) show as a banner for everyone.
   let tabWarning = false;
@@ -254,14 +265,14 @@ function initialFleets(galaxy: GalaxyModel, world: ReturnType<typeof createWorld
   const toVossk = { q: Math.round(home.q + (vossk.home.hex.q - home.q) * 0.15), r: Math.round(home.r + (vossk.home.hex.r - home.r) * 0.15) };
   const raiders = galaxy.nearestStar(toVossk, 12) ?? world.home;
   const fleets: FleetView[] = [
-    { id: 'scout-1', name: 'Scout Wing I', owner: player, color: '#e6b450', movement: planMovement(home, target.hex, t0 - 2, 4), design: house('Scout', 7, 'technological') },
-    { id: 'survey-1', name: 'Survey Group Alpha', owner: player, color: '#e6b450', movement: planMovement(home, survey.hex, t0 - 6, 3), design: house('Survey', 9, 'technological') },
+    { id: 'scout-1', name: 'Scout Wing I', owner: player, color: '#e6b450', movement: planMovement(home, target.hex, t0 - 2, 1), design: house('Scout', 7, 'technological') },
+    { id: 'survey-1', name: 'Survey Group Alpha', owner: player, color: '#e6b450', movement: planMovement(home, survey.hex, t0 - 6, 1), design: house('Survey', 9, 'technological') },
     { id: 'strike-1', name: '1st Strike Group', owner: player, color: '#e6b450', movement: planMovement(home, raiders.hex, t0 + 3 - hexDistance(home, raiders.hex), 1), design: house('Strike', 21, 'classic') },
-    { id: 'nova-1', name: 'Nova Survey Group', owner: 'Nova Collective', color: '#4fd1ff', movement: planMovement(nova.home.hex, target.hex, t0 + 7 - travelTurns(hexDistance(nova.home.hex, target.hex), 3), 3),
+    { id: 'nova-1', name: 'Nova Survey Group', owner: 'Nova Collective', color: '#4fd1ff', movement: planMovement(nova.home.hex, target.hex, t0 + 7 - travelTurns(hexDistance(nova.home.hex, target.hex), 1), 1),
       design: { ...DEFAULT_DESIGN, name: 'Nova', style: 'geometric', seed: 31, colors: { primary: '#e8f6ff', secondary: '#1b4b6b', accent: '#4fd1ff' } } },
-    { id: 'vossk-1', name: 'Vossk Raiders', owner: 'alien:Vossk', color: '#ff5d5d', movement: planMovement(vossk.home.hex, world.home.hex, t0 - 10, 2),
+    { id: 'vossk-1', name: 'Vossk Raiders', owner: 'alien:Vossk', color: '#ff5d5d', movement: planMovement(vossk.home.hex, world.home.hex, t0 - 10, 1),
       design: { ...DEFAULT_DESIGN, name: 'Vossk', style: 'organic', seed: 66, colors: { primary: '#5a1f1f', secondary: '#2a0d0d', accent: '#ff3b3b' }, weapons: 4 } },
-    { id: 'arrakai-1', name: 'Arrakai Expedition', owner: 'House Arrakai', color: '#c792ea', movement: planMovement(arrakai.home.hex, world.home.hex, t0 - 100, 3),
+    { id: 'arrakai-1', name: 'Arrakai Expedition', owner: 'House Arrakai', color: '#c792ea', movement: planMovement(arrakai.home.hex, world.home.hex, t0 - 100, 1),
       design: { ...DEFAULT_DESIGN, name: 'Arrakai', style: 'classic', seed: 12, colors: { primary: '#f2f2f2', secondary: '#c9a227', accent: '#7ad7ff' } } },
   ];
   const loadout = (ships: Squadron[], supply?: number): Loadout => ({ ships, ...fullStores(ships, specOf), ...(supply === undefined ? {} : { supply }) });

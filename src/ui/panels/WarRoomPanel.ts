@@ -79,7 +79,7 @@ export class WarRoomPanel extends Drawer {
       h('div', { class: 'target-list' }, ...ALIEN_TARGETS.map((t) => h('button', { class: `option ${t.id === this.targetId ? 'active' : ''}`, onclick: () => { this.targetId = t.id; this.outcome = null; this.groupId = null; this.resetCommit(); this.render(); } },
         h('b', {}, t.name), h('span', {}, `${t.owner} · ${t.kind === 'planet' ? 'planetary assault' : 'fleet battle'} · at ${this.q.targetStar(t.id).name}`), h('small', { class: 'muted' }, t.blurb)))),
       h('div', { class: 'row-between' }, h('span', { class: 'small' }, `Target location: `, h('b', {}, star.name)),
-        locateButton(`Locate ${star.name}`, () => { this.actions.select(star); this.actions.flyTo(star, true); })),
+        locateButton(`Locate ${star.name}`, (closeUp) => { this.actions.select(star); this.actions.flyTo(star, closeUp); })),
       h('h4', {}, 'Enemy order of battle'),
       h('ul', { class: 'plain oob' }, ...(target.kind === 'fleet' ? target.fleet!.ships : target.planet!.garrison.ships).map((x) => h('li', {}, h('span', { class: 'doc-dot', style: `--doc:${DOCTRINES[docOf(x.classId)].color}` }), `${x.count} × ${nameOf(x.classId)}`)),
         target.planet ? h('li', { class: 'muted' }, `Planetary defence ${target.planet.defense} · garrison troops ${target.planet.troops}`) : null),

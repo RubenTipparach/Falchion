@@ -54,6 +54,17 @@ export class ResearchPanel extends Drawer {
     this.render();
   }
 
+  /** Open on one technology: its area, selected, scrolled into view (e.g. what a locked item needs). */
+  focusNode(nodeId: string): void {
+    const node = this.tree.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    this.selected = node.id;
+    this.domain = node.domain;
+    if (!this.opened) this.open();
+    else this.render();
+    this.canvas.querySelector('.tnode.selected')?.scrollIntoView({ block: 'center', inline: 'center' });
+  }
+
   private computeLayout(domain: DomainId): { placed: Placed[]; height: number } {
     const nodes = this.tree.nodes.filter((n) => n.domain === domain);
     const col = new Map(this.branches.map((b, i) => [b.id, i]));

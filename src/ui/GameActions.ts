@@ -56,6 +56,8 @@ export interface GameQueries {
   /** Groups on station at a star (the dock counts at home). */
   groupsAt(star: StarSystem): FleetGroup[];
   colonyAt(planetId: string): Colony | undefined;
+  /** Buildings with no research gate, or whose research is done. */
+  isBuildingUnlocked(buildingId: string): boolean;
   /** Ship-building yards: colonies with a shipyard. */
   yards(): Colony[];
   /** Star a War Room target sits at. */
@@ -109,6 +111,8 @@ export interface GameActions {
   buildDepot(star: StarSystem): void;
   /** Construct a building on one of your colonies. */
   build(planetId: string, buildingId: string): void;
+  /** Open the research tree on a technology (what a locked ship or building needs). */
+  openResearch(nodeId: string): void;
   explore(planet: Planet): void;
   collectCrate(planetId: string): Collected | null;
   /** Explore every unexplored planet in a system. */

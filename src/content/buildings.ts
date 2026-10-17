@@ -17,6 +17,8 @@ export interface BuildingDef {
   readonly storage?: number;
   /** Years (minutes) to build. */
   readonly years: number;
+  /** Research node that unlocks it (none: available from the start). */
+  readonly unlock?: string;
   readonly blurb: string;
 }
 
@@ -24,10 +26,10 @@ export const BUILDINGS: readonly BuildingDef[] = [
   { id: 'farm', years: 2, name: 'Hydroponic Farm', cost: { credits: 60, metals: 20 }, yields: { food: 4 }, blurb: '+4 food. Every colony eats 2 a year.' },
   { id: 'mine', years: 3, name: 'Deep Mine', cost: { credits: 80, metals: 40 }, mineralBoost: 1, yields: { metals: 2 }, blurb: 'Doubles the planet’s mineral output, +2 metals.' },
   { id: 'trade-hub', years: 3, name: 'Trade Hub', cost: { credits: 100, metals: 30 }, yields: { credits: 15 }, blurb: '+15 credits from markets and tariffs.' },
-  { id: 'shipyard', years: 6, name: 'Orbital Shipyard', cost: { credits: 150, metals: 120 }, shipyard: true, unique: true, blurb: 'Builds ships here. New ships start in this system.' },
-  { id: 'lab', years: 4, name: 'Research Lab', cost: { credits: 120, crystals: 20 }, science: 4, blurb: '+4 science shards a year.' },
+  { id: 'shipyard', years: 6, unlock: 'u-modular', name: 'Orbital Shipyard', cost: { credits: 150, metals: 120 }, shipyard: true, unique: true, blurb: 'Builds ships here. New ships start in this system.' },
+  { id: 'lab', years: 4, unlock: 't-automation', name: 'Research Lab', cost: { credits: 120, crystals: 20 }, science: 4, blurb: '+4 science shards a year.' },
   { id: 'warehouse', years: 2, name: 'Warehouse', cost: { credits: 70, metals: 50 }, storage: 1000, blurb: '+1,000 storage for every mineral and food.' },
-  { id: 'temple', years: 3, name: 'Temple', cost: { credits: 80, metals: 10 }, yields: { faith: 3, influence: 1 }, blurb: '+3 faith, +1 influence.' },
+  { id: 'temple', years: 3, unlock: 'o-pheromone-diplomacy', name: 'Temple', cost: { credits: 80, metals: 10 }, yields: { faith: 3, influence: 1 }, blurb: '+3 faith, +1 influence.' },
 ];
 
 /**

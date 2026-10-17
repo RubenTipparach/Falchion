@@ -37,7 +37,14 @@ export function shipsText(ships: readonly Squadron[]): string {
 }
 
 /** A colony's buildings, free slots and a build menu. */
-export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>, build: (buildingId: string) => void, tables: EconomyTables, queued: readonly Job[] = [], turn = 0): HTMLElement {
+/** Research gates for the build menu: whether a building is unlocked, and a way to the research it needs. */
+export interface BuildGates {
+  unlocked(buildingId: string): boolean;
+  openResearch(nodeId: string): void;
+  nodeName(nodeId: string): string;
+}
+
+export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>, build: (buildingId: string) => void, tables: EconomyTables, queued: readonly Job[] = [], turn = 0, gates?: BuildGates): HTMLElement {
   const have = c.buildings ?? [];
   const pending = queued.filter((j) => j.kind === 'building');
   const slots = slotsOf(c.size ?? 3, c.capital);
@@ -54,7 +61,11 @@ export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>,
       ...pending.map((j) => h('span', { class: 'building pending', title: j.startTurn > turn ? 'Queued' : 'Under construction' }, `⏳ ${BUILDINGS.find((b) => b.id === j.item)?.name ?? j.item} · ${formatDuration(j.doneTurn - turn, CLOCK)}`)),
       ...Array.from({ length: Math.max(0, free) }, () => h('span', { class: 'building empty' }, 'Empty slot'))),
     free > 0 ? h('div', { class: 'build-menu' }, ...BUILDINGS.filter((b) => !(b.unique && (have.includes(b.id) || pending.some((j) => j.item === b.id)))).map((b) =>
-      h('button', { class: 'btn', disabled: !affordable(b), title: b.blurb, onclick: () => build(b.id) }, icon('build'), ` ${b.name}`, h('small', {}, `${costText(b)} · ${formatDuration(b.years, CLOCK)} · ${b.blurb}`)))) : h('p', { class: 'small muted' }, 'All building slots used.'));
+      gates && b.unlock && !gates.unlocked(b.id)
+        // Locked: the button leads to the research it needs.
+        ? h('button', { class: 'btn locked-build', title: `Needs research: ${gates.nodeName(b.unlock)}. Open it in the research tree.`, onclick: () => gates.openResearch(b.unlock!) },
+          icon('lock'), ` ${b.name}`, h('small', {}, `Research ${gates.nodeName(b.unlock)} → · ${b.blurb}`))
+        : h('button', { class: 'btn', disabled: !affordable(b), title: b.blurb, onclick: () => build(b.id) }, icon('build'), ` ${b.name}`, h('small', {}, `${costText(b)} · ${formatDuration(b.years, CLOCK)} · ${b.blurb}`)))) : h('p', { class: 'small muted' }, 'All building slots used.'));
 }
 
 /** Resources as icon + amount chips, e.g. what a planet's cache holds. */

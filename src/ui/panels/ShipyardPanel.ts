@@ -179,7 +179,10 @@ export class ShipyardPanel extends Drawer {
         unlocked
           ? h('div', { class: 'build-at' }, this.yardSelect(),
             h('button', { class: 'btn primary', disabled: !affordable || !this.game.yards().length, onclick: () => this.actions.buildShip(c.id, this.yard) }, affordable ? `Build · ${formatDuration(buildYears(c), CLOCK)}` : 'Not enough resources'))
-          : h('span', { class: 'locked-note' }, icon('lock'), ` Research ${c.unlock ? this.tree.node(c.unlock).name : ''}`)),
+          : c.unlock
+            // Locked: straight to the research that unlocks it.
+            ? h('button', { class: 'btn locked-build', title: `Open ${this.tree.node(c.unlock).name} in the research tree`, onclick: () => this.actions.openResearch(c.unlock!) }, icon('lock'), ` Research ${this.tree.node(c.unlock).name} →`)
+            : h('span', { class: 'locked-note' }, icon('lock'), ' Locked')),
       this.queueView(),
     );
   }

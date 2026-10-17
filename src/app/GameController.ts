@@ -285,6 +285,12 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     void this.beforeReset().finally(() => location.reload());
   }
 
+  openResearch(nodeId: string): void {
+    for (const [pid, panel] of Object.entries(this.view.panels)) if (pid !== 'research') panel.close();
+    (this.view.panels.research as unknown as { focusNode(id: string): void }).focusNode(nodeId);
+    this.view.topBar.setActivePanel('research');
+  }
+
   openPanel(id: PanelId): void {
     for (const [pid, panel] of Object.entries(this.view.panels)) {
       if (pid === id) panel.toggle();

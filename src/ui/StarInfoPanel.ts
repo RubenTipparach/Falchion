@@ -111,7 +111,8 @@ export class StarInfoPanel {
         ...(done?.success && !colony ? [h('dt', {}, 'Resources'), h('dd', {}, haulView(this.q.cacheOf(p)), s.collectedCaches.includes(p.id) ? h('span', { class: 'muted' }, ' · collected') : '')] : []),
         ...(done?.crate ? [h('dt', {}, 'Loot crate'), h('dd', {}, crateLine(done.crate, s.openedCrates.includes(p.id)))] : [])),
       done ? h('p', { class: 'small muted' }, done.narrative) : '',
-      colony ? h('div', {}, h('span', { class: 'eyebrow' }, colony.capital ? 'Capital' : 'Your colony'), colonyView(colony, s.empire.materials, (b) => this.actions.build(p.id, b), this.tables, this.q.jobs(p.id), s.turn)) : '',
+      colony ? h('div', {}, h('span', { class: 'eyebrow' }, colony.capital ? 'Capital' : 'Your colony'), colonyView(colony, s.empire.materials, (b) => this.actions.build(p.id, b), this.tables, this.q.jobs(p.id), s.turn, {
+        unlocked: (id) => this.q.isBuildingUnlocked(id), openResearch: (id) => this.actions.openResearch(id), nodeName: (id) => this.tables.tree.node(id).name })) : '',
       !done && !colony && !canExplore ? h('p', { class: 'small red' }, `Exploring needs a ship on station here with ${cost} supply.`) : '',
       h('div', { class: 'actions' },
         !done && !colony ? h('button', { class: 'btn primary', disabled: !canExplore, onclick: () => this.actions.explore(p) }, icon('explore'), ` Explore · ${cost} supply`) : '',

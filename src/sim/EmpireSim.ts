@@ -89,6 +89,12 @@ export class EmpireSim {
     return BASE_SPEED + this.bonus('speed');
   }
 
+  /** Buildings with no research gate, or whose research is done. */
+  isBuildingUnlocked = (buildingId: string): boolean => {
+    const unlock = BUILDINGS.find((b) => b.id === buildingId)?.unlock;
+    return !unlock || this.state.empire.research.researched.includes(unlock);
+  };
+
   isClassUnlocked = (c: ShipClassDef): boolean =>
     !c.unlock || this.state.empire.research.researched.includes(c.unlock) || this.state.empire.chassis.includes(c.id);
 
@@ -643,6 +649,7 @@ export class EmpireSim {
     const queued = this.jobs(planetId).filter((j) => j.kind === 'building').map((j) => j.item);
     if (have.length + queued.length >= slotsOf(colony.size ?? 3, colony.capital)) return this.dispatch(`${colony.name} has no free building slots`, 'bad');
     if (b.unique && (have.includes(b.id) || queued.includes(b.id))) return;
+    if (!this.isBuildingUnlocked(b.id)) return this.dispatch(`${b.name} needs research: ${this.deps.tree.node(b.unlock!).name}`, 'bad');
     if (!canAfford(s.empire.materials, b.cost)) return this.dispatch(`Not enough resources for a ${b.name}`, 'bad');
     const construction = enqueue(s.construction, { kind: 'building', item: b.id, site: planetId }, b.years, s.turn);
     const job = construction[construction.length - 1];

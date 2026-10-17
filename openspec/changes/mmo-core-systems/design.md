@@ -7,7 +7,7 @@ the server reuses it directly. See proposal.md for scope.
 
 ## Goals / Non-Goals
 
-**Goals:** authoritative server, async + lockstep time, PvE combat, expansion, economy, Discord.
+**Goals:** authoritative server, scheduled world turns + lockstep turns, PvE combat, expansion, economy, Discord.
 **Non-Goals:** PvP, monetisation, matchmaking.
 
 ## Decisions
@@ -15,8 +15,9 @@ the server reuses it directly. See proposal.md for scope.
 - **Server**: Node + TypeScript, imports `src/core`. Event-sourced: commands → validated
   → events persisted; state derived. Alternative: snapshot-only DB — rejected, replays
   and lockstep audit need the event log.
-- **Time — extension point `TimeAuthority`**: `AsyncTimeAuthority` schedules events on a
-  priority queue by game time; `LockstepTimeAuthority` owns a zone and advances on
+- **Time — extension point `TimeAuthority`**: the game is turn-based. `WorldTurnAuthority`
+  resolves world turns on a fixed server cadence from the orders submitted so far;
+  `LockstepTimeAuthority` owns a zone and advances its turn on
   all-orders-in or timeout. Entities are assigned to exactly one authority; zone
   detection uses hex distance over a spatial hash of fleets.
 - **Combat — extension point `Ability` registry**: round-based resolver
@@ -31,13 +32,15 @@ the server reuses it directly. See proposal.md for scope.
   Follow the proven High Frontier setup: one-click "Connect Discord" uses OAuth scopes
   `identify` + `guilds.join` to silently add the player to the bot's guild (bots can only
   DM users they share a guild with); a manual user-id fallback works with just the bot
-  token. Features switch on per configured secret (`DISCORD_BOT_TOKEN` → DMs; client id +
-  secret + guild id → OAuth), staged to Fly by CI, so an unconfigured deploy is inert.
+  token. Features switch on per configured secret, so an unconfigured deploy is inert.
+  Minimal secrets: `DISCORD_CLIENT_ID` + `DISCORD_CLIENT_SECRET` (sign-in, `identify`
+  only) and `DISCORD_BOT_TOKEN` (DMs). `DISCORD_GUILD_ID` only if we add the auto-join
+  notification flow; channel webhooks are stored per player/admin in the DB, not as secrets.
 - **Hosting**: the server runs on Fly.io (`server/`), the static client on GitHub Pages;
   persistence adds a Fly volume with a single-writer machine (as High Frontier does).
 
 ## Risks / Trade-offs
 
 - [Lockstep stalls on idle players] → turn timer with hold-position default.
-- [Long async horizons make balance hard] → simulation harness running years of game time headless.
+- [Long async horizons make balance hard] → simulation harness running thousands of turns headless.
 - [Discord API changes] → isolated behind `IdentityProvider`/`Notifier`.

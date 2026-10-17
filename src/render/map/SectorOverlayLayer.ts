@@ -7,9 +7,9 @@ import { fadeIn } from './ZoomModel';
 /** Quadrant axes, radial rings and radial cells with labels for galactic addressing. */
 export class SectorOverlayLayer implements MapLayer {
   readonly object3d = new THREE.Group();
-  private readonly lineMaterial = new THREE.LineBasicMaterial({ color: '#4f7fb8', transparent: true, depthWrite: false });
-  private readonly axisMaterial = new THREE.LineBasicMaterial({ color: '#8fb8ff', transparent: true, depthWrite: false });
-  private readonly highlightMaterial = new THREE.LineBasicMaterial({ color: '#ffd166', transparent: true, depthWrite: false });
+  private readonly lineMaterial = new THREE.LineBasicMaterial({ color: '#2c6a80', transparent: true, depthWrite: false });
+  private readonly axisMaterial = new THREE.LineBasicMaterial({ color: '#7fd3e6', transparent: true, depthWrite: false });
+  private readonly highlightMaterial = new THREE.LineBasicMaterial({ color: '#e6b450', transparent: true, depthWrite: false });
   private readonly labels: CSS2DObject[] = [];
   private highlight: THREE.LineLoop | null = null;
 

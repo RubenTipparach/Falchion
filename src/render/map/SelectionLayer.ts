@@ -4,7 +4,7 @@ import type { MapLayer, ViewState } from './MapLayer';
 /** Pulsing ring around the selected star, sized to stay visible at any zoom. */
 export class SelectionLayer implements MapLayer {
   readonly object3d: THREE.Mesh;
-  private readonly material = new THREE.MeshBasicMaterial({ color: '#ffd166', transparent: true, depthWrite: false, side: THREE.DoubleSide });
+  private readonly material = new THREE.MeshBasicMaterial({ color: '#e6b450', transparent: true, depthWrite: false, side: THREE.DoubleSide });
   private target: { x: number; z: number } | null = null;
 
   constructor() {
@@ -18,9 +18,9 @@ export class SelectionLayer implements MapLayer {
   }
 
   update(view: ViewState): void {
-    this.object3d.visible = !!this.target;
+    this.object3d.visible = !!this.target && view.visibleWidth > 9;
     if (!this.target) return;
-    const s = Math.max(0.6, view.visibleWidth * 0.012) * (1 + 0.08 * Math.sin(view.time * 4));
+    const s = Math.max(0.47, view.visibleWidth * 0.012) * (1 + 0.08 * Math.sin(view.time * 4));
     this.object3d.position.set(this.target.x, 0.01, this.target.z);
     this.object3d.scale.setScalar(s);
     this.material.opacity = 0.85;

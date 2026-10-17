@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { HEX_SIZE, Hex, hexKey, hexSpiral, hexToWorld } from '../../core/hex/Hex';
 import type { MapLayer, ViewState } from './MapLayer';
-import { fade } from './ZoomModel';
+import { fade, fadeIn } from './ZoomModel';
 
 export interface TerritoryClaim {
   readonly name: string;
@@ -48,7 +48,7 @@ export class TerritoryLayer implements MapLayer {
   }
 
   update(view: ViewState): void {
-    const opacity = fade(view.visibleWidth, 600, 1_500);
+    const opacity = fade(view.visibleWidth, 600, 1_500) * fadeIn(view.visibleWidth, 4, 9);
     this.fills.visible = opacity > 0.01;
     this.materials.forEach((m) => (m.opacity = 0.2 * opacity));
     const showMarkers = view.visibleWidth > 80;

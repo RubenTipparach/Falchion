@@ -17,7 +17,7 @@ builds on these.
   players can say where their planets are without coordinates.
 - Add exponential zoom with level-of-detail: hexes only drawn when zoomed in; quadrant
   and radial-cell overlays when zoomed out; a toggle to jump between hex and galaxy views.
-- Add fleet travel along hex paths with distance in light years and ETA in game time.
+- Make the game turn-based: an End Turn action advances the world; fleets move a whole number of hexes per turn along hex paths, with distance in light years and ETA in turns.
 - Add procedural ships in five styles (organic, technological, aesthetic/classic,
   simple geometry, utilitarian) behind a pluggable generator registry.
 - Add a simple ship designer: style, seed, proportions, colours, part counts.
@@ -38,7 +38,7 @@ Discord (see change `mmo-core-systems`); PvP and monetisation entirely.
 ### New Capabilities
 - `galaxy-map`: seeded galaxy, hex grid at 1 ly per hex, star placement, galactic addressing.
 - `map-navigation`: exponential zoom, LOD of hexes vs quadrant/radial overlays, view toggle, selection.
-- `fleet-movement`: hex-path travel, distance in ly and ETA in game time.
+- `fleet-movement`: turn-based hex-path travel, distance in ly and ETA in turns.
 - `ship-procgen`: deterministic procedural ship models in five styles via a pluggable registry.
 - `ship-customization`: player-facing ship design parameters and research-driven evolution.
 - `research-tree`: branches, prerequisites, exclusive locks with analogs, crossovers.

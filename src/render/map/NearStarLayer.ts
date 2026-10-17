@@ -5,7 +5,7 @@ import { GalaxyModel, SPECTRAL_COLORS, SpectralClass, StarSystem } from '../../c
 import { ChunkCache } from './ChunkCache';
 import type { MapLayer, ViewState } from './MapLayer';
 import { createStarPointsMaterial, pointScale } from './StarPointsMaterial';
-import { fade } from './ZoomModel';
+import { fade, fadeIn } from './ZoomModel';
 
 const CHUNK = 64;
 const BUDGET_PER_FRAME = 6;
@@ -39,7 +39,7 @@ export class NearStarLayer implements MapLayer {
   }
 
   update(view: ViewState): void {
-    const opacity = fade(view.visibleWidth, 260, 520);
+    const opacity = fade(view.visibleWidth, 260, 520) * fadeIn(view.visibleWidth, 2.5, 6);
     this.object3d.visible = opacity > 0.01;
     if (!this.object3d.visible) {
       this.labels.forEach((l) => (l.visible = false));
@@ -92,7 +92,7 @@ export class NearStarLayer implements MapLayer {
   }
 
   private updateLabels(view: ViewState): void {
-    const show = view.visibleWidth < 90;
+    const show = view.visibleWidth < 90 && view.visibleWidth > 6;
     const maxD = view.visibleWidth * 0.6;
     const near = show
       ? this.activeStars()
@@ -134,7 +134,7 @@ export class NearStarLayer implements MapLayer {
     geo.setAttribute('size', new THREE.BufferAttribute(size, 1));
     geo.computeBoundingSphere();
     const points = new THREE.Points(geo, this.material);
-    points.renderOrder = 3;
+    points.renderOrder = -5;
     return { points, stars };
   }
 

@@ -9,7 +9,7 @@ export interface IdentityProvider {
   signIn(): Promise<PlayerIdentity>;
 }
 
-/** Local stand-in used by the mockup. */
+/** Local stand-in until Discord sign-in is built. */
 export class MockDiscordIdentityProvider implements IdentityProvider {
   async signIn(): Promise<PlayerIdentity> {
     return { id: 'mock-0001', displayName: 'Commander', provider: 'mock' };

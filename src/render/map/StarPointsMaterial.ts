@@ -3,7 +3,8 @@ import * as THREE from 'three';
 /** Soft round star sprites with a minimum on-screen size so stars never vanish. */
 export function createStarPointsMaterial(opts: { worldSize: number; minPx: number; maxPx: number }): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
-    transparent: true,
+    // Additive glow drawn in the opaque pass ahead of planets (negative renderOrder), so planets occlude it.
+    transparent: false,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     uniforms: {

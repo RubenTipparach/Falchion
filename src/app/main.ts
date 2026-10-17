@@ -1,7 +1,10 @@
 import '../ui/styles.css';
 import { EncounterResolver } from '../core/encounters/Encounters';
 import { newEmpire } from '../core/empire/Empire';
-import { planMovement } from '../core/fleet/Fleet';
+import { planMovement, travelTurns } from '../core/fleet/Fleet';
+import { formatDuration } from '../core/time/WorldTime';
+import { CLOCK, connectWorldClock } from './WorldClock';
+import { SaveGame } from './SaveGame';
 import { DEFAULT_ADDRESS_SCHEME } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel } from '../core/galaxy/GalaxyModel';
 import { hexAdd, hexDistance, hexToWorld } from '../core/hex/Hex';
@@ -9,7 +12,25 @@ import { TechTree } from '../core/research/TechTree';
 import { DEFAULT_DESIGN } from '../core/ships/ShipDesign';
 import { DEFAULT_LOOT_TABLES } from '../content/lootTables';
 import { SHARD_SOURCES } from '../content/shardSources';
-import { BRANCHES, TECH_NODES } from '../content/techTree';
+import { ALIEN_TECH, BRANCHES, DOMAINS, TECH_NODES } from '../content/techTree';
+import { SHIP_CLASSES } from '../content/shipClasses';
+import { GOVERNMENTS, POLICIES, TENETS } from '../content/society';
+import type { Colony, EconomyTables } from '../core/economy/Economy';
+import type { Squadron } from '../core/combat/Combat';
+import { fullStores } from '../core/fleet/Logistics';
+import type { Loadout } from '../core/fleet/Presence';
+import { BUILDINGS, STORAGE } from '../content/buildings';
+import { specOf, upkeepOf } from '../content/logistics';
+import { planetsOf, Planet } from '../core/galaxy/Planets';
+import { PlanetThumbnails } from '../render/planets/PlanetThumbnails';
+import { NebulaLayer } from '../render/map/NebulaLayer';
+import { GalaxyDiscLayer } from '../render/map/GalaxyDiscLayer';
+import { StarfieldLayer } from '../render/map/StarfieldLayer';
+import { SystemLayer } from '../render/map/SystemLayer';
+import { Dispatches } from '../ui/Dispatches';
+import type { Drawer } from '../ui/Drawer';
+import { EmpirePanel } from '../ui/panels/EmpirePanel';
+import { WarRoomPanel } from '../ui/panels/WarRoomPanel';
 import { FleetLayer, FleetView } from '../render/map/FleetLayer';
 import { GalaxyCloudLayer } from '../render/map/GalaxyCloudLayer';
 import { HexGridLayer } from '../render/map/HexGridLayer';
@@ -20,47 +41,84 @@ import { SectorOverlayLayer } from '../render/map/SectorOverlayLayer';
 import { SelectionLayer } from '../render/map/SelectionLayer';
 import { TerritoryLayer } from '../render/map/TerritoryLayer';
 import { createDefaultShipFactory } from '../render/ships/defaultRegistries';
-import { formatDuration } from '../core/fleet/Fleet';
 import { Hud } from '../ui/Hud';
 import { StarInfoPanel } from '../ui/StarInfoPanel';
 import { TopBar } from '../ui/TopBar';
 import { ExplorePanel } from '../ui/panels/ExplorePanel';
+import { FleetsPanel } from '../ui/panels/FleetsPanel';
 import { ResearchPanel } from '../ui/panels/ResearchPanel';
 import { ShipyardPanel } from '../ui/panels/ShipyardPanel';
 import type { PanelId } from '../ui/GameActions';
-import { GameController } from './GameController';
+import { GameController, tradePartners } from './GameController';
 import type { GameState } from './GameState';
 import { MockDiscordIdentityProvider } from './identity';
 import { Store } from './Store';
-import { createMockWorld } from './World';
+import { createWorld } from './World';
 
 /** Composition root: build the pure services, the views, and wire them together. */
 async function bootstrap(): Promise<void> {
-  const params = new URLSearchParams(location.search);
   const identity = await new MockDiscordIdentityProvider().signIn();
 
   // ── Domain ──
   const galaxy = new GalaxyModel();
   const tree = new TechTree(TECH_NODES, SHARD_SOURCES);
   const encounters = new EncounterResolver(DEFAULT_LOOT_TABLES, tree);
-  const world = createMockWorld(galaxy);
+  const world = createWorld(galaxy);
   const { factory, styles, traits } = createDefaultShipFactory();
+  const partners = tradePartners(world, world.home);
+  const economyTables: EconomyTables = { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, partners, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf };
 
-  let empire = newEmpire(identity.displayName);
-  let research = tree.grantShards(empire.research, 't-alloys', 'science', 10);
-  research = tree.research(research, 't-alloys');
-  research = tree.grantShards(research, 't-lasers', 'science', 100);
-  research = tree.grantShards(research, 't-fusion', 'science', 60);
-  research = tree.grantShards(research, 'o-grown-hulls', 'observation', 4);
-  empire = { ...empire, research, chassis: ['tech-frigate'] };
+  // Starting position: a young empire with a few roots researched and a small fleet.
+  let research = newEmpire(identity.displayName).research;
+  for (const id of ['t-alloys', 'u-modular', 'a-heritage', 'a-duelist-tradition', 'o-grown-hulls', 'u-logistics']) {
+    research = tree.research(tree.grantShards(research, id, 'science', tree.node(id).shards), id);
+  }
+  research = tree.grantShards(research, 't-lasers', 'science', 50);
+  research = tree.grantShards(research, 'u-mining', 'science', 4);
+  research = tree.grantShards(research, 'a-diplomacy', 'observation', 3);
+  const empire = { ...newEmpire(identity.displayName), research };
 
-  const fleets = initialFleets(galaxy, world, identity.displayName);
-  const store = new Store<GameState>({
-    day: 0, speed: 1, empire, design: DEFAULT_DESIGN, hiddenTraits: [], home: world.home,
-    selected: null, explored: {}, fleets, contact: null, playerName: identity.displayName, log: [],
-  });
+  // Colonies are real planets: three in the home system (the capital has a shipyard) and one in each claimed system.
+  const homePlanets = planetsOf(world.home, galaxy.params.seed);
+  const colonyOf = (p: Planet, buildings: string[], capital = false): Colony =>
+    ({ name: capital ? `${p.name} (capital)` : p.name, biome: p.biome, planetId: p.id, starId: p.starId, size: p.size, capital, buildings });
+  // Capital on the most habitable world; gas giants cannot be settled.
+  const HABITABLE = ['terran', 'ocean', 'jungle', 'desert', 'ice', 'barren', 'volcanic', 'toxic'];
+  const settleable = homePlanets.filter((p) => p.biome !== 'gas')
+    .sort((a, b) => HABITABLE.indexOf(a.biome) - HABITABLE.indexOf(b.biome) || b.size - a.size);
+  const colonies: Colony[] = [
+    ...settleable.slice(0, 1).map((p) => colonyOf(p, ['shipyard', 'farm', 'trade-hub'], true)),
+    ...settleable.slice(1, 3).map((p) => colonyOf(p, ['mine'])),
+  ];
+  const claim = world.claims.find((c) => c.kind === 'player')!;
+  for (const c of claim.colonies.slice(1)) {
+    const star = galaxy.starAt(c.hex);
+    const p = star && star.id !== world.home.id ? planetsOf(star, galaxy.params.seed).find((x) => x.biome !== 'gas') : undefined;
+    if (p && !colonies.some((x) => x.planetId === p.id)) colonies.push(colonyOf(p, ['farm']));
+  }
+  const clock = await connectWorldClock();
+  const saveGame = new SaveGame(galaxy.params.seed);
+  const saved = saveGame.load();
+  const t0 = clock.tick();
+  const start = initialFleets(galaxy, world, identity.displayName, t0);
+  const houseDesign = { ...DEFAULT_DESIGN, colors: { primary: '#c8d0dc', secondary: '#2b3448', accent: '#ffb547' } };
 
-  const controller = new GameController({ store, galaxy, tree, encounters, world });
+  const fresh: GameState = {
+    turn: t0, empire,
+    economy: {
+      roster: start.roster, government: 'council', policies: [], routes: [{ partnerId: partners[0].id }],
+      faith: null, spyNetworks: [], focus: 't-fusion', colonies,
+    },
+    designs: { prospector: { ...houseDesign, name: 'Prospector Skiff', style: 'utilitarian', seed: 4, length: 0.8, bulk: 0.8, engines: 2, weapons: 0 } },
+    shipyardClass: 'prospector', hiddenTraits: [], home: world.home,
+    selected: null, selectedPlanet: null, explored: {}, openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0, ammo: 0 }, depots: [], construction: [], contact: null, playerName: identity.displayName,
+    lastReport: null, engaged: [],
+    dispatches: [{ turn: t0, text: 'Welcome, Commander. One year passes every minute. Survey Group Alpha is on station nearby: explore its planets and collect what you find. Ships need supply to explore and ammunition to fight; both refill in friendly systems.' }],
+  };
+  // A saved empire carries on where it left off; the missed years are caught up below.
+  const store = new Store<GameState>(saved ? { ...fresh, ...saved } : fresh);
+
+  const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame });
 
   // ── Views ──
   const app = document.getElementById('app')!;
@@ -69,69 +127,112 @@ async function bootstrap(): Promise<void> {
   app.append(mapEl);
   const map = new MapView({ container: mapEl, galaxyRadius: galaxy.params.radius, onClick: controller.handleClick, onHover: controller.handleHover, onFrame: controller.onFrame });
 
+  map.layers.add(new StarfieldLayer(galaxy.params.seed));
+  map.layers.add(new NebulaLayer(galaxy.params.seed));
+  map.layers.add(new GalaxyDiscLayer(galaxy.params));
   map.layers.add(new GalaxyCloudLayer(galaxy));
   map.layers.add(new MidStarLayer(galaxy));
   const sectors = map.layers.add(new SectorOverlayLayer(galaxy.params.radius, DEFAULT_ADDRESS_SCHEME));
   map.layers.add(new TerritoryLayer(world.claims));
   const hexGrid = map.layers.add(new HexGridLayer(galaxy.params.radius));
   map.layers.add(new NearStarLayer(galaxy));
+  const system = map.layers.add(new SystemLayer(galaxy, { isHome: (s) => s.id === world.home.id, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet) }));
   const selection = map.layers.add(new SelectionLayer());
-  const fleetLayer = map.layers.add(new FleetLayer(factory, formatDuration));
+  const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK)));
 
-  const topBar = new TopBar(store, controller, identity.displayName);
-  const hud = new Hud();
-  const starInfo = new StarInfoPanel(store, controller, controller.describe);
-  const panels: Record<PanelId, ShipyardPanel | ResearchPanel | ExplorePanel> = {
-    shipyard: new ShipyardPanel(store, controller, factory, styles, traits, controller.unlockedTraits, controller.effectiveDesign),
-    research: new ResearchPanel(store, controller, tree, BRANCHES),
-    explore: new ExplorePanel(store, controller, controller.planets, tree),
+  const zoomCfg = map.controller.zoom.config;
+  const topBar = new TopBar(store, controller, identity.displayName, clock, controller.caps);
+  const hud = new Hud({ min: zoomCfg.minAltitude, max: zoomCfg.maxAltitude }, (alt) => controller.zoomTo(alt));
+  const thumbs = new PlanetThumbnails(80);
+  const thumb = (p: Planet) => thumbs.url(p);
+  const starInfo = new StarInfoPanel(store, controller, controller, controller.describe, thumb, economyTables);
+  const dispatches = new Dispatches(store);
+  const panels: Record<PanelId, Drawer> = {
+    shipyard: new ShipyardPanel(store, controller, controller, factory, styles, traits, tree, {
+      isUnlocked: controller.isClassUnlocked,
+      designFor: controller.designFor,
+      effectiveDesign: controller.effectiveDesign,
+      unlockedTraits: controller.unlockedTraits,
+      buildDiscount: () => Math.min(40, controller.bonus('build')),
+    }),
+    research: new ResearchPanel(store, controller, tree, BRANCHES, DOMAINS, economyTables),
+    empire: new EmpirePanel(store, controller, controller, economyTables, world.neighbours.map((n) => n.name)),
+    war: new WarRoomPanel(store, controller, controller),
+    explore: new ExplorePanel(store, controller, controller, controller.planets, tree, thumb),
+    fleets: new FleetsPanel(store, controller, controller),
   };
-  app.append(topBar.el, hud.el, starInfo.el, ...Object.values(panels).map((p) => p.el));
+  app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, dispatches.el, ...Object.values(panels).map((p) => p.el));
 
-  controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels });
+  controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system });
 
   // ── Start ──
   const home = hexToWorld(world.home.hex);
   map.controller.focus.set(home.x, home.z);
-  if (params.get('view') === 'galaxy') {
-    map.controller.zoom.setTargetAltitude(map.controller.zoom.config.galaxyPreset);
-  } else if (params.get('view') === 'sector') {
-    map.controller.zoom.setTargetAltitude(1_500);
-  } else {
-    map.controller.zoom.setTargetAltitude(Number(params.get('alt')) || 55);
-  }
+  map.controller.zoom.setTargetAltitude(48);
   map.controller.zoom.snap();
   controller.select(world.home);
-  const panel = params.get('panel') as PanelId | null;
-  if (panel && panel in panels) controller.openPanel(panel);
-  if (params.get('paused')) controller.setSpeed(0);
 
   window.addEventListener('keydown', (e) => {
-    if ((e.target as HTMLElement).tagName === 'INPUT') return;
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     if (e.key === 'g' || e.key === 'G') controller.toggleView();
-    if (e.key === 'Escape') controller.select(null);
+    if (e.key === 'Escape') { if (store.state.selectedPlanet && store.state.selected) controller.focusPlanet(store.state.selected, null); else controller.select(null); }
     if (e.key === 'h' || e.key === 'H') controller.flyTo(world.home, true);
+    if (import.meta.env.DEV && e.key === 'Enter' && tag !== 'BUTTON') controller.skipYear();
   });
+  // The world runs on: one year per minute, pushed by the server when there is one.
+  clock.onTick((tick) => controller.advanceTo(tick));
+  controller.advanceTo(clock.tick());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) controller.advanceTo(clock.tick()); });
+  let saveTimer = 0;
+  store.subscribe(() => { clearTimeout(saveTimer); saveTimer = window.setTimeout(() => saveGame.save(store.state), 1500); });
+  window.addEventListener('pagehide', () => saveGame.save(store.state));
+  // One tab plays the empire: if another tab saves it, this one stops writing and offers to take over.
+  saveGame.onOtherTab(() => {
+    saveGame.stop();
+    hud.setContact('This empire is open in another tab, so this tab stopped saving. Reload here to play in this tab instead.');
+  });
+  saveGame.save(store.state);
   map.start();
   if (import.meta.env.DEV) Object.assign(window, { falchion: controller });
 }
 
-function initialFleets(galaxy: GalaxyModel, world: ReturnType<typeof createMockWorld>, player: string): FleetView[] {
-  const target = galaxy.nearestStar(hexAdd(world.home.hex, { q: 22, r: -9 }), 10) ?? world.home;
+/** Starting fleets, timed relative to the year the empire is founded (t0). */
+function initialFleets(galaxy: GalaxyModel, world: ReturnType<typeof createWorld>, player: string, t0: number) {
+  const home = world.home.hex;
+  const near = (dq: number, dr: number) => galaxy.nearestStar(hexAdd(home, { q: dq, r: dr }), 10) ?? world.home;
+  const target = near(22, -9);
+  const survey = near(5, -3);
   const nova = world.neighbours.find((n) => n.name === 'Nova Collective')!;
   const vossk = world.neighbours.find((n) => n.name === 'Vossk Hegemony')!;
   const arrakai = world.neighbours.find((n) => n.name === 'House Arrakai')!;
-  return [
-    { id: 'scout-1', name: 'Scout Wing I', owner: player, color: '#5dff9b', movement: planMovement(world.home.hex, target.hex, -3, 2),
-      design: { ...DEFAULT_DESIGN, name: 'Scout', seed: 7 } },
-    // Nova's survey fleet is heading to the same star: contact (lockstep) when they meet.
-    { id: 'nova-1', name: 'Nova Survey Group', owner: 'Nova Collective', color: '#4fd1ff', movement: planMovement(nova.home.hex, target.hex, 12 - hexDistance(nova.home.hex, target.hex) / 3.5, 3.5),
+  const house = (name: string, seed: number, style = DEFAULT_DESIGN.style) => ({ ...DEFAULT_DESIGN, name, style, seed, colors: { primary: '#c8d0dc', secondary: '#2b3448', accent: '#ffb547' } });
+  // Raiders sit 15% of the way to Vossk space; a strike group is already on its way.
+  const toVossk = { q: Math.round(home.q + (vossk.home.hex.q - home.q) * 0.15), r: Math.round(home.r + (vossk.home.hex.r - home.r) * 0.15) };
+  const raiders = galaxy.nearestStar(toVossk, 12) ?? world.home;
+  const fleets: FleetView[] = [
+    { id: 'scout-1', name: 'Scout Wing I', owner: player, color: '#e6b450', movement: planMovement(home, target.hex, t0 - 2, 4), design: house('Scout', 7, 'technological') },
+    { id: 'survey-1', name: 'Survey Group Alpha', owner: player, color: '#e6b450', movement: planMovement(home, survey.hex, t0 - 6, 3), design: house('Survey', 9, 'technological') },
+    { id: 'strike-1', name: '1st Strike Group', owner: player, color: '#e6b450', movement: planMovement(home, raiders.hex, t0 + 3 - hexDistance(home, raiders.hex), 1), design: house('Strike', 21, 'classic') },
+    // Nova's survey fleet is heading to the same star: contact a few minutes in.
+    { id: 'nova-1', name: 'Nova Survey Group', owner: 'Nova Collective', color: '#4fd1ff', movement: planMovement(nova.home.hex, target.hex, t0 + 7 - travelTurns(hexDistance(nova.home.hex, target.hex), 3), 3),
       design: { ...DEFAULT_DESIGN, name: 'Nova', style: 'geometric', seed: 31, colors: { primary: '#e8f6ff', secondary: '#1b4b6b', accent: '#4fd1ff' } } },
-    { id: 'vossk-1', name: 'Vossk Raiders', owner: 'alien:Vossk', color: '#ff5d5d', movement: planMovement(vossk.home.hex, world.home.hex, -10, 1.5),
+    { id: 'vossk-1', name: 'Vossk Raiders', owner: 'alien:Vossk', color: '#ff5d5d', movement: planMovement(vossk.home.hex, world.home.hex, t0 - 10, 2),
       design: { ...DEFAULT_DESIGN, name: 'Vossk', style: 'organic', seed: 66, colors: { primary: '#5a1f1f', secondary: '#2a0d0d', accent: '#ff3b3b' }, weapons: 4 } },
-    { id: 'arrakai-1', name: 'Arrakai Expedition', owner: 'House Arrakai', color: '#c792ea', movement: planMovement(arrakai.home.hex, world.home.hex, -100, 2.5),
+    { id: 'arrakai-1', name: 'Arrakai Expedition', owner: 'House Arrakai', color: '#c792ea', movement: planMovement(arrakai.home.hex, world.home.hex, t0 - 100, 3),
       design: { ...DEFAULT_DESIGN, name: 'Arrakai', style: 'classic', seed: 12, colors: { primary: '#f2f2f2', secondary: '#c9a227', accent: '#7ad7ff' } } },
   ];
+  const loadout = (ships: Squadron[], supply?: number): Loadout => ({ ships, ...fullStores(ships, specOf), ...(supply === undefined ? {} : { supply }) });
+  const loadouts: Record<string, Loadout> = {
+    'scout-1': loadout([{ classId: 'pathfinder', count: 2 }]),
+    'survey-1': { ...loadout([{ classId: 'survey-cutter', count: 2 }], 15), orders: { autoReturn: true } },
+    // Wins against the raiders with full magazines, loses at half: ammunition matters.
+    'strike-1': loadout([{ classId: 'lancer', count: 6 }, { classId: 'railgun-monitor', count: 2 }, { classId: 'interceptor', count: 2 }]),
+  };
+  // Roster = every ship owned: deployed fleets plus the home dock.
+  const roster: Record<string, number> = { prospector: 3, 'ice-cutter': 1, 'bulk-freighter': 1, interceptor: 2, 'survey-cutter': 1, 'colony-ark': 1, 'construction-tender': 1 };
+  for (const l of Object.values(loadouts)) for (const x of l.ships) roster[x.classId] = (roster[x.classId] ?? 0) + x.count;
+  return { fleets, loadouts, roster };
 }
 
 bootstrap();

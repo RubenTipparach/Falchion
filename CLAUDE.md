@@ -3,7 +3,7 @@
 Hex-based, at-scale 4X MMO (three.js + TypeScript, Discord integration planned).
 
 ## Commands
-- `npm run dev` — Vite dev server for the mockup
+- `npm run dev` — Vite dev server for the game
 - `npm test` — Vitest unit tests (src/core, src/content)
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run build` — production build
@@ -13,10 +13,12 @@ Hex-based, at-scale 4X MMO (three.js + TypeScript, Discord integration planned).
 `.github/workflows/deploy.yml` runs on every push to every branch: typecheck, tests, spec
 validation, build and a server smoke test, then deploys to **GitHub Pages** (static client)
 and **Fly.io** (`server/`: zero-dependency Node server serving the client + `/healthz` +
-`/api/info`; future home of the MMO server). The most recent push wins. The Fly job skips
+`/api/info` + the world clock `/api/clock` and tick stream `/api/ticks`; future home of the MMO server).
+The world is realtime: one tick per minute = one game year (`server/clock.json`, shared with the client).
+The most recent push wins. The Fly job skips
 with a notice until `FLY_API_TOKEN` is set and the `falchion` app exists (see
-`server/fly.toml`). Optional Discord secrets (`DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`,
-`DISCORD_CLIENT_SECRET`, `DISCORD_GUILD_ID`, `DISCORD_WEBHOOK_URL`) are staged to Fly on deploy.
+`server/fly.toml`). The only secret needed is `FLY_API_TOKEN`
+(Discord secrets get added when the Discord integration is built).
 Pattern mirrors RubenTipparach/high-frontier-fan-game.
 
 ## Workflow

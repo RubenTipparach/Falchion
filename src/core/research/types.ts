@@ -1,4 +1,5 @@
 export type BranchId = 'organic' | 'technological' | 'utilitarian' | 'geometric' | 'aesthetic';
+export type DomainId = 'hulls' | 'weapons' | 'defense' | 'industry' | 'society' | 'intel' | 'colonies';
 
 export type Grant =
   | { readonly kind: 'trait'; readonly id: string }
@@ -11,6 +12,8 @@ export interface TechNode {
   readonly id: string;
   readonly name: string;
   readonly branch: BranchId;
+  /** Research area the node belongs to (hulls, weapons, society…). */
+  readonly domain: DomainId;
   readonly tier: number;
   /** Whole shards needed (e.g. 10, 100, 500). */
   readonly shards: number;
@@ -32,6 +35,12 @@ export interface BranchDef {
   readonly id: BranchId;
   readonly name: string;
   readonly color: string;
+}
+
+export interface DomainDef {
+  readonly id: DomainId;
+  readonly name: string;
+  readonly blurb: string;
 }
 
 export type Availability =

@@ -83,3 +83,43 @@ export const DOCTRINES: Readonly<Record<Doctrine, { name: string; color: string;
   support: { name: 'Support', color: '#a98bff', summary: 'Repairs, recon and fleet-wide bonuses.', strong: 'Long battles', weak: 'Being targeted' },
   civilian: { name: 'Civilian', color: '#8592ad', summary: 'Does not fight.', strong: '—', weak: 'Everything' },
 };
+
+/** How big a class's hulls are: it sets how many hulls one ship of it stands for. */
+export type ShipSize = 'fighter' | 'frigate' | 'destroyer' | 'cruiser' | 'heavy-cruiser' | 'capital';
+
+/** Hulls in one ship (a squadron) of each size. Hull points and attack are the whole squadron's. */
+export const HULLS_PER_SHIP: Readonly<Record<ShipSize, number>> = { fighter: 8, frigate: 4, destroyer: 3, cruiser: 2, 'heavy-cruiser': 1, capital: 1 };
+
+export const SIZE_NAMES: Readonly<Record<ShipSize, string>> = { fighter: 'Fighter', frigate: 'Frigate', destroyer: 'Destroyer', cruiser: 'Cruiser', 'heavy-cruiser': 'Heavy cruiser', capital: 'Capital ship' };
+
+export const SHIP_SIZES: Readonly<Record<string, ShipSize>> = {
+  // Mining and logistics: light hulls in numbers, the big ones alone.
+  prospector: 'frigate', 'gas-harvester': 'destroyer', 'ice-cutter': 'destroyer', 'crystal-driller': 'destroyer', 'regolith-dredge': 'cruiser',
+  'exotic-siphon': 'heavy-cruiser', 'void-trawler': 'heavy-cruiser',
+  'bulk-freighter': 'cruiser', 'survey-cutter': 'frigate', 'construction-tender': 'cruiser', pathfinder: 'frigate', 'colony-ark': 'heavy-cruiser',
+  // Warships.
+  interceptor: 'fighter',
+  lancer: 'frigate', jammer: 'frigate', 'flak-picket': 'frigate', 'boarding-corvette': 'frigate', 'drop-ship': 'frigate',
+  'railgun-monitor': 'destroyer', 'missile-barge': 'destroyer', bombard: 'destroyer', 'tractor-tender': 'destroyer',
+  brawler: 'cruiser', 'repair-tender': 'cruiser',
+  'planet-cracker': 'heavy-cruiser',
+  // Battleships, carriers, flagships and dreadnoughts.
+  'swarm-carrier': 'capital', 'assault-carrier': 'capital', dreadnought: 'capital', leviathan: 'capital', monolith: 'capital', flagship: 'capital',
+};
+
+/** A class's size (a class missing from the table counts as a frigate). */
+export const sizeOf = (classId: string): ShipSize => SHIP_SIZES[classId] ?? 'frigate';
+/** Hulls one ship of a class stands for. */
+export const hullsOf = (classId: string): number => HULLS_PER_SHIP[sizeOf(classId)];
+
+/**
+ * How well a doctrine's fire works on a target squadron of `hulls` hulls: missiles, drones and
+ * flak (barrage, suppression) spread across many small hulls; beams and railguns (long range)
+ * punch through one big one.
+ */
+export function vsHulls(doctrine: Doctrine, hulls: number): number {
+  const extra = Math.max(0, hulls - 1);
+  if (doctrine === 'barrage' || doctrine === 'suppression') return Math.min(1.5, 0.8 + 0.1 * extra);
+  if (doctrine === 'long') return Math.max(0.6, 1.3 - 0.1 * extra);
+  return 1;
+}

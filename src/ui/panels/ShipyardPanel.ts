@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { GameState } from '../../app/GameState';
 import type { Store } from '../../app/Store';
 import { RESOURCES, Resource } from '../../content/resources';
-import { DOCTRINES, SHIP_CLASSES, ShipClassDef, ShipRole } from '../../content/shipClasses';
+import { DOCTRINES, hullsOf, SHIP_CLASSES, ShipClassDef, ShipRole, SIZE_NAMES, sizeOf } from '../../content/shipClasses';
 import { canAfford } from '../../core/economy/Economy';
 import type { TechTree } from '../../core/research/TechTree';
 import { DESIGN_LIMITS, MAX_BLEND, ShipDesign, decodeDesign, encodeDesign } from '../../core/ships/ShipDesign';
@@ -172,7 +172,7 @@ export class ShipyardPanel extends Drawer {
         stat('Hull', c.hull), stat('Attack', c.attack),
         c.troops ? stat('Troops', c.troops) : null,
         c.mines ? stat('Mines', `+${3} ${RESOURCES.find((r) => r.id === c.mines)!.short}/yr`) : null,
-        stat('Supply', logisticsOf(c).supply)),
+        stat('Supply', logisticsOf(c).supply), stat(SIZE_NAMES[sizeOf(c.id)], hullsOf(c.id) === 1 ? '1 hull' : `squadron of ${hullsOf(c.id)}`)),
       c.doctrine !== 'civilian' && c.doctrine !== 'support' ? h('p', { class: 'small matchup' }, h('b', {}, 'Strong vs '), doc.strong, h('b', {}, '  ·  Weak vs '), doc.weak) : '',
       h('div', { class: 'build-row' },
         h('div', { class: 'costs' }, ...costRow, discount ? h('span', { class: 'muted small' }, `−${discount}% from research`) : null),

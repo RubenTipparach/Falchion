@@ -3,7 +3,8 @@ import type { ShipDesign } from '../../core/ships/ShipDesign';
 import { Rng, hashSeed } from '../../core/rng/Rng';
 import type { ShipFactory } from '../ships/ShipFactory';
 import { BattleFx, COL, mix3, rgb, WHITE, type RGB } from './BattleFx';
-import { sideAt, sstep, type BattleScript, type ScriptEvent, type ScriptShip, type Vec3 } from './BattleScript';
+import { hullsOf } from '../../content/shipClasses';
+import { health, sideAt, sstep, type BattleScript, type ScriptEvent, type ScriptShip, type Vec3 } from './BattleScript';
 import { ShipBatches } from './ShipBatches';
 
 /** One fleet as the stage draws it. */
@@ -37,8 +38,13 @@ export interface StageShip {
   deathPos: THREE.Vector3 | null;
   capPos: THREE.Vector3 | null;
   capQ: THREE.Quaternion | null;
-  /** Its pose when it was destroyed (the wing's hulls go up around it). */
+  /** Its pose when it was destroyed (the squadron's last hulls go up around it). */
   deathQ?: THREE.Quaternion;
+  /** Where its hulls sit in formation (units of its radius), and when each is lost (-Infinity: lost before the round). */
+  readonly form: readonly THREE.Vector3[];
+  readonly hullEnd: readonly number[];
+  /** Each lost hull's pose when it went up (worked out once). */
+  readonly hullPose: Array<{ p: THREE.Vector3; q: THREE.Quaternion } | null>;
   readonly keys: readonly [string, string];
   readonly chunks: ReadonlyArray<{ v: THREE.Vector3; axis: THREE.Vector3; w: number; s: THREE.Vector3; c: RGB }>;
   readonly fb: readonly THREE.Vector3[];
@@ -47,14 +53,23 @@ export interface StageShip {
 
 const SHIP_SCALE = 1.15;
 /**
- * Hulls drawn for each ship the rules count: one ship of a fleet is a wing of four flying in a
- * diamond (a lead, two flankers, one trailing), which fights, takes damage, dies and is boarded as one.
+ * Every ship the rules count is a squadron of hulls by its size (content/shipClasses hullsOf): a
+ * capital ship alone, two cruisers, three destroyers in a vic, four frigates in a diamond, eight
+ * fighters in two rows. The squadron fights, carries one health bar and is boarded as one; its
+ * hulls go up one by one as its health falls (the rules' squadron loses firepower the same way).
  */
-export const WING = 4;
-/** Where each hull of a wing sits, in units of its radius (x across, y up, z forward), centred on the wing. */
-const WING_OFF: readonly THREE.Vector3[] = [[0, 0, 1.2], [-1.35, -0.25, 0], [1.35, 0.25, 0], [0, 0.45, -1.2]].map(([x, y, z]) => new THREE.Vector3(x, y, z));
-/** Seconds between the hulls of a wing going up when it is destroyed. */
+const FORMATIONS: Readonly<Record<number, readonly Vec3[]>> = {
+  1: [[0, 0, 0]],
+  2: [[-0.9, 0, 0.35], [0.9, 0.15, -0.35]],
+  3: [[0, 0, 1.0], [-1.3, -0.2, -0.5], [1.3, 0.2, -0.5]],
+  4: [[0, 0, 1.2], [-1.35, -0.25, 0], [1.35, 0.25, 0], [0, 0.45, -1.2]],
+  8: [[-0.9, 0, 0.9], [0.9, 0.1, 0.9], [-2.7, -0.2, 0.5], [2.7, 0.2, 0.5], [-0.9, 0.3, -0.9], [0.9, -0.1, -0.9], [-2.7, 0.15, -1.3], [2.7, -0.15, -1.3]],
+};
+const formationOf = (n: number): THREE.Vector3[] => (FORMATIONS[n] ?? Array.from({ length: n }, (_, i) => [(i - (n - 1) / 2) * 1.6, 0, 0] as Vec3)).map(([x, y, z]) => new THREE.Vector3(x, y, z));
+/** Seconds between a squadron's remaining hulls going up when it is destroyed. */
 const WING_STAGGER = 0.16;
+/** Time step used to find when each hull is lost as the squadron's health falls. */
+const HULL_STEP = 0.1;
 /** Distance between the fleets as the range closes: by round (fractional), long → medium → short. */
 const SEP_KEYS: ReadonlyArray<readonly [number, number]> = [[0, 148], [2, 122], [2.08, 84], [4, 74], [4.08, 44], [12, 36], [1e6, 36]];
 /** Their brawlers press ahead of their line as the fleets close. */
@@ -134,7 +149,7 @@ export class BattleStage {
       for (const owner of [sh.side, sh.capBy]) {
         if (owner < 0) continue;
         const k = `${owner}|${sh.classId}`;
-        need.set(k, (need.get(k) ?? 0) + WING);
+        need.set(k, (need.get(k) ?? 0) + hullsOf(sh.classId));
       }
     }
     const sizes = new Map<string, { radius: number; length: number }>();
@@ -151,7 +166,10 @@ export class BattleStage {
       const hull: RGB[] = [rgb(design.colors.primary), rgb(design.colors.secondary)];
       const n = Math.min(12, 5 + Math.round(r * 0.8));
       const keyOf = (owner: number) => (owner < 0 ? '' : `${owner}|${s.classId}|${designKey(sides[owner].design(s.classId))}`);
+      const form = formationOf(hullsOf(s.classId));
+      const hullEnd = hullLosses(s, form.length, script.R);
       this.ships.push({
+        form, hullEnd, hullPose: form.map(() => null),
         s, cur: new THREE.Vector3(), q: new THREE.Quaternion(), fwd: new THREE.Vector3(0, 0, 1), r, len: size.length * SHIP_SCALE, visible: true,
         deathPos: null, capPos: null, capQ: null, keys: [keyOf(s.side), keyOf(s.capBy)],
         chunks: Array.from({ length: n }, (_, j) => ({
@@ -162,7 +180,7 @@ export class BattleStage {
         sparks: Array.from({ length: 22 }, () => ({ d: unit(rng), v: rng.range(6, 22) })),
       });
     }
-    this.evState = script.events.map((e, i) => ({ p0: null, fw0: null, ws: (i * 7 + e.s) % WING, wd: (i * 3 + Math.max(0, e.d ?? 0)) % WING }));
+    this.evState = script.events.map((e, i) => ({ p0: null, fw0: null, ws: i * 7 + e.s, wd: i * 3 + Math.max(0, e.d ?? 0) }));
   }
 
   /** Distance between the fleets at `t`. */
@@ -221,9 +239,16 @@ export class BattleStage {
     return sh.deathPos;
   }
 
-  /** Hull `k` of a wing: where it is now (or, given a pose, there). */
+  /** Hull `k` of a squadron: where it is now (or, given a pose, there). */
   wingPos(sh: StageShip, k: number, out: THREE.Vector3, pos: THREE.Vector3 = sh.cur, quat: THREE.Quaternion = sh.q): THREE.Vector3 {
-    return out.copy(WING_OFF[k % WING]).multiplyScalar(sh.r).applyQuaternion(quat).add(pos);
+    return out.copy(sh.form[k % sh.form.length]).multiplyScalar(sh.r).applyQuaternion(quat).add(pos);
+  }
+
+  /** One of the squadron's hulls still flying at `t` (picked by `n`): fire comes from and lands on those. */
+  private liveHull(sh: StageShip, n: number, t: number): number {
+    let alive = 0;
+    for (const end of sh.hullEnd) if (end > t) alive++;
+    return alive ? n % alive : 0;
   }
 
   private muzzle(sh: StageShip, out: THREE.Vector3, k = 0): THREE.Vector3 { return this.wingPos(sh, k, out).addScaledVector(sh.fwd, sh.len * 0.42); }
@@ -233,16 +258,16 @@ export class BattleStage {
       const s = this.ships[e.s];
       st.p0 = new THREE.Vector3();
       this.posOf(s, e.t0, _r, _qa);
-      this.wingPos(s, st.ws, st.p0, _r, _qa);
+      this.wingPos(s, this.liveHull(s, st.ws, e.t0), st.p0, _r, _qa);
       st.fw0 = FW.clone().applyQuaternion(_qa);
       st.p0.addScaledVector(st.fw0, s.len * 0.42);
     }
     return st.p0;
   }
 
-  private tgt(e: ScriptEvent, out: THREE.Vector3, k = 0): THREE.Vector3 {
+  private tgt(e: ScriptEvent, out: THREE.Vector3, k = 0, t = e.t0): THREE.Vector3 {
     const d = this.ships[e.d];
-    this.wingPos(d, k, out);
+    this.wingPos(d, this.liveHull(d, k, t), out);
     if (e.off) out.x += e.off[0] * d.r * 0.35, out.y += e.off[1] * d.r * 0.35, out.z += e.off[2] * d.r * 0.35;
     return out;
   }
@@ -263,7 +288,7 @@ export class BattleStage {
       sh.visible = t < sh.s.death;
       // The wing's hulls; when it is destroyed they go up one after another.
       const key = t >= sh.s.cap ? sh.keys[1] : sh.keys[0];
-      for (let k = 0; k < WING; k++) if (t < sh.s.death + k * WING_STAGGER) this.batches.add(key, this.wingPos(sh, k, _p), sh.q, SHIP_SCALE);
+      for (let k = 0; k < sh.form.length; k++) if (t < sh.hullEnd[k]) this.batches.add(key, this.wingPos(sh, k, _p), sh.q, SHIP_SCALE);
       this.shipFx(sh, t);
     }
     this.jamNow[0] = this.jamNow[1] = 0;
@@ -277,19 +302,21 @@ export class BattleStage {
       if (t > e.t0 + e.span || e.k === 'jam') continue;
       this.draw(e, this.evState[i], t);
     }
-    for (const [sh, a] of this.flash) if (sh.visible) for (let k = 0; k < WING; k++) this.fx.shield.add(this.wingPos(sh, k, _p), sh.q, _s.setScalar(sh.r * 1.18), this.shieldRgb[sideAt(sh.s, t)], a * 0.38);
+    for (const [sh, a] of this.flash) if (sh.visible) for (let k = 0; k < sh.form.length; k++) if (t < sh.hullEnd[k]) this.fx.shield.add(this.wingPos(sh, k, _p), sh.q, _s.setScalar(sh.r * 1.18), this.shieldRgb[sideAt(sh.s, t)], a * 0.38);
     this.fx.end();
     this.batches.end();
   }
 
   private shipFx(sh: StageShip, t: number): void {
     const s = sh.s;
-    if (t >= s.death) {
-      this.deathPosOf(sh);
-      for (let k = 0; k < WING; k++) this.wreck(sh, k, t - s.death - k * WING_STAGGER);
-      return;
+    // Hulls lost so far (as its health fell, or all at once as it died) go up where they were.
+    for (let k = 0; k < sh.form.length; k++) {
+      const end = sh.hullEnd[k];
+      if (end === -Infinity || t < end) continue;
+      if (!sh.hullPose[k]) { const pose = { p: new THREE.Vector3(), q: new THREE.Quaternion() }; this.posOf(sh, Math.min(end, s.death), _r, pose.q); this.wingPos(sh, k, pose.p, _r, pose.q); sh.hullPose[k] = pose; }
+      this.wreck(sh, k, t - end);
     }
-    this.liveFx(sh, t);
+    if (t < s.death) this.liveFx(sh, t);
   }
 
   /** One hull of a destroyed wing, `dt` seconds after it went up: flash, fireballs, a shockwave in the empire's colour, sparks, then wreckage that keeps drifting. */
@@ -297,7 +324,7 @@ export class BattleStage {
     if (dt < 0) return;
     const G = this.fx.glow, s = sh.s;
     {
-      const p = this.wingPos(sh, k, _w, sh.deathPos!, sh.deathQ!), r = sh.r, col = this.sideRgb[sideAt(s, s.death)];
+      const p = _w.copy(sh.hullPose[k]!.p), r = sh.r, col = this.sideRgb[sideAt(s, Math.min(s.death, sh.hullEnd[k]))];
       if (dt < 0.7) { const k = dt / 0.7; G.add(p, COL.flash, (1 - k) * 1.6, r * (3 + 7 * k)); }
       if (dt < 1.8) { const k = dt / 1.8; for (const o of sh.fb) G.add(_p.copy(o).multiplyScalar(1 + k * 1.6).add(p), mix3(COL.fire, COL.bad, k), (1 - k) ** 2 * 1.3, r * (1.1 + k * 1.8)); }
       if (dt < 1.2) { const k = dt / 1.2; G.add(p, col, (1 - k) * 0.9, r * (2 + k * 9), 1); }
@@ -352,7 +379,7 @@ export class BattleStage {
         const u = (t - e.t0) / e.f;
         if (u > 1 || !S || !D) return;
         const a = sstep(0, 0.1, u) * (1 - sstep(0.72, 1, u)) * ja;
-        this.muzzle(S, _a); this.tgt(e, _b);
+        this.muzzle(S, _a, this.liveHull(S, st.ws, e.t0)); this.tgt(e, _b, st.wd);
         const w = e.w ?? 0.4;
         B.add(_a, _b, c, a * 0.95, w);
         G.add(_a, c, a, w * 4); G.add(_b, c, a * 1.1, w * 8); G.add(_b, WHITE, a * 0.7, w * 2.5);
@@ -362,7 +389,7 @@ export class BattleStage {
       case 'slug': {
         if (!S || !D) return;
         const u = (t - e.t0) / e.f, w = e.w ?? 0.3;
-        this.muzzle(S, _a); this.tgt(e, _b);
+        this.muzzle(S, _a, this.liveHull(S, st.ws, e.t0)); this.tgt(e, _b, st.wd);
         if (u <= 1) {
           _p.lerpVectors(_a, _b, u); _r.lerpVectors(_a, _b, Math.max(0, u - 0.22));
           B.add(_r, _p, c, ja, w, 0, 1); G.add(_p, WHITE, 0.9 * ja, w * 4);
@@ -373,7 +400,7 @@ export class BattleStage {
       case 'missile': case 'drones': {
         if (!S || !D) return;
         const u = (t - e.t0) / e.f, p0 = this.launchPos(e, st);
-        this.tgt(e, _b);
+        this.tgt(e, _b, st.wd);
         _a.copy(st.fw0!).multiplyScalar(14).add(v3(e.k1 ?? [0, 0, 0], _p)).add(p0);
         _r.copy(_b).add(v3(e.k2 ?? [0, 0, 0], _p));
         const stop = e.icpt || 1;
@@ -415,7 +442,7 @@ export class BattleStage {
       }
       case 'bolt': case 'plasma': {
         if (!S || !D) return;
-        this.muzzle(S, _a); this.tgt(e, _b);
+        this.muzzle(S, _a, this.liveHull(S, st.ws, e.t0)); this.tgt(e, _b, st.wd);
         const dist = Math.max(0.01, _a.distanceTo(_b));
         const f = Math.max(0.18, dist / (e.speed ?? 85));
         const t0 = e.exact !== undefined ? e.exact - f : e.t0;
@@ -490,4 +517,24 @@ export class BattleStage {
 /** Designs repeat across classes and rounds: build each look once. */
 function designKey(d: ShipDesign): string {
   return [d.style, d.seed, d.length, d.bulk, d.engines, d.weapons, d.colors.primary, d.colors.secondary, d.colors.accent, d.traits.join(','), (d.blend ?? []).join(',')].join(':');
+}
+
+/**
+ * When each of a squadron's hulls is lost in the round: as its health falls the squadron keeps
+ * ceil(hulls × health) of them (never fewer than one until it dies, never more as Menders patch it),
+ * the last ones going up one after another as it is destroyed. -Infinity: lost before the round.
+ */
+export function hullLosses(s: ScriptShip, n: number, R: number): number[] {
+  const end = Array.from({ length: n }, () => Infinity);
+  const aliveAt = (t: number) => (t >= s.death ? 0 : Math.max(1, Math.ceil(n * health(s, t, R) - 1e-9)));
+  let alive = Math.min(n, aliveAt(0));
+  for (let k = alive; k < n; k++) end[k] = -Infinity;
+  for (let t = HULL_STEP; t < Math.min(R + HULL_STEP, s.death) && alive > 1; t += HULL_STEP) {
+    const now = Math.min(alive, aliveAt(Math.min(t, R)));
+    for (let k = now; k < alive; k++) end[k] = t;
+    alive = now;
+  }
+  // Destroyed: the hulls still flying go up one after another.
+  if (s.death < Infinity) for (let k = 0, j = 0; k < n; k++) if (end[k] > s.death) end[k] = s.death + (j++) * WING_STAGGER;
+  return end;
 }

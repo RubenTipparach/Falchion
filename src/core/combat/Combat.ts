@@ -1,4 +1,4 @@
-import type { Doctrine, ShipClassDef } from '../../content/shipClasses';
+import { hullsOf, vsHulls, type Doctrine, type ShipClassDef } from '../../content/shipClasses';
 import { Rng, hashSeed } from '../rng/Rng';
 
 export interface Squadron {
@@ -101,6 +101,19 @@ interface Group {
   /** Damage on the current (front) ship of the group. */
   wound: number;
   readonly hull: number;
+  /** Hulls one ship of it stands for (its squadron): a fighter 8, a capital ship 1. */
+  readonly hulls: number;
+}
+
+/**
+ * Ships a group fights with: its whole ships, plus the share of the damaged one's squadron still
+ * flying (each hull lives until its share of the hull points is gone, so a one-hull ship fires
+ * fully until it is destroyed).
+ */
+function firing(g: Group): number {
+  if (g.count <= 0) return 0;
+  const left = Math.ceil(g.hulls * Math.max(0, 1 - g.wound / g.hull) - 1e-9);
+  return g.count - 1 + left / g.hulls;
 }
 
 function groupsOf(side: Side, classes: ReadonlyMap<string, ShipClassDef>): Group[] {
@@ -111,7 +124,7 @@ function groupsOf(side: Side, classes: ReadonlyMap<string, ShipClassDef>): Group
       const def = classes.get(s.classId)!;
       const hull = Math.round(def.hull * (1 + hullPct / 100));
       // Damage carried in never quite kills a ship: that takes a new blow.
-      return { def, count: s.count, wound: Math.min(hull - 1, Math.max(0, side.damage?.[s.classId] ?? 0)), hull };
+      return { def, count: s.count, wound: Math.min(hull - 1, Math.max(0, side.damage?.[s.classId] ?? 0)), hull, hulls: hullsOf(def.id) };
     });
 }
 
@@ -139,10 +152,6 @@ interface Output {
 }
 
 /** Damage a side deals this round, split by doctrine. */
-function output(own: Group[], foe: Group[], b: CombatBonuses, foeB: CombatBonuses, band: Band, rng: Rng): number {
-  return outputOf(own, foe, b, foeB, band, rng).total;
-}
-
 function outputOf(own: Group[], foe: Group[], b: CombatBonuses, foeB: CombatBonuses, band: Band, rng: Rng): Output {
   const flagship = own.some((g) => g.def.id === 'flagship' && g.count > 0) ? 1.1 : 1;
   const morale = 1 + (b.morale ?? 0) / 100;
@@ -153,7 +162,7 @@ function outputOf(own: Group[], foe: Group[], b: CombatBonuses, foeB: CombatBonu
   let total = 0;
   for (const g of alive(own)) {
     const d = g.def.doctrine;
-    let dmg = g.count * g.def.attack * BAND_MULT[d][band];
+    let dmg = firing(g) * g.def.attack * BAND_MULT[d][band];
     dmg *= 1 + ((b as Record<string, number | undefined>)[d] ?? 0) * 0.05;
     if (d === 'barrage') dmg *= 1 - flak + (foeB.vsBarrage ? -foeB.vsBarrage / 100 : 0);
     if (d === 'long' && foeB.vsLong) dmg *= 1 - foeB.vsLong / 100;
@@ -166,13 +175,35 @@ function outputOf(own: Group[], foe: Group[], b: CombatBonuses, foeB: CombatBonu
   return { total: Math.max(0, total * morale * flagship * jam * roll), by, jam, flak };
 }
 
+/**
+ * A side's fire, by doctrine, spread across the target's groups in proportion to ship count and
+ * scaled by how well each doctrine works on that group's squadrons (vsHulls: missiles and flak on
+ * swarms, beams on capital ships). Returns ships destroyed (tallied by class in `lostBy`).
+ */
+function applyFire(gs: Group[], by: Readonly<Record<string, number>>, lostBy?: Record<string, number>): number {
+  const live = alive(gs);
+  return wound(live, spreadFire(by, live.map((g) => ({ classId: g.def.id, count: g.count }))), lostBy);
+}
+
+/** The damage each of a target's squadrons takes from fire split by doctrine (see applyFire). */
+export function spreadFire(by: Readonly<Record<string, number>>, target: readonly Squadron[]): number[] {
+  const total = target.reduce((n, x) => n + Math.max(0, x.count), 0);
+  if (!total) return target.map(() => 0);
+  return target.map((x) => Object.entries(by).reduce((n, [d, dmg]) => n + dmg * (Math.max(0, x.count) / total) * vsHulls(d as Doctrine, hullsOf(x.classId)), 0));
+}
+
 /** Spread damage across groups in proportion to ship count; returns ships destroyed (tallied by class in `lostBy`). */
 function applyDamage(gs: Group[], dmg: number, lostBy?: Record<string, number>): number {
   const live = alive(gs);
   const total = shipsOf(live);
+  return wound(live, live.map((g) => dmg * (g.count / total)), lostBy);
+}
+
+function wound(live: Group[], per: readonly number[], lostBy?: Record<string, number>): number {
   let destroyed = 0;
-  for (const g of live) {
-    g.wound += dmg * (g.count / total);
+  for (let i = 0; i < live.length; i++) {
+    const g = live[i];
+    g.wound += per[i];
     const lost = Math.min(g.count, Math.floor(g.wound / g.hull));
     g.count -= lost;
     g.wound -= lost * g.hull;
@@ -246,10 +277,11 @@ export function resolveBattle(a: Side, d: Side, classes: readonly ShipClassDef[]
     if (!fighting(sides[0]) || !fighting(sides[1])) break;
     const band = bandOf(r);
     const notes: string[] = [];
-    const dmg0 = output(sides[0], sides[1], bon[0], bon[1], band, rng);
-    const dmg1 = output(sides[1], sides[0], bon[1], bon[0], band, rng);
-    const lost1 = applyDamage(sides[1], dmg0);
-    const lost0 = applyDamage(sides[0], dmg1);
+    const out0 = outputOf(sides[0], sides[1], bon[0], bon[1], band, rng);
+    const out1 = outputOf(sides[1], sides[0], bon[1], bon[0], band, rng);
+    const dmg0 = out0.total, dmg1 = out1.total;
+    const lost1 = applyFire(sides[1], out0.by);
+    const lost0 = applyFire(sides[0], out1.by);
     const cap0 = capture(sides[0], sides[1], bon[0], band);
     const cap1 = capture(sides[1], sides[0], bon[1], band);
     merge(captured[0], cap0);
@@ -348,7 +380,7 @@ export function resolveRound(a: Side, d: Side, classes: readonly ShipClassDef[],
   const out1 = outputOf(sides[1], sides[0], bon[1], bon[0], band, rng);
   const dmg0 = out0.total, dmg1 = out1.total;
   const lostBy: [Record<string, number>, Record<string, number>] = [{}, {}];
-  const losses = [applyDamage(sides[0], dmg1, lostBy[0]), applyDamage(sides[1], dmg0, lostBy[1])];
+  const losses = [applyFire(sides[0], out1.by, lostBy[0]), applyFire(sides[1], out0.by, lostBy[1])];
   // Boarders take the ships this round's fire crippled.
   const cap0 = capture(sides[0], sides[1], bon[0], band);
   const cap1 = capture(sides[1], sides[0], bon[1], band);

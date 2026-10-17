@@ -91,9 +91,9 @@ On narrow screens the meter SHALL sit under the top bar instead of over the pane
 - **WHEN** the view is open on a 390 by 844 touch screen
 - **THEN** the meter, health bars and dock fit, one finger turns the camera and a pinch zooms
 
-### Requirement: Each ship is a wing of four
-The battle view SHALL draw every ship the rules count as a wing of four hulls of its class in close formation. A wing SHALL fire, take hits, carry one health bar, be boarded and be destroyed as one ship; when it is destroyed its four hulls SHALL go up one after another.
+### Requirement: Each ship is a squadron
+The battle view SHALL draw every ship the rules count as its squadron: as many hulls as its size stands for (ship-squadrons), in close formation. A squadron SHALL fire, take hits, carry one health bar and be boarded as one ship; its hulls SHALL go up one by one as its health falls, and the rest together when it is destroyed.
 
-#### Scenario: A lancer lost
-- **WHEN** the round destroys one Lancer of a fleet
-- **THEN** a wing of four Lancer hulls explodes in quick succession, and the fleet's Lancer count drops by one
+#### Scenario: A Lancer squadron lost
+- **WHEN** the round destroys one Lancer (a frigate) of a fleet
+- **THEN** its remaining hulls of four explode in quick succession, and the fleet's Lancer count drops by one

@@ -84,7 +84,8 @@ describe('NebulaSkyPainter', () => {
     const s: NebulaColor = { r: 0, g: 0, b: 0, a: 0 };
     let empty: [number, number] | null = null, full: [number, number] | null = null;
     for (let i = 0; i < 4000 && !(empty && full); i++) {
-      const x = (i % 63) * 97 - 3000, z = Math.floor(i / 63) * 89 - 3000;
+      // Out in the disc: the core is one solid cloud.
+      const x = (i % 63) * 97 + 15_000, z = Math.floor(i / 63) * 89 - 3000;
       field.sample(x, z, 0, s);
       if (!empty && s.a < 0.05) empty = [x, z];
       if (!full && s.a > 0.6) full = [x, z];
@@ -143,12 +144,30 @@ describe('NebulaSkyPainter', () => {
 });
 
 describe('nebula follows the spiral arms', () => {
-  it('is richer along the arms than in the gaps, sparse in the core and gone past the rim', async () => {
+  it('is richer along the arms than in the gaps, one blob in the core and gone past the rim', async () => {
     const { armPresence } = await import('./nebulaField');
-    const ring = Array.from({ length: 360 }, (_, i) => armPresence(18_000 * Math.cos(i / 57.3), 18_000 * Math.sin(i / 57.3)));
-    expect(Math.max(...ring)).toBeGreaterThan(0.9);
-    expect(Math.min(...ring)).toBeLessThan(0.2);
-    expect(armPresence(0, 0)).toBeLessThan(0.35);
+    const ring = (r: number) => Array.from({ length: 360 }, (_, i) => armPresence(r * Math.cos(i / 57.3), r * Math.sin(i / 57.3)));
+    expect(Math.max(...ring(18_000))).toBeGreaterThan(0.9);
+    expect(Math.min(...ring(18_000))).toBeLessThan(0.2);
+    // The core: no spiral gaps, all the way round.
+    expect(Math.min(...ring(2_000))).toBeGreaterThan(0.95);
+    expect(armPresence(0, 0)).toBe(1);
     expect(armPresence(40_000, 0)).toBe(0);
+  });
+
+  it('burns bright white, yellow and orange in the core, with no empty patches', async () => {
+    const { NebulaField } = await import('./nebulaField');
+    const field = new NebulaField(1337);
+    const s = { r: 0, g: 0, b: 0, a: 0 };
+    let minA = 1, warm = 0, n = 0;
+    for (let i = 0; i < 400; i++) {
+      const a = i * 2.39996, r = 2_500 * Math.sqrt((i + 0.5) / 400);
+      field.sample(r * Math.cos(a), r * Math.sin(a), 0, s);
+      minA = Math.min(minA, s.a);
+      if (s.r >= s.b && s.g >= s.b) warm++;
+      n++;
+    }
+    expect(minA).toBeGreaterThan(0.4);
+    expect(warm / n).toBeGreaterThan(0.95);
   });
 });

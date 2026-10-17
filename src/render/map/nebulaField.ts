@@ -14,7 +14,8 @@ import { hash01, hashSeed } from '../../core/rng/Rng';
  * their colour. `detail` (0..1, from `nebulaDetail`) fades the fine texture into a smooth fill as
  * the view zooms out, where it would only alias into speckle. Outside the large clouds space
  * stays dark, apart from a faint haze. The large clouds themselves follow the galaxy's spiral
- * arms (`armPresence`): rich along the arms, sparse between them and in the old core.
+ * arms (`armPresence`): rich along the arms, sparse between them. Toward the core the arms
+ * merge into one bright blob (`coreHeat`) of white, yellow and orange clouds, with no gaps.
  *
  * `sample()` returns the colour the map draws at a galaxy point: `rgb` with a
  * coverage `alpha`; the map adds `rgb * alpha * 1.3` over the background.
@@ -30,18 +31,25 @@ const FINE_TINT = 0.35;
 const { arms: ARMS, pitch: PITCH, radius: GALAXY_R, bulgeRadius: BULGE } = DEFAULT_GALAXY;
 const INV_TAN_PITCH = 1 / Math.tan(PITCH);
 
+/** The core blob, 0..1: full in the bulge, fading out to where the arms take over. */
+export function coreHeat(r: number): number {
+  return 1 - smoothstep(BULGE * 1.1, BULGE * 2.9, r);
+}
+
 /**
  * How much nebula the galaxy holds at a point, 0..1: full along the spiral arms, thin in the
- * gaps between them, sparse in the old stellar core and gone past the rim.
+ * gaps between them, full again in the core (the arms merge into one blob instead of winding
+ * into skinny spirals) and gone past the rim.
  */
 export function armPresence(x: number, z: number): number {
   const r = Math.hypot(x, z);
   const phase = ARMS * (Math.atan2(z, x) - Math.log(Math.max(r, 1) / 1_500) * INV_TAN_PITCH);
   const arm = Math.pow(0.5 + 0.5 * Math.cos(phase), 1.5);
-  const core = 0.25 + 0.75 * smoothstep(BULGE * 0.8, BULGE * 2.2, r);
   const edge = 1 - smoothstep(GALAXY_R * 0.82, GALAXY_R * 1.02, r);
-  return (0.12 + 0.88 * smoothstep(0.08, 0.55, arm)) * core * edge;
+  return mix(0.12 + 0.88 * smoothstep(0.08, 0.55, arm), 1, coreHeat(r)) * edge;
 }
+/** Core colours: hot white, yellow and orange. */
+const CORE_WHITE = [1.0, 0.93, 0.80], CORE_YELLOW = [1.0, 0.78, 0.34], CORE_ORANGE = [0.98, 0.50, 0.18];
 /** Added to lattice coordinates so the GPU only ever casts positive ints to unsigned. */
 const LATTICE_OFFSET = 1 << 30;
 /** Shader time (seconds) to drift units: the clouds move very slowly. */
@@ -84,23 +92,29 @@ export const NEBULA_GLSL = /* glsl */ `
     return vec4(col, smoothstep(0.30, 0.85, n) * (1.0 - dust));
   }
   // Nebula the galaxy holds here (armPresence): along the arms, thin between them.
+  float coreHeat(float r) { return 1.0 - smoothstep(${(BULGE * 1.1).toFixed(1)}, ${(BULGE * 2.9).toFixed(1)}, r); }
   float armPresence(vec2 p) {
     float r = length(p);
     float phase = ${ARMS.toFixed(1)} * (atan(p.y, p.x) - log(max(r, 1.0) / 1500.0) * ${INV_TAN_PITCH.toFixed(8)});
     float arm = pow(0.5 + 0.5 * cos(phase), 1.5);
-    float core = 0.25 + 0.75 * smoothstep(${(BULGE * 0.8).toFixed(1)}, ${(BULGE * 2.2).toFixed(1)}, r);
     float edge = 1.0 - smoothstep(${(GALAXY_R * 0.82).toFixed(1)}, ${(GALAXY_R * 1.02).toFixed(1)}, r);
-    return (0.12 + 0.88 * smoothstep(0.08, 0.55, arm)) * core * edge;
+    return mix(0.12 + 0.88 * smoothstep(0.08, 0.55, arm), 1.0, coreHeat(r)) * edge;
   }
   // Map colour at an absolute galaxy point: rgb and coverage.
   vec4 nebulaSample(vec2 hit, float t, float detail) {
     vec4 region = cloudLayer(hit / ${REGION_SCALE.toFixed(1)} + 11.0, t * 0.5);
     vec4 fine = cloudLayer(hit / ${CLOUD_SCALE.toFixed(1)}, t);
-    float mask = smoothstep(0.12, 0.55, region.a * (0.35 + 0.95 * armPresence(hit)));
+    float heat = coreHeat(length(hit));
+    // In the core the large layer's gaps fill in: one blob, textured by the fine clouds.
+    float mask = mix(smoothstep(0.12, 0.55, region.a * (0.35 + 0.95 * armPresence(hit))), 1.0, heat * 0.9);
     vec3 col = mix(region.rgb, fine.rgb, ${FINE_TINT});
     float cover = mask * mix(0.6, min(1.0, fine.a * 1.25), detail);
     // Faint two-tone haze, strongest inside the large clouds.
     float hazeN = fbm(hit / ${HAZE_SCALE.toFixed(1)} + 3.0);
+    // The core burns white, yellow and orange (the haze noise picks the mix), never dark.
+    vec3 coreCol = mix(mix(vec3(${CORE_ORANGE.join(', ')}), vec3(${CORE_YELLOW.join(', ')}), smoothstep(0.30, 0.60, hazeN)), vec3(${CORE_WHITE.join(', ')}), smoothstep(0.55, 0.80, hazeN));
+    col = mix(col, coreCol * (0.7 + 0.33 * fine.a), heat * 0.85);
+    cover = max(cover, heat * (0.52 + 0.32 * fine.a));
     vec3 haze = mix(vec3(0.10, 0.16, 0.42), vec3(0.32, 0.12, 0.40), hazeN);
     float hazeA = 0.16 * smoothstep(0.25, 0.75, hazeN) * (0.25 + 0.75 * mask);
     return vec4(mix(mix(haze, region.rgb * 0.6, mask), col, clamp(cover * 1.6, 0.0, 1.0)), cover * 0.85 + hazeA);
@@ -159,13 +173,17 @@ export class NebulaField {
     const reg = this.region, fin = this.fine;
     this.cloudLayer(x / REGION_SCALE + 11, z / REGION_SCALE + 11, t * 0.5, reg);
     this.cloudLayer(x / CLOUD_SCALE, z / CLOUD_SCALE, t, fin);
-    const mask = smoothstep(0.12, 0.55, reg[3] * (0.35 + 0.95 * armPresence(x, z)));
-    const cover = mask * mix(0.6, Math.min(1, fin[3] * 1.25), detail);
+    const heat = coreHeat(Math.hypot(x, z));
+    const mask = mix(smoothstep(0.12, 0.55, reg[3] * (0.35 + 0.95 * armPresence(x, z))), 1, heat * 0.9);
+    let cover = mask * mix(0.6, Math.min(1, fin[3] * 1.25), detail);
     const hazeN = this.fbm(x / HAZE_SCALE + 3, z / HAZE_SCALE + 3);
+    const sY = smoothstep(0.30, 0.60, hazeN), sW = smoothstep(0.55, 0.80, hazeN);
+    cover = Math.max(cover, heat * (0.52 + 0.32 * fin[3]));
     const k = clamp01(cover * 1.6);
     const rgb = [0, 0, 0];
     for (let i = 0; i < 3; i++) {
-      const col = mix(reg[i], fin[i], FINE_TINT);
+      const coreCol = mix(mix(CORE_ORANGE[i], CORE_YELLOW[i], sY), CORE_WHITE[i], sW);
+      const col = mix(mix(reg[i], fin[i], FINE_TINT), coreCol * (0.7 + 0.33 * fin[3]), heat * 0.85);
       const haze = mix(mix(HAZE_A[i], HAZE_B[i], hazeN), reg[i] * 0.6, mask);
       rgb[i] = mix(haze, col, k);
     }

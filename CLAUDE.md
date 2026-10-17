@@ -15,6 +15,9 @@ validation, build and a server smoke test, then deploys to **Fly.io**, the one a
 (`server/`: zero-dependency Node server serving the client + `/healthz` +
 `/api/info` + the world clock `/api/clock` and tick stream `/api/ticks`; future home of the MMO server).
 The world is realtime: one tick per minute = one game year (`server/clock.json`, shared with the client).
+Empires keep playing while their owners are away: each world year the server plays every away empire
+forward with the game's own rules (`src/sim/headless.ts`, bundled by `npm run build:sim` into
+`server/sim/`, driven by `server/simTicker.mjs`).
 The most recent push wins. The Fly job skips
 with a notice until `FLY_API_TOKEN` is set and the `falchion` app exists (see
 `server/fly.toml`). Secrets: `FLY_API_TOKEN`, plus `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` and

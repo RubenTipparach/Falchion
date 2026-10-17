@@ -1,5 +1,6 @@
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
-import { Hex, hexAdd, worldToHex } from '../core/hex/Hex';
+import { Hex, hexAdd, hexDistance, worldToHex } from '../core/hex/Hex';
+import type { TradePartner } from '../content/society';
 import { Rng, hash01, hashSeed } from '../core/rng/Rng';
 import type { TerritoryClaim } from '../render/map/TerritoryLayer';
 
@@ -69,4 +70,14 @@ export function createWorld(galaxy: GalaxyModel, playerKey?: string, homeHint?: 
     ...neighbours.map((n) => ({ name: n.name, color: n.color, kind: n.kind, home: n.home.hex, colonies: [{ hex: n.home.hex, radius: HOME_RADIUS }] })),
   ];
   return { home, claims, neighbours };
+}
+
+/** Trade partners derived from the world, with distances from home. */
+export function tradePartners(world: World, home: StarSystem): TradePartner[] {
+  const dist = (h: { q: number; r: number }) => hexDistance(home.hex, h);
+  const mine = world.claims.find((c) => c.kind === 'player')!;
+  return [
+    ...mine.colonies.slice(1).map((c, i) => ({ id: `colony-${i}`, name: `Colony ${['Aster', 'Brannoc', 'Cirrus', 'Daleth'][i] ?? i + 1}`, kind: 'colony' as const, distance: Math.max(1, dist(c.hex)) })),
+    ...world.neighbours.map((n) => ({ id: n.name, name: n.name, kind: n.kind === 'alien' ? ('alien' as const) : ('player' as const), distance: dist(n.home.hex) })),
+  ];
 }

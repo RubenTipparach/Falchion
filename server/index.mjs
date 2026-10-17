@@ -15,6 +15,7 @@ import { createChat } from './chat.mjs';
 import { createPlayerFeed } from './live.mjs';
 import { createNotifier } from './notifier.mjs';
 import { linkPreview, withPreview } from './links.mjs';
+import { createSimTicker } from './simTicker.mjs';
 import { createStore } from './store.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -167,9 +168,30 @@ function scheduleTick() {
   setTimeout(() => {
     worldTick = tickAt(Date.now());
     broadcast('tick', clockInfo());
+    void simTicker.tick(worldTick);
     scheduleTick();
   }, wait).unref?.();
 }
+
+// Empires keep playing while their owners are away (see simTicker.mjs). The simulation is
+// bundled into ./sim/ by `npm run build:sim` (CI and the Docker image build it).
+let simWarned = false;
+const loadSim = async () => {
+  try {
+    return await import('./sim/headless.mjs');
+  } catch {
+    if (!simWarned) console.warn('No bundled simulation (run npm run build:sim): empires only advance while their owners play.');
+    simWarned = true;
+    return null;
+  }
+};
+export const simTicker = createSimTicker({
+  store, loadSim,
+  isOnline: (id) => chat.online().some((u) => u.id === id),
+  publish: (p) => playerFeed.publish(p),
+  publicView: (p) => publicView(p),
+  log: (m) => console.warn(m),
+});
 // Proxies drop idle streams; a comment every 20 s keeps them open.
 setInterval(() => { for (const res of listeners) res.write(': keep-alive\n\n'); }, 20_000).unref?.();
 

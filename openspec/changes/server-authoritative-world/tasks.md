@@ -1,6 +1,6 @@
 - [x] 1 Extract the rules from GameController into a pure EmpireSim (no three/DOM); controller extends it
-- [ ] 2 Server bundle of the simulation (Vite SSR), built in CI and Docker
-- [ ] 3 Server ticks every empire each minute and persists it
+- [x] 2 Server bundle of the simulation (Vite SSR: `npm run build:sim` → server/sim/headless.mjs), built in CI and Docker
+- [x] 3 Server plays every away empire forward each world year and persists it (server/simTicker.mjs); owners playing (online, or saved within 2.5 min) are left to their browsers
 - [ ] 4 Command API: client sends commands, server applies them and returns state; validation by ids
 - [ ] 5 Client adopts server state after each command and tick (signed in); guests stay local
-- [ ] 6 Tests: sim determinism (client = server), commands, ticking offline empires
+- [x] 6 Tests: the server's simulation equals the client's, determinism, ticking away empires, never overwriting a fresher owner save

@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { specOf } from '../content/logistics';
-import type { TradePartner } from '../content/society';
 import { arrivalTurn, hexAt } from '../core/fleet/Fleet';
 import { WorldClock } from './WorldClock';
 import type { SaveGame } from './SaveGame';
@@ -22,9 +21,10 @@ import type { FleetInfo, GameActions, GameQueries, PanelId } from '../ui/GameAct
 import type { Hud } from '../ui/Hud';
 import type { TopBar } from '../ui/TopBar';
 import type { GameState } from './GameState';
+export { tradePartners } from './World';
 import { routePath, systemRoute } from './Routes';
 import { touchFirst } from '../ui/dom';
-import type { World } from './World';
+
 import { EmpireSim, SimDeps } from '../sim/EmpireSim';
 
 export interface ControllerDeps extends SimDeps {
@@ -412,12 +412,3 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
   };
 }
 
-/** Trade partners derived from the world, with distances from home. */
-export function tradePartners(world: World, home: StarSystem): TradePartner[] {
-  const dist = (h: { q: number; r: number }) => hexDistance(home.hex, h);
-  const mine = world.claims.find((c) => c.kind === 'player')!;
-  return [
-    ...mine.colonies.slice(1).map((c, i) => ({ id: `colony-${i}`, name: `Colony ${['Aster', 'Brannoc', 'Cirrus', 'Daleth'][i] ?? i + 1}`, kind: 'colony' as const, distance: Math.max(1, dist(c.hex)) })),
-    ...world.neighbours.map((n) => ({ id: n.name, name: n.name, kind: n.kind === 'alien' ? ('alien' as const) : ('player' as const), distance: dist(n.home.hex) })),
-  ];
-}

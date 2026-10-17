@@ -44,6 +44,11 @@ export function createStore(dir) {
         return false;
       }
     },
+    /** Every stored player id. */
+    async ids() {
+      await ready();
+      return (await readdir(dir)).filter((n) => /^\d{5,25}\.json$/.test(n)).map((n) => n.slice(0, -5));
+    },
     /** Admin view: every player with progress, last save time and save size. */
     async summaries() {
       await ready();

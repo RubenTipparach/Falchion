@@ -26,6 +26,8 @@ jobs:
       cancel-in-progress: true
     env:
       OPENSPEC_TELEMETRY: '0'
+    outputs:
+      pages: ${{ steps.pages_gate.outputs.ready }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,14 +46,30 @@ jobs:
           curl -fsS localhost:8090/ | grep -q '<div id="app">'
           curl -fsS localhost:8090/api/info
           kill %1
+      # Pre-bootstrap is "skip, don't fail": until Pages is enabled with
+      # source "GitHub Actions" (Settings -> Pages), the Pages deploy skips.
+      - name: Check Pages readiness
+        id: pages_gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" --jq .build_type 2>/dev/null | grep -qx workflow; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::GitHub Pages is not enabled with source 'GitHub Actions'; skipping Pages deploy. Enable it in Settings -> Pages."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/configure-pages@v5
+        if: steps.pages_gate.outputs.ready == 'true'
       - uses: actions/upload-pages-artifact@v3
+        if: steps.pages_gate.outputs.ready == 'true'
         with:
           path: dist
 
   deploy-pages:
     name: Deploy to GitHub Pages
     needs: build
+    if: needs.build.outputs.pages == 'true'
     runs-on: ubuntu-latest
     # Never cancel a Pages deploy mid-flight: an orphaned in-progress
     # deployment blocks later deploys. Queue them; the newest lands last.

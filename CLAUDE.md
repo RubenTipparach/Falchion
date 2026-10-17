@@ -9,8 +9,15 @@ Hex-based, at-scale 4X MMO (three.js + TypeScript, Discord integration planned).
 - `npm run build` — production build
 - `npx openspec list` / `npx openspec validate --all` — spec-driven workflow
 
-## CI
-GitHub Actions (`.github/workflows/ci.yml`) runs typecheck, tests, spec validation and build on every push (any branch) and pull request. Every pushed commit that passes deploys `dist/` to GitHub Pages; the site always shows the most recent push.
+## CI / deploy
+`.github/workflows/deploy.yml` runs on every push to every branch: typecheck, tests, spec
+validation, build and a server smoke test, then deploys to **GitHub Pages** (static client)
+and **Fly.io** (`server/`: zero-dependency Node server serving the client + `/healthz` +
+`/api/info`; future home of the MMO server). The most recent push wins. The Fly job skips
+with a notice until `FLY_API_TOKEN` is set and the `falchion` app exists (see
+`server/fly.toml`). Optional Discord secrets (`DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`,
+`DISCORD_CLIENT_SECRET`, `DISCORD_GUILD_ID`, `DISCORD_WEBHOOK_URL`) are staged to Fly on deploy.
+Pattern mirrors RubenTipparach/high-frontier-fan-game.
 
 ## Workflow
 Spec first: use `/opsx:propose` → `/opsx:apply` → `/opsx:archive`. Specs live in `openspec/`.

@@ -18,6 +18,14 @@ npm test         # core unit tests
 - **Click a star**: select it to see its sector address, distance and travel time
 - Panels: **Shipyard** (procgen ship designer), **Research** (branching tech tree with shards), **Explore** (encounters and loot crates)
 
+## Deployment
+
+Every push to any branch builds, tests and deploys (latest push wins):
+
+- **GitHub Pages**: the static client. One-time: Settings → Pages → Source: *GitHub Actions*; Settings → Environments → `github-pages` → allow all branches.
+- **Fly.io**: `server/` (Node, serves the client + `/healthz`, `/api/info`). One-time: `fly apps create falchion`, then `fly tokens create deploy -a falchion` → repo secret `FLY_API_TOKEN`. Until then the job skips with a notice.
+- Optional Discord secrets (`DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_GUILD_ID`, `DISCORD_WEBHOOK_URL`) set as Actions secrets are staged to Fly on each deploy.
+
 ## Spec-driven development
 
 This repo uses [OpenSpec](https://openspec.dev/). Specs and change proposals live in `openspec/`; Claude Code commands are under `/opsx:*`. Project engineering skills (SOLID, modular systems, determinism, testing) live in `.claude/skills/`.

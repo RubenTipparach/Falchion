@@ -1,0 +1,13 @@
+# Allowlist for the Fly image (built from the repo root; see server/Dockerfile).
+*
+!package.json
+!package-lock.json
+!index.html
+!tsconfig.json
+!vite.config.ts
+!src
+!server
+**/*.test.ts
+**/node_modules
+**/*.log
+.env

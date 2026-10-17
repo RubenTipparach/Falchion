@@ -28,6 +28,13 @@ the server reuses it directly. See proposal.md for scope.
 - **Discord**: `IdentityProvider` (Discord OAuth / Embedded App SDK `authorize` +
   token exchange on the server) and `Notifier` (bot DMs, channel webhooks).
   The client depends only on the interfaces; a `MockIdentityProvider` serves local dev.
+  Follow the proven High Frontier setup: one-click "Connect Discord" uses OAuth scopes
+  `identify` + `guilds.join` to silently add the player to the bot's guild (bots can only
+  DM users they share a guild with); a manual user-id fallback works with just the bot
+  token. Features switch on per configured secret (`DISCORD_BOT_TOKEN` → DMs; client id +
+  secret + guild id → OAuth), staged to Fly by CI, so an unconfigured deploy is inert.
+- **Hosting**: the server runs on Fly.io (`server/`), the static client on GitHub Pages;
+  persistence adds a Fly volume with a single-writer machine (as High Frontier does).
 
 ## Risks / Trade-offs
 

@@ -31,8 +31,10 @@ the server reuses it directly. See proposal.md for scope.
   Follow the proven High Frontier setup: one-click "Connect Discord" uses OAuth scopes
   `identify` + `guilds.join` to silently add the player to the bot's guild (bots can only
   DM users they share a guild with); a manual user-id fallback works with just the bot
-  token. Features switch on per configured secret (`DISCORD_BOT_TOKEN` → DMs; client id +
-  secret + guild id → OAuth), staged to Fly by CI, so an unconfigured deploy is inert.
+  token. Features switch on per configured secret, so an unconfigured deploy is inert.
+  Minimal secrets: `DISCORD_CLIENT_ID` + `DISCORD_CLIENT_SECRET` (sign-in, `identify`
+  only) and `DISCORD_BOT_TOKEN` (DMs). `DISCORD_GUILD_ID` only if we add the auto-join
+  notification flow; channel webhooks are stored per player/admin in the DB, not as secrets.
 - **Hosting**: the server runs on Fly.io (`server/`), the static client on GitHub Pages;
   persistence adds a Fly volume with a single-writer machine (as High Frontier does).
 

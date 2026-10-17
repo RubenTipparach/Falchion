@@ -17,14 +17,6 @@ const MIME = {
   '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
 };
 
-/** Which Discord features are configured (secrets are staged by CI; see discord-integration spec). */
-export function discordStatus(env = process.env) {
-  return {
-    bot: Boolean(env.DISCORD_BOT_TOKEN),
-    oauth: Boolean(env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET && env.DISCORD_GUILD_ID),
-  };
-}
-
 function send(res, status, body, headers = {}) {
   res.writeHead(status, headers);
   res.end(body);
@@ -56,7 +48,7 @@ export const server = createServer(async (req, res) => {
   const { pathname } = new URL(req.url ?? '/', 'http://localhost');
   if (pathname === '/healthz') return send(res, 200, 'ok', { 'Content-Type': 'text/plain' });
   if (pathname === '/api/info') {
-    return send(res, 200, JSON.stringify({ name: 'falchion', version: VERSION, discord: discordStatus() }), { 'Content-Type': 'application/json' });
+    return send(res, 200, JSON.stringify({ name: 'falchion', version: VERSION }), { 'Content-Type': 'application/json' });
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed');
   return serveStatic(pathname, res);

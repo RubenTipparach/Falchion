@@ -119,34 +119,6 @@ jobs:
           fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
-      # Stage optional Discord secrets so the release boots with them
-      # (--stage defers the restart to the deploy below). Unset Actions
-      # secrets are left untouched on Fly.
-      - name: Sync Discord secrets to Fly.io
-        if: steps.fly_gate.outputs.ready == 'true'
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
-          DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
-          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          set -e
-          stage_secret() {
-            if [ -n "$2" ]; then
-              echo "Staging $1"
-              flyctl secrets set "$1=$2" --app "$APP" --stage
-            else
-              echo "::notice::$1 not set in Actions secrets; leaving Fly value untouched."
-            fi
-          }
-          stage_secret DISCORD_BOT_TOKEN     "${DISCORD_BOT_TOKEN}"
-          stage_secret DISCORD_CLIENT_ID     "${DISCORD_CLIENT_ID}"
-          stage_secret DISCORD_CLIENT_SECRET "${DISCORD_CLIENT_SECRET}"
-          stage_secret DISCORD_GUILD_ID      "${DISCORD_GUILD_ID}"
-          stage_secret DISCORD_WEBHOOK_URL   "${DISCORD_WEBHOOK_URL}"
-
       # Built from the repo root (see server/Dockerfile). Retries with
       # backoff because Fly's remote builder can drop connections transiently.
       - name: Deploy to Fly.io

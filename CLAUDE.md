@@ -15,8 +15,8 @@ validation, build and a server smoke test, then deploys to **GitHub Pages** (sta
 and **Fly.io** (`server/`: zero-dependency Node server serving the client + `/healthz` +
 `/api/info`; future home of the MMO server). The most recent push wins. The Fly job skips
 with a notice until `FLY_API_TOKEN` is set and the `falchion` app exists (see
-`server/fly.toml`). Optional Discord secrets (`DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`,
-`DISCORD_CLIENT_SECRET`, `DISCORD_GUILD_ID`, `DISCORD_WEBHOOK_URL`) are staged to Fly on deploy.
+`server/fly.toml`). The only secret needed is `FLY_API_TOKEN`
+(Discord secrets get added when the Discord integration is built).
 Pattern mirrors RubenTipparach/high-frontier-fan-game.
 
 ## Workflow

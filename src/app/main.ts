@@ -13,6 +13,7 @@ import { ALIEN_TECH, BRANCHES, DOMAINS, TECH_NODES } from '../content/techTree';
 import { SHIP_CLASSES } from '../content/shipClasses';
 import { GOVERNMENTS, POLICIES, TENETS } from '../content/society';
 import type { EconomyTables } from '../core/economy/Economy';
+import type { Market } from '../core/economy/Trade';
 import { BUILDINGS, STORAGE } from '../content/buildings';
 import { upkeepOf } from '../content/logistics';
 import { Planet } from '../core/galaxy/Planets';
@@ -99,10 +100,13 @@ async function bootstrap(): Promise<void> {
   const shared = await SharedWorldClient.connect(!!serverSaves && probe.server);
   // The server runs the NPC empires for signed-in players; a guest's browser runs its own.
   const onlineWorld = !!serverSaves && probe.server;
+  // Other players' worlds are markets for trade goods, from the live players list (PlayersSetup).
+  let otherMarkets: readonly Market[] = [];
   const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame, shared,
     playerId: onlineWorld ? identity.id : 'local', ...(onlineWorld ? {} : { npcs: 'local' as const }),
     // Signed-in players' notable news goes to the galaxy feed and the Discord channel (the server rate-limits it).
     report: signedIn ? reportActivity : undefined,
+    markets: () => otherMarkets,
   });
   // Signed in: the server runs the empire. Every order is applied here at once and sent to the
   // server as a command (only the outermost call: an order that gives others sends just itself);
@@ -210,7 +214,8 @@ async function bootstrap(): Promise<void> {
   store.subscribe((s, prev) => { if (s.turn !== prev.turn) drawNpcs(); });
   // Other players, live: the Players drawer, Galaxy feed, toasts and their fleets and territory (see PlayersSetup).
   const players = setupPlayers({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, store, territory,
-    fetchPlayers: serverSaves && (() => serverSaves.players()), message: (id) => chat.openThread(id) });
+    fetchPlayers: serverSaves && (() => serverSaves.players()), message: (id) => chat.openThread(id),
+    setMarkets: (markets) => { otherMarkets = markets; } });
   // In-game chat (global + DMs, location links, @mentions): see ChatSetup. Its stream also carries the players' live events.
   // The live stream also carries the server's state of this empire each year.
   // It also announces changes to the shared world.

@@ -1,7 +1,11 @@
 // The server runs every empire: a player's orders arrive here as commands (POST /api/command),
 // are applied with the game's own rules to the server's copy (the bundled simulation, see
 // src/sim/headless.ts and src/sim/commands.ts), saved, and the result returned as the truth the
-// player's browser adopts. Other players see the empire's new public view at once.
+// player's browser adopts. Other players see the empire's new public view at once. Every command
+// the rules applied or refused is appended to the empire's event log (eventLog.mjs). Other
+// players' worlds are markets for trade goods: `others` lists them (read once a year, see markets.mjs).
+
+import { appendSafely } from './eventLog.mjs';
 
 /** Commands per player per window: a burst for quick clicks, steady play well under it. */
 const BURST = 40;
@@ -10,17 +14,23 @@ const WINDOW_MS = 10_000;
 /**
  * @param {{
  *   store: { load(id: string): Promise<any>, save(id: string, record: any): Promise<void> },
- *   loadSim: () => Promise<{ applyCommand(save: unknown, player: object, worldTime: number, command: unknown, clientTime?: number, world?: unknown): { ok: boolean, error?: string, save: object, public: object, effects?: any[] } | null } | null>,
+ *   loadSim: () => Promise<{ applyCommand(save: unknown, player: object, worldTime: number, command: unknown, clientTime?: number, world?: unknown, others?: any[]): { ok: boolean, error?: string, save: object, public: object, effects?: any[] } | null } | null>,
  *   withLock: (key: string, fn: () => Promise<any>) => Promise<any>,
  *   world?: { get(): Promise<any>, apply(effects: any[]): Promise<any> },
  *   worldTime: () => number,
+ *   others?: () => Promise<any[]>,
  *   publish?: (player: object) => void,
  *   publicView?: (p: unknown) => object,
+ *   events?: { append(id: string, entry: object): Promise<void> | void },
+ *   log?: (msg: string) => void,
  *   now?: () => number,
  * }} deps
  */
-export function createCommandService({ store, loadSim, withLock, worldTime, world = null, publish = () => {}, publicView = (p) => p, now = () => Date.now() }) {
+export function createCommandService({ store, loadSim, withLock, worldTime, world = null, others = async () => [], publish = () => {}, publicView = (p) => p, events = null, log = () => {}, now = () => Date.now() }) {
   const recent = new Map(); // player id -> timestamps
+
+  // Not waited on: a log failure never fails an order.
+  const logEvent = appendSafely(events, log);
 
   function allow(id) {
     const t = now();
@@ -36,16 +46,23 @@ export function createCommandService({ store, loadSim, withLock, worldTime, worl
     if (!allow(user.id)) return { status: 429, body: { ok: false, error: 'too many orders: slow down a moment' } };
     const sim = await loadSim();
     if (!sim) return { status: 503, body: { ok: false, error: 'the server cannot run empires right now' } };
+    // Read before taking the lock: the list never waits on this empire.
+    const traders = await Promise.resolve().then(others).catch(() => []);
     return withLock(user.id, async () => {
       const record = await store.load(user.id);
       if (!record?.save) return { status: 404, body: { ok: false, error: 'no empire yet' } };
       const player = { id: user.id, name: String(record.player?.name ?? user.name ?? 'Commander') };
-      const result = sim.applyCommand(record.save, player, worldTime(), body?.command, typeof body?.time === 'number' ? body.time : undefined, world ? await world.get() : undefined);
+      // Read once: the log must hold exactly the times the rules ran with, for a replay.
+      const time = worldTime();
+      const clientTime = typeof body?.time === 'number' ? body.time : undefined;
+      const result = sim.applyCommand(record.save, player, time, body?.command, clientTime, world ? await world.get() : undefined, traders);
       if (!result) return { status: 409, body: { ok: false, error: 'this empire cannot be loaded' } };
       if (world && result.effects?.length) await world.apply(result.effects);
       const pub = publicView(result.public);
       const updatedAt = now();
       await store.save(user.id, { ...record, player: { ...record.player, ...user }, save: result.save, public: pub, updatedAt });
+      // Refused commands are logged too: they still caught the empire up, and the save changed.
+      logEvent(user.id, { at: updatedAt, worldTime: time, turn: record.save.turn, command: body?.command ?? null, clientTime, ok: result.ok, error: result.error });
       publish({ ...pub, id: user.id, name: user.name, avatar: user.avatar ?? null, updatedAt });
       return { status: 200, body: { ok: result.ok, ...(result.error ? { error: result.error } : {}), save: result.save } };
     });

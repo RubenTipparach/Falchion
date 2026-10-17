@@ -5,17 +5,22 @@ import { SPECTRAL_COLORS } from '../core/galaxy/GalaxyModel';
 import type { Planet } from '../core/galaxy/Planets';
 import { BIOMES } from '../content/biomes';
 import { BIOME_YIELDS, RESOURCES } from '../content/resources';
+import { hasWarships } from '../content/logistics';
 import type { FleetGroup, FleetInfo, GameActions, GameQueries } from './GameActions';
 import { formatDuration } from '../core/time/WorldTime';
 import { CLOCK } from '../app/WorldClock';
 import type { EconomyTables } from '../core/economy/Economy';
 import { exploreCost } from '../core/fleet/Logistics';
 import { countOf } from '../core/fleet/Presence';
+import { minedBy } from '../core/fleet/AutoMine';
+import { SHIP_CLASSES } from '../content/shipClasses';
 import { colonyView, crateLine, haulView, shipsText, storesView } from './widgets';
 import { collectWithFx } from './collectFx';
 import { clear, fmt, h, touchFirst } from './dom';
 import { icon, resourceIcon } from './icons';
 import { FREIGHTER } from '../core/economy/Trade';
+
+const minesOf = (classId: string) => SHIP_CLASSES.find((c) => c.id === classId)?.mines;
 
 export interface StarDetails {
   readonly address: string;
@@ -183,7 +188,9 @@ export class StarInfoPanel {
         storesView(group),
         h('div', { class: 'row orders' },
           this.orderChip(group, 'autoExplore', 'Auto-explore'),
-          this.orderChip(group, 'autoReturn', 'Return to resupply')),
+          this.orderChip(group, 'autoReturn', 'Return to resupply'),
+          minedBy(group.ships, minesOf).length ? this.orderChip(group, 'autoMine', 'Auto-mine') : '',
+          this.stanceChip(group)),
         this.cargoView(group, info.at),
         info.surveying ? h('p', { class: 'small' }, `Surveying ${info.surveying.name} this year`) : '',
         info.plan.length ? h('div', { class: 'survey-plan' }, h('span', { class: 'eyebrow' }, 'Survey route'),
@@ -196,7 +203,7 @@ export class StarInfoPanel {
         h('p', { class: 'notice' }, touchFirst()
           ? 'Press and hold a star, or anywhere in empty space, to send this fleet there. Pinch to zoom.'
           : 'Right-click a star, or anywhere in empty space, to send this fleet there. Right-drag to orbit the camera.'))
-        : h('p', { class: 'small muted' }, fleet.owner.startsWith('alien:') ? 'Hostile alien fleet.' : 'Another empire\'s fleet.'),
+        : h('p', { class: 'small muted' }, fleet.owner.startsWith('alien:') ? 'Hostile alien fleet.' : fleet.status ? `Another empire's fleet: ${fleet.status}.` : 'Another empire\'s fleet.'),
       h('div', { class: 'actions' },
         h('button', { class: 'btn', title: 'Centre the camera on this fleet', onclick: () => this.actions.focusFleet(fleet.id) }, icon('locate'), ' Centre'),
         h('button', { class: 'btn', title: 'Zoom in to the ship', onclick: () => this.actions.focusFleet(fleet.id, true) }, icon('focus'), ' Zoom'),
@@ -225,7 +232,14 @@ export class StarInfoPanel {
         !to && market && !sale ? h('button', { class: 'chip', title: `Load goods at your nearest colony and sell them at ${market.name}, again and again`, onclick: () => this.actions.tradeRun(g.id, at) }, `Trade run to ${market.name}`) : null));
   }
 
-  private orderChip(g: FleetGroup, key: 'autoExplore' | 'autoReturn', label: string): HTMLElement {
+  /** Warships only: an aggressive fleet attacks the fleets of other empires it meets at sea. */
+  private stanceChip(g: FleetGroup): HTMLElement | null {
+    if (!hasWarships(g.ships)) return null;
+    const on = g.orders?.stance === 'aggressive';
+    return h('button', { class: `chip ${on ? 'active' : ''}`, title: 'Aggressive: attack other empires\' fleets that meet this one at sea', 'aria-pressed': String(on), onclick: () => this.actions.setOrders(g.id, { ...g.orders, stance: on ? undefined : 'aggressive' }) }, on ? '✓ Aggressive' : 'Aggressive');
+  }
+
+  private orderChip(g: FleetGroup, key: 'autoExplore' | 'autoReturn' | 'autoMine', label: string): HTMLElement {
     const on = !!g.orders?.[key];
     return h('button', { class: `chip ${on ? 'active' : ''}`, 'aria-pressed': String(on), onclick: () => this.actions.setOrders(g.id, { ...g.orders, [key]: !on }) }, on ? `✓ ${label}` : label);
   }

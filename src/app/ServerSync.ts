@@ -2,6 +2,7 @@ import { cleanIdentity, type EmpireIdentity } from '../core/empire/Identity';
 import type { FleetMovement } from '../core/fleet/Fleet';
 import type { Hex } from '../core/hex/Hex';
 import { HERALDRY } from '../content/heraldry';
+import { hasWarships } from '../content/logistics';
 import type { TerritoryClaim } from '../render/map/TerritoryLayer';
 import type { FleetView } from '../render/map/FleetLayer';
 import type { GameState } from './GameState';
@@ -15,7 +16,8 @@ export interface PublicEmpire {
   readonly empire?: Pick<EmpireIdentity, 'name' | 'ruler' | 'title' | 'capital' | 'flag'>;
   readonly home: Hex;
   readonly colonies: readonly Hex[];
-  readonly fleets: ReadonlyArray<Pick<FleetView, 'id' | 'name' | 'movement' | 'design'>>;
+  /** `armed`: has warships. `stance`: 'aggressive' when it attacks the fleets it meets at sea (absent = passive). */
+  readonly fleets: ReadonlyArray<Pick<FleetView, 'id' | 'name' | 'movement' | 'design'> & { readonly armed: boolean; readonly stance?: 'aggressive' }>;
 }
 
 /** Another player in the shared galaxy, as /api/players returns them (and the live stream pushes them). */
@@ -59,7 +61,10 @@ export function publicEmpire(s: GameState, color: string): PublicEmpire {
     empire: id ? { name: id.name, ruler: id.ruler, title: id.title, capital: id.capital, flag: id.flag } : undefined,
     home: s.home.hex,
     colonies,
-    fleets: s.fleets.filter((f) => f.owner === s.playerName).map((f) => ({ id: f.id, name: f.name, movement: f.movement, design: f.design })),
+    fleets: s.fleets.filter((f) => f.owner === s.playerName).map((f) => {
+      const l = s.loadouts[f.id];
+      return { id: f.id, name: f.name, movement: f.movement, design: f.design, armed: hasWarships(l?.ships ?? []), stance: l?.orders?.stance };
+    }),
   };
 }
 
@@ -79,6 +84,12 @@ export function ownClaim(s: GameState): TerritoryClaim {
   };
 }
 
+/** What another player's fleet shows of its stance: an aggressive warfleet attacks yours at sea. */
+export function fleetStance(f: { readonly armed?: unknown; readonly stance?: unknown }): string | undefined {
+  if (f.armed !== true) return undefined;
+  return f.stance === 'aggressive' ? 'Aggressive warfleet' : 'Warfleet';
+}
+
 /** Other players as map fleets and territory, labelled with their empire's name and flag. */
 export function othersOnMap(players: readonly OtherPlayer[]): { fleets: FleetView[]; claims: TerritoryClaim[] } {
   const fleets: FleetView[] = [];
@@ -89,7 +100,7 @@ export function othersOnMap(players: readonly OtherPlayer[]): { fleets: FleetVie
     const color = id?.color ?? colorFor(p.id);
     const name = id?.name ?? p.name;
     if (isHex(p.home)) claims.push({ id: p.id, name, color, kind: 'other-player', home: p.home, flag: id?.flag, colonies: [{ hex: p.home, radius: HOME_RADIUS }, ...(p.colonies ?? []).filter(isHex).map((hex) => ({ hex, radius: COLONY_RADIUS }))] });
-    for (const f of p.fleets ?? []) if (isFleetMovement(f.movement)) fleets.push({ ...f, id: `${p.id}:${f.id}`, name: `${f.name} · ${name}`, owner: name, color });
+    for (const f of p.fleets ?? []) if (isFleetMovement(f.movement)) fleets.push({ ...f, id: `${p.id}:${f.id}`, name: `${f.name} · ${name}`, owner: name, color, status: fleetStance(f) });
   }
   return { fleets, claims };
 }

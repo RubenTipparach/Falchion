@@ -1,8 +1,8 @@
 import { RESOURCES, Resource } from '../content/resources';
 import { BUILDINGS, slotsOf } from '../content/buildings';
-import { buildYears, isSurveyClass, isWarship, specOf } from '../content/logistics';
+import { buildYears, hasWarships, isSurveyClass, isWarship, specOf, warshipsOf } from '../content/logistics';
 import { SHIP_CLASSES, ShipClassDef } from '../content/shipClasses';
-import { CombatBonuses, resolveAssault, resolveBattle, Squadron } from '../core/combat/Combat';
+import { BattleResult, CombatBonuses, resolveAssault, resolveBattle, Side, Squadron } from '../core/combat/Combat';
 import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf } from '../core/economy/Economy';
 import { cargoCapacity, FREIGHTER, saleValue, type Market } from '../core/economy/Trade';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
@@ -12,8 +12,9 @@ import type { ActivityPlace, ReportKind } from '../core/social/Activity';
 import { arrivalTurn, hexAt, planMovement, positionAt, retime, travelTurns } from '../core/fleet/Fleet';
 import { catchUpTicks, formatDuration } from '../core/time/WorldTime';
 import { capacity, clampStores, exploreCost, firepower, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
-import { adjustShips, countOf, dockedShips, FleetOrders, hasShips, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
+import { adjustShips, countOf, dockedShips, Encounter, FleetOrders, hasShips, isAggressive, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
 import { planSurvey } from '../core/fleet/Survey';
+import { minedBy, nearestMine, stockFor } from '../core/fleet/AutoMine';
 import { fieldLeft, fieldsOf, homeBelt, yearsToFull, type AsteroidField } from '../core/galaxy/Asteroids';
 import { applyEffects, EMPTY_WORLD, type SharedEffect, type SharedWorld } from '../core/world/SharedWorld';
 import { DISCOVERY_RANGE, gridNpcsNear, HOME_TERRITORY, initialNpcState, nearNpc, npcById, spawnNpcs, territoryOf, worldDefense, type NpcDef } from '../core/npc/NpcCatalog';
@@ -74,6 +75,28 @@ const RELATIONS_KEEP = 120;
 
 const poolKey = (starId: string, resource: Resource) => `${starId}|${resource}`;
 const parsePool = (key: string) => { const i = key.lastIndexOf('|'); return { starId: key.slice(0, i), resource: key.slice(i + 1) as Resource }; };
+
+/** A fleet as it meets another at sea: what it fights with, and whether it attacks. */
+export interface ContactForce extends Encounter {
+  readonly fleetId: string;
+  readonly fleetName: string;
+  /** The empire's name (its identity, or the owner's name before founding). */
+  readonly empire: string;
+  readonly at: Hex;
+  readonly star: StarSystem | null;
+  /** The ships that fight: the warships, or the whole fleet when it has none. */
+  readonly ships: readonly Squadron[];
+  /** Ammunition the fleet fires in this battle. */
+  readonly spent: number;
+  readonly side: Side;
+}
+
+/** The other fleet of a contact, as it stood going in. */
+export interface ContactFoe {
+  readonly fleetName: string;
+  readonly empire: string;
+  readonly ships: readonly Squadron[];
+}
 
 /** What the rules need: state, the galaxy and the content tables. No view, no DOM, no three.js. */
 export interface SimDeps {
@@ -453,9 +476,14 @@ export class EmpireSim {
 
   setOrders(fleetId: string, orders: FleetOrders): void {
     const l = this.state.loadouts[fleetId];
-    // A trade run carries on unless the fleet is sent exploring.
-    const trade = orders.autoExplore ? undefined : orders.trade ?? l?.orders?.trade;
-    if (l) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { ...orders, trade } } } }));
+    if (!l) return;
+    // A trade run carries on unless the fleet is sent exploring. The flags are stored the same
+    // way however they arrive (auto-mine only when on), so browser and server keep equal orders.
+    const trade = orders.autoExplore ? undefined : orders.trade ?? l.orders?.trade;
+    // Only a fleet with warships may be aggressive.
+    const stance = isAggressive(orders) && hasWarships(l.ships) ? 'aggressive' as const : undefined;
+    const next: FleetOrders = { autoExplore: orders.autoExplore === true, autoReturn: orders.autoReturn === true, ...(orders.autoMine === true ? { autoMine: true } : {}), trade, stance };
+    this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: next } } }));
   }
 
   returnHome(fleetId: string): void {
@@ -845,6 +873,15 @@ export class EmpireSim {
           }
         }
       }
+      // Auto-mine: miners with nothing left to mine here move on to the nearest field that has some
+      // (not while the fleet is still surveying this system).
+      if (l.orders.autoMine && !(l.orders.autoExplore && left().length > 0)) {
+        const moved = this.mineOn(f.id);
+        if (moved) {
+          news.push(moved);
+          continue;
+        }
+      }
       // Out of supply: back to the nearest friendly system to refill. Explorers always do this
       // (and carry on surveying once full); other fleets when ordered to return to resupply.
       const now = this.state.loadouts[f.id];
@@ -863,6 +900,32 @@ export class EmpireSim {
       }
     }
     return news;
+  }
+
+  /**
+   * An auto-mining fleet on station whose miners have nothing left to mine where they are (no
+   * field of their resource, or all of them mined out) heads for the nearest system in reach with
+   * a field that has rocks left. Uses the shared world, so fields others mined dry count as dry.
+   * Returns the news, or null when it stays.
+   */
+  protected mineOn(fleetId: string): string | null {
+    const s = this.state;
+    const f = s.fleets.find((x) => x.id === fleetId);
+    const l = s.loadouts[fleetId];
+    if (!f || !l || !isStationed(f.movement, s.turn)) return null;
+    const resources = minedBy(l.ships, (classId) => this.classById.get(classId)?.mines);
+    if (!resources.length) return null;
+    const here = hexAt(f.movement, s.turn);
+    const star = this.deps.galaxy.starAt(here);
+    const stockAt = (st: StarSystem) => stockFor(this.fieldReport(st), resources);
+    if (star && stockAt(star) > 0) return null;
+    const next = nearestMine(this.deps.galaxy, here, stockAt);
+    if (!next) return null;
+    // Name the resource it goes for: the one with most left there.
+    const report = this.fieldReport(next);
+    const resource = [...resources].sort((a, b) => stockFor(report, [b]) - stockFor(report, [a]))[0];
+    this.moveFleet(f.id, next, true);
+    return `${f.name} heads to ${next.name} to mine ${resource}`;
   }
 
   /** The closest system where fleets resupply (a colony system or a supply depot); home if none is closer. */
@@ -971,9 +1034,13 @@ export class EmpireSim {
       loadouts: { ...s.loadouts, [fleetId]: { ...l, cargo: 0, cargoFrom: undefined } },
     });
     if (market.npc) this.changeStanding(market.npc, Math.min(STANDING.tradeMax, Math.max(1, Math.floor(l.cargo * STANDING.perGoods))));
-    if (!quiet) this.dispatch(`${this.fleetName(fleetId)} sold ${l.cargo} trade goods at ${star.name} for ${credits} credits`, 'good');
+    if (!quiet) this.dispatch(this.saleNews(fleetId, l.cargo, market, credits), 'good');
     return credits;
   }
+
+  /** The seller's news of a sale, naming whose world bought the goods (only the seller hears of it). */
+  protected saleNews = (fleetId: string, goods: number, market: Market, credits: number): string =>
+    `${this.fleetName(fleetId)} sold ${goods} trade goods at ${market.name} for ${credits} credits`;
 
   /**
    * Start (or stop, with null) a trade run: the fleet loads goods at your colony system nearest the
@@ -1000,7 +1067,7 @@ export class EmpireSim {
     }
     const l = this.state.loadouts[fleetId];
     if (!l || !countOf(l.ships, FREIGHTER)) return this.dispatch('A trade run needs Bulk Freighters', 'bad');
-    this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { trade: { from: from.id, to: to.id } } } } }));
+    this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { trade: { from: from.id, to: to.id }, stance: l.orders?.stance } } } }));
     this.dispatch(`${this.fleetName(fleetId)} starts a trade run: goods from ${from.name} to ${to.name}`);
     this.runTrade(fleetId);
   }
@@ -1016,10 +1083,11 @@ export class EmpireSim {
     const from = this.starById(trade.from), to = this.starById(trade.to);
     if (!from || !to) return null;
     let news: string | null = null;
-    if (at.id === to.id && l.cargo) {
-      const n = l.cargo;
+    const market = at.id === to.id && l.cargo ? this.marketAt(to) : null;
+    if (market) {
+      const n = l.cargo!;
       const credits = this.sellGoods(fleetId, true);
-      if (credits) news = `${this.fleetName(fleetId)} sold ${n} trade goods at ${to.name} for ${credits} credits`;
+      if (credits) news = this.saleNews(fleetId, n, market, credits);
     }
     if (at.id === from.id) this.loadGoods(fleetId, true);
     const cargo = this.state.loadouts[fleetId]?.cargo ?? 0;
@@ -1106,6 +1174,46 @@ export class EmpireSim {
     this.dispatch(outcome.summary, result.captured ? 'good' : 'bad');
     this.deps.report?.('battle', `${outcome.summary} at ${at.name}`, placeOf(at));
     return outcome;
+  }
+
+  // ── Contacts at sea: fleets of different empires on one hex ───────
+
+  /**
+   * This fleet as it meets another at sea on `turn`: its warships (the whole fleet when it has
+   * none), its research bonuses and its ammunition. Null when it is not on station.
+   */
+  contactForce(fleetId: string, turn: number): ContactForce | null {
+    const s = this.state;
+    const f = s.fleets.find((x) => x.id === fleetId);
+    const l = s.loadouts[fleetId];
+    if (!f || !l || !isStationed(f.movement, turn)) return null;
+    const warships = warshipsOf(l.ships);
+    const ships = warships.length ? warships : l.ships.filter((x) => x.count > 0);
+    const fire = firepower(l.ammo, ships, specOf);
+    const at = hexAt(f.movement, turn);
+    const empire = s.identity?.name ?? s.playerName;
+    return {
+      fleetId, fleetName: f.name, empire, at, star: this.deps.galaxy.starAt(at), ships, spent: fire.spent,
+      aggressive: isAggressive(l.orders), armed: warships.length > 0,
+      side: { name: empire, ships, bonuses: this.combatBonuses(), firepower: fire.factor },
+    };
+  }
+
+  /**
+   * Record a battle at sea in this empire's own save: the ships its fleet lost (and any it took),
+   * the ammunition it fired, and the news. `index` is its side in the battle; `foe` is the other
+   * fleet as it went in.
+   */
+  applyContact(force: ContactForce, foe: ContactFoe, result: BattleResult, index: 0 | 1): void {
+    const other = index === 0 ? 1 : 0;
+    const delta: Squadron[] = force.ships.map((x) => ({ classId: x.classId, count: -(x.count - countOf(result.survivors[index], x.classId)) }));
+    for (const c of result.captured[index]) delta.push({ classId: c.classId, count: c.count });
+    this.adjustGroup(force.fleetId, delta, { ammo: (this.state.loadouts[force.fleetId]?.ammo ?? 0) - force.spent });
+    const mine = shipTotal(force.ships) - shipTotal(result.survivors[index]);
+    const theirs = shipTotal(foe.ships) - shipTotal(result.survivors[other]);
+    const verdict = result.winner === null ? 'stalemate' : result.winner === index ? 'victory' : 'defeat';
+    // The other fleet's and empire's names come from another player: bounded like their public view.
+    this.dispatch(`${force.fleetName} fought ${foe.fleetName.slice(0, 64)} of ${foe.empire.slice(0, 100)} at ${force.star?.name ?? 'deep space'}: ${verdict}, ${mine} of ours lost, ${theirs} of theirs destroyed`, verdict === 'victory' ? 'good' : verdict === 'defeat' ? 'bad' : undefined);
   }
 
   // ── NPC empires ────────────────────────────────────────────────────

@@ -1,0 +1,56 @@
+## ADDED Requirements
+
+### Requirement: A fleet with warships can be set aggressive
+A fleet with warships SHALL be settable to aggressive from its fleet card. The stance SHALL be kept in the fleet's orders on the server and in the browser, and a fleet SHALL be passive unless set. Fleets without warships SHALL NOT offer the stance, and the rules SHALL refuse it for them.
+
+#### Scenario: Setting a warfleet aggressive
+- **WHEN** a player turns Aggressive on for a fleet with warships
+- **THEN** the fleet's orders carry the aggressive stance until it is turned off
+
+#### Scenario: An unarmed fleet stays passive
+- **WHEN** an order sets an aggressive stance on a fleet with no warships
+- **THEN** the fleet stays passive
+
+### Requirement: Fleets of two players fight at sea when one attacks
+Two fleets of different empires on the same hex, both on station, SHALL fight when at least one is aggressive and armed. Two passive fleets SHALL NOT fight, and an unarmed fleet SHALL NOT start a fight.
+
+#### Scenario: Passive fleets pass
+- **WHEN** two passive fleets of different players stop on the same hex
+- **THEN** no battle is fought
+
+#### Scenario: An aggressive fleet attacks
+- **WHEN** an aggressive armed fleet is on the same hex as a passive fleet of another player
+- **THEN** the two fleets fight that year
+
+### Requirement: The battle is the same for both sides
+The battle SHALL run the game's combat rules with each side's warships, research bonuses and ammunition-scaled firepower. It SHALL be deterministic in both fleets (owner and id) and the year, whichever empire is named first. Each empire's save SHALL record its own losses and a dispatch naming the other fleet and its empire, with those names bounded. Both empires SHALL have played exactly to that year.
+
+#### Scenario: Both sides lose ships
+- **WHEN** an aggressive fleet of six interceptors meets six interceptors
+- **THEN** each empire's fleet has fewer ships and its dispatch names the other fleet and empire
+
+#### Scenario: An empire behind the year does not fight
+- **WHEN** one of the two empires has not been played to the year of the contact
+- **THEN** no battle is fought that year
+
+### Requirement: The server resolves contacts each year
+After every empire is played forward in a world year, the server SHALL find contacts from the stored public views and resolve each pair with both empires locked in id order. It SHALL store both results or neither, publish both public views and tell both owners. A fleet SHALL take part in at most one battle per year, and a year's battles SHALL be fought once even if the year is ticked again.
+
+#### Scenario: Two empires meet
+- **WHEN** player B's aggressive fleet and player A's passive fleet are on one hex in year N
+- **THEN** both empires' saves record the battle for year N and both owners are told
+
+#### Scenario: A year ticked twice
+- **WHEN** the server ticks year N a second time
+- **THEN** no battle of year N is fought again
+
+#### Scenario: A failed save
+- **WHEN** the second empire's save cannot be stored
+- **THEN** the first empire's save is put back and neither owner is told of the battle
+
+### Requirement: Public views show armed and stance
+Each fleet in another player's public view SHALL say whether it has warships and whether it is aggressive. The server SHALL sanitise both fields, and the map and fleet card SHALL show another empire's armed fleets as a warfleet or an aggressive warfleet.
+
+#### Scenario: Seeing an aggressive fleet
+- **WHEN** a player looks at another empire's aggressive fleet with warships
+- **THEN** its map label and fleet card show it as an aggressive warfleet

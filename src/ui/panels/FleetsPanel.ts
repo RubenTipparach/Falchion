@@ -4,6 +4,7 @@ import { isSurveyClass, isWarship, specOf } from '../../content/logistics';
 import { SHIP_CLASSES } from '../../content/shipClasses';
 import type { Squadron } from '../../core/combat/Combat';
 import { capacity } from '../../core/fleet/Logistics';
+import { MINE_REACH, minedBy } from '../../core/fleet/AutoMine';
 import { formatDuration } from '../../core/time/WorldTime';
 import { CLOCK } from '../../app/WorldClock';
 import type { StarSystem } from '../../core/galaxy/GalaxyModel';
@@ -60,14 +61,15 @@ export class FleetsPanel extends Drawer {
       g.capacity.supply && g.stores.supply === 0 ? h('div', { class: 'notice warn' }, 'Out of supply: cannot explore. Return home or reach a friendly system to resupply.') : null,
       h('div', { class: 'row orders' }, h('span', { class: 'small muted' }, 'Standing orders:'),
         this.order(g, 'autoExplore', 'Auto-explore', 'Survey unexplored planets wherever it is on station'),
-        this.order(g, 'autoReturn', 'Return to resupply', 'Head home when it can explore nothing more here')),
+        this.order(g, 'autoReturn', 'Return to resupply', 'Head home when it can explore nothing more here'),
+        minedBy(g.ships, (id) => classOf(id).mines).length ? this.order(g, 'autoMine', 'Auto-mine', `When its fields run dry, move on to the nearest field with rocks left (within ${MINE_REACH} ly)`) : null),
       h('div', { class: 'row' },
         target && target.id !== g.star?.id ? h('button', { class: 'btn primary', onclick: () => this.actions.moveFleet(g.id, target) }, icon('fleet'), ` Send to ${target.name}`) : null,
         !atHome ? h('button', { class: 'btn', onclick: () => this.actions.returnHome(g.id) }, icon('home'), ' Return home') : null,
         atHome ? h('button', { class: 'btn', onclick: () => this.actions.dockFleet(g.id) }, 'Dock (merge into home dock)') : null));
   }
 
-  private order(g: FleetGroup, key: 'autoExplore' | 'autoReturn', label: string, title: string): HTMLElement {
+  private order(g: FleetGroup, key: 'autoExplore' | 'autoReturn' | 'autoMine', label: string, title: string): HTMLElement {
     const on = !!g.orders?.[key];
     return h('button', { class: `chip ${on ? 'active' : ''}`, title, 'aria-pressed': String(on), onclick: () => this.actions.setOrders(g.id, { ...g.orders, [key]: !on }) }, on ? `✓ ${label}` : label);
   }

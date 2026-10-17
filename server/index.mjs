@@ -12,12 +12,14 @@ import { createActivity } from './activity.mjs';
 import { adminIds, createAdmin } from './admin.mjs';
 import { createAuth } from './auth.mjs';
 import { createChat } from './chat.mjs';
+import { createEventLog } from './eventLog.mjs';
 import { createPlayerFeed } from './live.mjs';
 import { createNotifier } from './notifier.mjs';
 import { linkPreview, withPreview } from './links.mjs';
 import { createSimTicker } from './simTicker.mjs';
 import { createCommandService } from './commands.mjs';
 import { createLocks } from './locks.mjs';
+import { oncePerTick } from './markets.mjs';
 import { createStore } from './store.mjs';
 import { createSharedWorld } from './world.mjs';
 
@@ -38,6 +40,9 @@ export const auth = createAuth({
   ...(process.env.DISCORD_AUTHORIZE_URL ? { discordAuthorize: process.env.DISCORD_AUTHORIZE_URL } : {}),
 });
 export const store = createStore(resolve(process.env.DATA_DIR ?? join(here, '..', 'data')));
+// Append-only record of what the server applied to each empire, and each founding save, for
+// admins and replay (<DATA_DIR>/events, server/eventLog.mjs).
+export const events = createEventLog({ dir: store.dir });
 const MAX_SAVE_BYTES = 3 * 1024 * 1024;
 const STARTED_AT = Date.now();
 // Same secret as High Frontier: ADMIN_DISCORD_ID (or ADMIN_DISCORD_IDS), comma-separated.
@@ -71,7 +76,7 @@ export const activity = createActivity({
 // Each save's public view reaches the other players at once (server/live.mjs).
 export const playerFeed = createPlayerFeed({ broadcast: (event, data, opts) => chat.broadcast(event, data, opts) });
 const admin = createAdmin({
-  auth, store, admins, notifier,
+  auth, store, admins, notifier, events,
   info: () => ({ version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, notifications: notifier.mode, notificationsProblem: notifier.problem, uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000) }),
 });
 
@@ -112,7 +117,11 @@ export function publicView(p) {
     empire: publicIdentity(p?.empire),
     home: p?.home && Number.isInteger(p.home.q) && Number.isInteger(p.home.r) ? { q: p.home.q, r: p.home.r } : null,
     colonies: Array.isArray(p?.colonies) ? p.colonies.filter((h) => Number.isInteger(h?.q) && Number.isInteger(h?.r)).slice(0, 200).map((h) => ({ q: h.q, r: h.r })) : [],
-    fleets: fleets.map((f) => ({ id: String(f.id).slice(0, 64), name: String(f.name).slice(0, 64), movement: f.movement, design: f.design })),
+    fleets: fleets.map((f) => ({
+      id: String(f.id).slice(0, 64), name: String(f.name).slice(0, 64), movement: f.movement, design: f.design,
+      // Whether it has warships, and whether it attacks what it meets at sea (anything else is passive).
+      armed: f.armed === true, ...(f.stance === 'aggressive' ? { stance: 'aggressive' } : {}),
+    })),
   };
 }
 
@@ -139,6 +148,8 @@ async function api(req, res, pathname) {
         const updatedAt = Date.now();
         await store.save(user.id, { player: user, save: body.save, public: pub, updatedAt });
         playerFeed.publish({ ...pub, id: user.id, name: user.name, avatar: user.avatar ?? null, updatedAt });
+        // The founding save starts the empire's replay; a log failure never fails the founding.
+        events.found(user.id, { save: body.save, worldTime: worldTime(), at: updatedAt }).catch((err) => console.error(`event log: ${err?.message ?? err}`));
         void notifier.joined(user.name, body.public?.empire?.name);
         void activity.founded(user, pub);
         return json(res, 200, { ok: true });
@@ -214,15 +225,18 @@ const worldTime = () => (Date.now() - CLOCK.epochMs) / CLOCK.msPerTick;
 // The galaxy everyone shares: mined asteroid fields and discovered NPC empires (server/world.mjs).
 export const sharedWorld = createSharedWorld({ file: join(store.dir, 'world.json'), loadSim, withLock, broadcast: (event, data) => chat.broadcast(event, data) });
 export const simTicker = createSimTicker({
-  store, loadSim, withLock, world: sharedWorld,
+  store, loadSim, withLock, world: sharedWorld, events,
   publish: (p) => playerFeed.publish(p),
   // The owner's browser shows what the server decided this year.
   notifyOwner: (id, save) => chat.sendTo(id, 'state', { save }),
   publicView: (p) => publicView(p),
   log: (m) => console.warn(m),
 });
+// Other players' worlds are markets: orders read the other empires once a world year.
+const otherEmpires = oncePerTick(() => store.players(), () => worldTick);
 export const commands = createCommandService({
-  store, loadSim, withLock, worldTime, world: sharedWorld,
+  store, loadSim, withLock, worldTime, world: sharedWorld, others: otherEmpires, events,
+  log: (m) => console.error(m),
   publish: (p) => playerFeed.publish(p),
   publicView: (p) => publicView(p),
 });

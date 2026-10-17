@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { planMovement } from '../core/fleet/Fleet';
 import { GalaxyPlayers, isOtherPlayer } from './GalaxyPlayers';
-import { isFleetMovement, othersOnMap, type OtherPlayer } from './ServerSync';
+import { fleetStance, isFleetMovement, othersOnMap, type OtherPlayer } from './ServerSync';
 
 const A = '111111111111111111';
 const B = '222222222222222222';
@@ -22,9 +22,17 @@ describe('other players on the map', () => {
     expect(isFleetMovement({ route: [{ q: 0, r: 0 }], departTurn: -1, speed: 1 })).toBe(false);
   });
 
+  it('shows whether another player\'s fleet is armed and aggressive', () => {
+    const m = planMovement({ q: 1, r: 2 }, { q: 4, r: 2 }, 3, 1);
+    const { fleets } = othersOnMap([player(A, 1, { fleets: [{ id: 'war', name: 'War', movement: m, design: {} as never, armed: true, stance: 'aggressive' }, { id: 'guard', name: 'Guard', movement: m, design: {} as never, armed: true }] })]);
+    expect(fleets.map((f) => f.status)).toEqual(['Aggressive warfleet', 'Warfleet']);
+    expect(fleetStance({ armed: false, stance: 'aggressive' })).toBeUndefined();
+    expect(fleetStance({})).toBeUndefined();
+  });
+
   it('labels claims with the player id (clickable markers) and prefixes fleet ids', () => {
     const m = planMovement({ q: 1, r: 2 }, { q: 4, r: 2 }, 3, 1);
-    const { fleets, claims } = othersOnMap([player(A, 1, { fleets: [{ id: 'scout-1', name: 'Scout', movement: m, design: {} as never }, { id: 'bad', name: 'Bad', movement: { route: 'x' } as never, design: {} as never }] })]);
+    const { fleets, claims } = othersOnMap([player(A, 1, { fleets: [{ id: 'scout-1', name: 'Scout', movement: m, design: {} as never, armed: false }, { id: 'bad', name: 'Bad', movement: { route: 'x' } as never, design: {} as never, armed: false }] })]);
     expect(claims.map((c) => [c.id, c.kind])).toEqual([[A, 'other-player']]);
     expect(fleets.map((f) => [f.id, f.name, f.owner])).toEqual([[`${A}:scout-1`, `Scout · P1`, 'P1']]);
   });

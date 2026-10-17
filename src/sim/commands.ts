@@ -68,11 +68,13 @@ const squadrons: ArgCodec<Squadron[]> = {
     return raw.map((s) => (s && CLASS_IDS.has(s.classId) && Number.isInteger(s.count) && s.count >= 0 && s.count <= 10_000 ? { classId: s.classId, count: s.count } : fail('bad ships')));
   },
 };
+// A trade run is not sent: it is started with tradeRun, and setOrders keeps the one a fleet has.
 const orders: ArgCodec<FleetOrders> = {
-  encode: (o) => ({ autoExplore: !!o.autoExplore, autoReturn: !!o.autoReturn }),
+  encode: (o) => ({ autoExplore: !!o.autoExplore, autoReturn: !!o.autoReturn, autoMine: !!o.autoMine, ...(o.stance ? { stance: o.stance } : {}) }),
   decode: (raw) => {
     const o = raw as FleetOrders | null;
-    return o && typeof o === 'object' ? { autoExplore: o.autoExplore === true, autoReturn: o.autoReturn === true } : fail('bad orders');
+    if (!o || typeof o !== 'object') return fail('bad orders');
+    return { autoExplore: o.autoExplore === true, autoReturn: o.autoReturn === true, autoMine: o.autoMine === true, ...(o.stance === 'aggressive' ? { stance: 'aggressive' as const } : {}) };
   },
 };
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;

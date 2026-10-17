@@ -220,4 +220,14 @@ describe('public empire view', async () => {
     expect(v.empire.flag).toEqual({ field: 'cross', emblem: 'none', colors: ['#e6b450', '#10121c', '#000000'] });
     expect(publicView({ empire: { name: '' } }).empire).toBeUndefined();
   });
+
+  it('says only whether each fleet is armed and aggressive, as booleans and one known stance', () => {
+    const v = publicView({ fleets: [
+      { id: 'a', name: 'A', armed: true, stance: 'aggressive' },
+      { id: 'b', name: 'B', armed: 'yes', stance: '<script>' },
+      { id: 'c', name: 'C' },
+    ] });
+    expect(v.fleets.map((f) => [f.id, f.armed, f.stance])).toEqual([['a', true, 'aggressive'], ['b', false, undefined], ['c', false, undefined]]);
+    expect('stance' in v.fleets[1]).toBe(false);
+  });
 });

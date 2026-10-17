@@ -1,3 +1,4 @@
+import type { Squadron } from '../core/combat/Combat';
 import type { LogisticsSpec } from '../core/fleet/Logistics';
 import { SHIP_CLASSES, type Doctrine, type ShipClassDef } from './shipClasses';
 
@@ -36,6 +37,11 @@ export const specOf = (classId: string): LogisticsSpec | undefined => SPECS.get(
 /** Ships that explore well enough to form a survey group. */
 export const isSurveyClass = (c: ShipClassDef): boolean => (SUPPLY_OVERRIDES[c.id] ?? 0) >= 8;
 export const isWarship = (c: ShipClassDef): boolean => (c.role === 'combat' || c.role === 'capital') && c.attack > 0;
+const WARSHIP_IDS = new Set(SHIP_CLASSES.filter(isWarship).map((c) => c.id));
+
+/** The warships in a squadron list: what a fleet fights with. */
+export const warshipsOf = (ships: readonly Squadron[]): Squadron[] => ships.filter((x) => x.count > 0 && WARSHIP_IDS.has(x.classId));
+export const hasWarships = (ships: readonly Squadron[]): boolean => warshipsOf(ships).length > 0;
 
 /** Years (minutes) a hull takes at a shipyard: bigger, costlier hulls take longer. */
 export function buildYears(c: ShipClassDef): number {

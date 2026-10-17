@@ -8,8 +8,12 @@ export interface FleetOrders {
   readonly autoExplore?: boolean;
   /** Head home to resupply when it can explore nothing more here. */
   readonly autoReturn?: boolean;
+  /** Mining ships move on to the nearest asteroid field of their resource when theirs runs dry. */
+  readonly autoMine?: boolean;
   /** Trade run: load goods at `from` (a colony system), sell them at `to` (a market), repeat. */
   readonly trade?: { readonly from: string; readonly to: string };
+  /** Attacks other empires' fleets it meets at sea (absent = passive). Only fleets with warships may be aggressive. */
+  readonly stance?: 'aggressive';
 }
 
 /** A deployed group of ships with its own supply and ammunition. */
@@ -52,3 +56,19 @@ export function dockedShips(roster: Readonly<Record<string, number>>, deployed: 
 export function hasShips(have: readonly Squadron[], want: readonly Squadron[]): boolean {
   return want.every((w) => w.count >= 0 && countOf(have, w.classId) >= w.count);
 }
+
+/** Whether a fleet's orders make it attack the fleets of other empires it meets. */
+export const isAggressive = (orders?: FleetOrders): boolean => orders?.stance === 'aggressive';
+
+/** What a fleet brings to a meeting at sea. */
+export interface Encounter {
+  readonly aggressive: boolean;
+  /** Has warships: only an armed fleet can attack. */
+  readonly armed: boolean;
+}
+
+/** An aggressive armed fleet attacks what it meets. */
+export const attacks = (e: Encounter): boolean => e.aggressive && e.armed;
+
+/** Two fleets on the same hex fight when at least one of them attacks. Two passive fleets pass each other. */
+export const startsFight = (a: Encounter, b: Encounter): boolean => attacks(a) || attacks(b);

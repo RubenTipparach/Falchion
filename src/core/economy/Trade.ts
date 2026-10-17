@@ -16,6 +16,8 @@ export interface Market {
   readonly kind: MarketKind;
   /** The NPC faction whose world it is (its standing with you sets the price). */
   readonly npc?: string;
+  /** The player whose world it is (kind 'player'; see PlayerMarkets). */
+  readonly player?: string;
 }
 
 /** Goods one Bulk Freighter carries (before research). */

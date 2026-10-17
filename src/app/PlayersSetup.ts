@@ -1,3 +1,5 @@
+import { playerMarkets } from '../core/economy/PlayerMarkets';
+import type { Market } from '../core/economy/Trade';
 import { cleanIdentity, type Flag } from '../core/empire/Identity';
 import { arrivalTurn, type FleetMovement } from '../core/fleet/Fleet';
 import type { GalaxyModel } from '../core/galaxy/GalaxyModel';
@@ -32,6 +34,8 @@ export interface PlayersSetupDeps {
   readonly fetchPlayers: (() => Promise<OtherPlayer[]>) | null;
   /** Open a direct-message thread with a player (the chat drawer). */
   readonly message: (playerId: string) => void;
+  /** Other players' worlds as markets for trade goods, whenever the players list changes. */
+  readonly setMarkets?: (markets: readonly Market[]) => void;
 }
 
 export interface PlayersSetup {
@@ -50,7 +54,7 @@ export interface PlayersSetup {
  * map effects (other players' fleets and territory, clickable markers), the Players drawer with
  * its Galaxy feed, and toasts for other players' news.
  */
-export function setupPlayers({ identity, canSignIn, galaxy, controller, store, territory, fetchPlayers, message }: PlayersSetupDeps): PlayersSetup {
+export function setupPlayers({ identity, canSignIn, galaxy, controller, store, territory, fetchPlayers, message, setMarkets }: PlayersSetupDeps): PlayersSetup {
   const signedIn = identity.provider === 'discord' && !!fetchPlayers;
   const meId = signedIn ? identity.id : null;
   const model = new GalaxyPlayers(meId);
@@ -144,6 +148,8 @@ export function setupPlayers({ identity, canSignIn, galaxy, controller, store, t
       // Territory changes rarely (a new colony or a new empire): rebuild it only then.
       const key = JSON.stringify(claims);
       if (key !== drawnClaims) { drawnClaims = key; territory.setDynamic(claims); }
+      // Their homes and colonies are markets at once (the server builds the same list for orders).
+      setMarkets?.(playerMarkets(galaxy, model.others, meId));
     }
     if (what === 'activity') {
       panel.noteActivity(fresh.filter((e) => e.player.id !== meId));

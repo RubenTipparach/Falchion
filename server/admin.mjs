@@ -1,6 +1,7 @@
 // Admin portal: /admin plus /api/admin/*, for Discord ids on the allowlist.
 // The allowlist uses the same secret as High Frontier: ADMIN_DISCORD_ID (or
 // ADMIN_DISCORD_IDS), a comma-separated list of Discord user ids.
+import { ADMIN_EVENT_LIMIT } from './eventLog.mjs';
 
 /** Parse the admin allowlist from the environment. */
 export function adminIds(env) {
@@ -34,10 +35,10 @@ async function readJson(req, limit = 16_384) {
 }
 
 /**
- * @param {{ auth: any, store: any, admins: Set<string>, notifier?: any, info: () => object }} deps
+ * @param {{ auth: any, store: any, admins: Set<string>, notifier?: any, info: () => object, events?: any }} deps
  * @returns {(req: any, res: any, pathname: string) => Promise<boolean>} handles the request if it is an admin route
  */
-export function createAdmin({ auth, store, admins, notifier, info }) {
+export function createAdmin({ auth, store, admins, notifier, info, events }) {
   const isAdmin = (user) => !!user && admins.has(user.id);
 
   return async function handle(req, res, pathname) {
@@ -71,6 +72,12 @@ export function createAdmin({ auth, store, admins, notifier, info }) {
     }
     if (pathname === '/api/admin/players' && req.method === 'GET') {
       json(res, 200, await store.summaries());
+      return true;
+    }
+    // Read only: the last 50 events the server logged for one empire, oldest first.
+    const ev = /^\/api\/admin\/players\/(\d{5,25})\/events$/.exec(pathname);
+    if (ev && req.method === 'GET') {
+      json(res, 200, events ? await events.read(ev[1], { limit: ADMIN_EVENT_LIMIT }) : []);
       return true;
     }
     const m = /^\/api\/admin\/players\/(\d{5,25})$/.exec(pathname);
@@ -145,6 +152,9 @@ const ADMIN_HTML = `<main>
 <div class="row"><button id="annSave">Publish</button><button id="annClear">Clear</button><span id="annMsg" class="muted"></span></div>
 <h2>Players</h2>
 <div class="scroll"><table><thead><tr><th>Player</th><th>Discord id</th><th>Year</th><th>Colonies</th><th>Fleets</th><th>Home</th><th>Last save</th><th>Size</th><th></th></tr></thead><tbody id="players"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody></table></div>
+<h2 id="logTitle" hidden>Event log</h2>
+<p class="muted" id="logHint" hidden>The last 50 events the server logged for this empire (its founding, and every order applied or refused), newest first. Read only.</p>
+<div class="scroll" id="logBox" hidden><table><thead><tr><th>Time (UTC)</th><th>Year</th><th>Command</th><th>Result</th></tr></thead><tbody id="log"></tbody></table></div>
 </main>
 <script>
 const H = { 'X-Falchion-Admin': '1', 'Content-Type': 'application/json' };
@@ -174,9 +184,29 @@ async function load() {
       const r = await fetch('/api/admin/players/' + p.id, { method: 'DELETE', headers: H });
       if (r.ok) load(); else alert('Reset failed: ' + r.status);
     };
-    const act = el('td'); act.append(del);
+    const log = el('button', 'Event log');
+    log.onclick = () => showLog(p);
+    const act = el('td'); act.append(log, document.createTextNode(' '), del);
     tr.append(name, el('td', p.id), el('td', p.year == null ? '—' : String(p.year)), el('td', String(p.colonies)), el('td', String(p.fleets)),
       el('td', p.home ? p.home.q + ', ' + p.home.r : '—'), el('td', ago(p.updatedAt)), el('td', Math.round(p.bytes / 1024) + ' KB'), act);
+    body.append(tr);
+  }
+}
+async function showLog(p) {
+  document.getElementById('logTitle').textContent = 'Event log: ' + p.name;
+  for (const id of ['logTitle', 'logHint', 'logBox']) document.getElementById(id).hidden = false;
+  const body = document.getElementById('log'); body.replaceChildren();
+  const r = await fetch('/api/admin/players/' + p.id + '/events');
+  const rows = r.ok ? await r.json() : [];
+  if (!r.ok) { const tr = el('tr'); const td = el('td', 'Could not load the log: ' + r.status, 'err'); td.colSpan = 4; tr.append(td); body.append(tr); return; }
+  if (!rows.length) { const tr = el('tr'); const td = el('td', 'No events logged yet.', 'muted'); td.colSpan = 4; tr.append(td); body.append(tr); }
+  for (const e of rows.slice().reverse()) {
+    // A command is { name, args } as the player sent it: untrusted, so shown as text only.
+    const c = e.command;
+    const name = typeof c === 'string' ? c : c && typeof c.name === 'string' ? c.name + (Array.isArray(c.args) && c.args.length ? ' ' + JSON.stringify(c.args).slice(0, 120) : '') : JSON.stringify(c);
+    const tr = el('tr');
+    tr.append(el('td', new Date(e.at).toISOString().slice(0, 19).replace('T', ' ')), el('td', typeof e.worldTime === 'number' ? String(Math.floor(e.worldTime)) : '—'),
+      el('td', name), el('td', e.ok ? 'applied' : 'refused: ' + (e.error || ''), e.ok ? 'ok' : 'err'));
     body.append(tr);
   }
 }

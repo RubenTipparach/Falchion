@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+import { isSolid, makeOutward } from '../geometry/orientation';
 import type { ShipDesign } from '../../core/ships/ShipDesign';
 import { ShipKit, ShipModel } from './ShipKit';
 import type { ShipStyleGenerator, ShipTraitDecorator } from './ShipStyleGenerator';
@@ -35,6 +37,9 @@ export class ShipFactory {
     style.build(kit);
     kit.freezeHull();
     for (const id of design.traits) this.traits.get(id)?.apply(kit);
-    return kit.finish();
+    const model = kit.finish();
+    // Safety net for any style or trait: every solid part faces outward, normals included.
+    model.group.traverse((o) => { if (o instanceof THREE.Mesh && isSolid(o)) makeOutward(o.geometry); });
+    return model;
   }
 }

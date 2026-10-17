@@ -23,6 +23,8 @@ const PATH_UNIT = 20;
 const ABSORB = 0.03;
 /** Mean sky brightness the exposure aims for, and how far it may push. */
 const TARGET = 0.28, MIN_GAIN = 0.3, MAX_GAIN = 8;
+/** Sky brightness, relative to a full nebula sky, out in empty space: a faint glow at most. */
+const EMPTY_SKY = 0.06;
 
 /**
  * Homeworld-style sky colours, one per direction on a sphere, painted from the map's
@@ -31,7 +33,9 @@ const TARGET = 0.28, MIN_GAIN = 0.3, MAX_GAIN = 8;
  * ray toward either pole leaves the slab soon and sees a darker, desaturated tint of
  * the local colour. On top come Homeworld's broad strokes, seeded per anchor: a few
  * big glowing cloud lobes, a tilted band with a dust lane, a dim side and a bright
- * side. Exposure is normalised so the system always looks enveloped, never black.
+ * side. Exposure is normalised to the nebula actually around the anchor: inside a
+ * cloud on the map the system looks enveloped; out in empty space (no cloud on the map)
+ * the sky stays a dark starfield with at most a faint glow.
  *
  * Pure and deterministic (same field, seed, anchor and time give the same colours).
  */
@@ -104,15 +108,28 @@ export class NebulaSkyPainter {
       lumSum += lum;
     }
 
-    // Exposure: aim every sky at the same mean brightness, then roll highlights off softly.
+    // Exposure: aim every sky at the same mean brightness, then roll highlights off softly,
+    // scaled by how much cloud surrounds the anchor on the map (the haze alone does not count).
+    const presence = this.presence();
     const meanLum = lumSum / (dirs.length / 3);
     const gain = Math.min(MAX_GAIN, Math.max(MIN_GAIN, TARGET / Math.max(1e-6, meanLum)));
     const mLum = 0.3 * mean[0] + 0.55 * mean[1] + 0.15 * mean[2];
-    const floor = mLum > 1e-6 ? mean.map((c) => (0.07 * c) / mLum) : [0.02, 0.025, 0.04];
+    const floor = mLum > 1e-6 ? mean.map((c) => (0.07 * c * presence) / mLum) : [0, 0, 0];
+    const level = EMPTY_SKY + (1 - EMPTY_SKY) * presence;
     for (let i = 0; i < dirs.length; i += 3) {
-      for (let c = 0; c < 3; c++) out[i + c] = Math.max(floor[c], 1 - Math.exp(-raw[i + c] * gain * 1.15));
+      for (let c = 0; c < 3; c++) out[i + c] = Math.max(floor[c], (1 - Math.exp(-raw[i + c] * gain * 1.15)) * level);
     }
     return out;
+  }
+
+  /**
+   * How much nebula surrounds the anchor, 0 (empty space) to 1 (inside a cloud): coverage at
+   * the anchor and within ~30 ly around it, above the faint haze every point has.
+   */
+  private presence(): number {
+    let sum = this.centre[3] * AZ, n = AZ;
+    for (let a = 0; a < AZ; a++) for (let j = 0; j < RINGS - 6; j++, n++) sum += this.grid[(a * RINGS + j) * 4 + 3];
+    return smoothstep(0.18, 0.5, sum / n);
   }
 
   /** Field around the anchor: one sample at the centre plus AZ x RINGS on log-spaced rings. */
@@ -122,12 +139,12 @@ export class NebulaSkyPainter {
       // Emission as the map draws it (premultiplied), plus coverage for absorption.
       arr[o] = s.r * s.a * 1.3; arr[o + 1] = s.g * s.a * 1.3; arr[o + 2] = s.b * s.a * 1.3; arr[o + 3] = s.a;
     };
-    this.field.sample(anchor.x, anchor.z, time, 1, s);
+    this.field.sample(anchor.x, anchor.z, time, s);
     put(this.centre, 0);
     for (let a = 0; a < AZ; a++) {
       const th = (a / AZ) * Math.PI * 2, cx = Math.cos(th), cz = Math.sin(th);
       for (let j = 0; j < RINGS; j++) {
-        this.field.sample(anchor.x + cx * this.radii[j], anchor.z + cz * this.radii[j], time, 1, s);
+        this.field.sample(anchor.x + cx * this.radii[j], anchor.z + cz * this.radii[j], time, s);
         put(this.grid, (a * RINGS + j) * 4);
       }
     }
@@ -173,7 +190,7 @@ export class NebulaSkyPainter {
   private farEmission(anchor: SkyAnchor, az: number, time: number): number[] {
     const s = this.sample, m = [0, 0, 0];
     for (const d of FAR) {
-      this.field.sample(anchor.x + Math.cos(az) * d, anchor.z + Math.sin(az) * d, time, 1, s);
+      this.field.sample(anchor.x + Math.cos(az) * d, anchor.z + Math.sin(az) * d, time, s);
       m[0] += (s.r * s.a * 1.3) / FAR.length; m[1] += (s.g * s.a * 1.3) / FAR.length; m[2] += (s.b * s.a * 1.3) / FAR.length;
     }
     return m;

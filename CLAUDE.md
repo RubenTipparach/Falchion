@@ -33,3 +33,5 @@ Spec first: use `/opsx:propose` → `/opsx:apply` → `/opsx:archive`. Specs liv
 - Extend via registries/interfaces (ShipStyleGenerator, MapLayer, ShardSource) — Open/Closed.
 - Load `solid-principles`, `modular-game-systems`, `deterministic-simulation`, and
   `testing-practices` skills before designing or reviewing code.
+- Load `procedural-geometry` before adding or changing ship styles, traits, parts or any
+  procedural mesh: solid parts must face outward (a test checks every generated ship).

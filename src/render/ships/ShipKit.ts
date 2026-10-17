@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { makeOutward } from '../geometry/orientation';
 import { Rng, hashSeed } from '../../core/rng/Rng';
 import type { ShipDesign } from '../../core/ships/ShipDesign';
 
@@ -85,10 +86,15 @@ export class ShipKit {
 
   // ── Primitives (all oriented along z) ───────────────────────────────
 
-  /** Revolve a profile of [radius, z] pairs around the z axis. */
+  /**
+   * Revolve a profile of [radius, z] pairs around the z axis. The profile may run either way:
+   * which way LatheGeometry winds its faces depends on the point order, so the result is
+   * turned outward here (a profile written front to back used to come out inside-out).
+   */
   lathe(profile: ReadonlyArray<readonly [number, number]>, material: THREE.Material, segments = 24): THREE.Mesh {
     const pts = profile.map(([r, z]) => new THREE.Vector2(Math.max(0.0001, r), z));
     const geo = new THREE.LatheGeometry(pts, segments).rotateX(Math.PI / 2);
+    makeOutward(geo);
     return new THREE.Mesh(geo, material);
   }
 

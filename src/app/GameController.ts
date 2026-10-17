@@ -20,7 +20,7 @@ import { due, enqueue, Job } from '../core/construction/Construction';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
 import { planetsOf, Planet } from '../core/galaxy/Planets';
-import { Hex, hexDistance, hexEquals, worldToHex } from '../core/hex/Hex';
+import { Hex, hexDistance, hexEquals, hexToWorld, worldToHex } from '../core/hex/Hex';
 import { hashSeed } from '../core/rng/Rng';
 import type { TechTree } from '../core/research/TechTree';
 import { normalizeDesign, ShipDesign } from '../core/ships/ShipDesign';
@@ -439,16 +439,21 @@ export class GameController implements GameActions, GameQueries {
   }
 
   moveFleet(fleetId: string, to: StarSystem, quiet = false): void {
+    this.moveFleetToHex(fleetId, to.hex, to.name, quiet);
+  }
+
+  /** Send a fleet to any hex: a star system or empty space. */
+  moveFleetToHex(fleetId: string, to: Hex, label: string, quiet = false): void {
     const s = this.state;
     const f = s.fleets.find((x) => x.id === fleetId);
     const l = s.loadouts[fleetId];
     if (!f || !l) return;
     const from = hexAt(f.movement, s.turn);
-    if (hexEquals(from, to.hex)) return;
+    if (hexEquals(from, to)) return;
     const speed = this.fleetSpeed();
-    const moved = { ...f, movement: planMovement(from, to.hex, s.turn, speed) };
+    const moved = { ...f, movement: planMovement(from, to, s.turn, speed) };
     this.deps.store.update({ fleets: s.fleets.map((x) => (x.id === fleetId ? moved : x)) });
-    if (!quiet) this.dispatch(`${f.name} sets course for ${to.name} (${formatDuration(travelTurns(hexDistance(from, to.hex), speed), CLOCK)})`);
+    if (!quiet) this.dispatch(`${f.name} sets course for ${label} (${formatDuration(travelTurns(hexDistance(from, to), speed), CLOCK)})`);
   }
 
   setOrders(fleetId: string, orders: FleetOrders): void {
@@ -1057,14 +1062,23 @@ export class GameController implements GameActions, GameQueries {
     const info = id ? this.fleetInfo(id) : null;
     if (!id) return;
     if (!info?.mine) return this.dispatch(`${info?.fleet.name ?? 'That fleet'} is not yours to command`, 'bad');
-    // Orders go to the star nearest the click, searching wider the further out the view is.
+    // A star right under the click (within a couple of percent of the view) is the target;
+    // anywhere else, the fleet goes to that exact hex of empty space.
     const v = this.view.map.view;
-    const reach = v ? Math.min(60, Math.max(4, Math.round(v.visibleWidth * 0.05))) : 4;
-    const star = this.deps.galaxy.nearestStar(worldToHex(world.x, world.z), reach);
-    if (!star) return this.dispatch('No star near there: move orders go to a star', 'bad');
-    if (info.at?.id === star.id) return this.dispatch(`${info.fleet.name} is already at ${star.name}`);
-    this.moveFleet(id, star);
-    this.view.selection.select({ x: star.position.x, z: star.position.z });
+    const clicked = worldToHex(world.x, world.z);
+    const snap = v ? Math.min(30, Math.round(v.visibleWidth * 0.015)) : 0;
+    const star = this.deps.galaxy.nearestStar(clicked, snap);
+    const fleet = info.fleet;
+    if (star) {
+      if (info.at?.id === star.id) return this.dispatch(`${fleet.name} is already at ${star.name}`);
+      this.moveFleet(id, star);
+      this.view.selection.select({ x: star.position.x, z: star.position.z });
+      return;
+    }
+    if (hexEquals(hexAt(fleet.movement, this.state.turn), clicked)) return this.dispatch(`${fleet.name} is already there`);
+    const p = hexToWorld(clicked);
+    this.moveFleetToHex(id, clicked, `deep space at ${formatAddress(addressOf(clicked))}`);
+    this.view.selection.select({ x: p.x, z: p.z });
   };
 
   handleHover = (world: THREE.Vector3 | null, ray: THREE.Raycaster): void => {
@@ -1072,7 +1086,7 @@ export class GameController implements GameActions, GameQueries {
     if (shipUnder) {
       const f = this.state.fleets.find((x) => x.id === shipUnder);
       this.view.map.canvas.style.cursor = 'pointer';
-      this.view.hud.setHover(`${f?.name ?? 'Fleet'}  ·  ${f?.owner === this.state.playerName ? 'click to select, then right-click a star to move' : f?.owner.replace('alien:', '') ?? ''}`);
+      this.view.hud.setHover(`${f?.name ?? 'Fleet'}  ·  ${f?.owner === this.state.playerName ? 'click to select, then right-click a star or empty space to move' : f?.owner.replace('alien:', '') ?? ''}`);
       return;
     }
     const v0 = this.view.map.view;

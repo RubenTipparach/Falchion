@@ -7,33 +7,25 @@ import { hash01, hashSeed } from '../../core/rng/Rng';
  * arithmetic (`hash01` from core, mirrored in GLSL, keeping the top 24 bits), so
  * both sides agree bit for bit on every lattice value; only float rounding differs.
  *
- * It is ONE nebula at every zoom. A large (~3,200 ly) domain-warped field sets the
- * clouds' shape, colour and density everywhere. Finer octaves (~120 ly down to ~4 ly),
- * warped along those same clouds, only add density detail inside them; `detail`
- * (0..1, from `nebulaDetail`) grows that detail as the view zooms in. So zooming in
- * reveals detail in the same clouds and a region keeps one hue at every scale.
+ * It is one layer: fine (~220 ly) domain-warped clouds that drift slowly, over a faint
+ * two-tone haze (~1,800 ly) so the space between clouds is never empty. The same clouds
+ * show at every zoom; the map fades them out toward galaxy scale.
  *
  * `sample()` returns the colour the map draws at a galaxy point: `rgb` with a
  * coverage `alpha`; the map adds `rgb * alpha * 1.3` over the background.
  */
 
-/** Large cloud structure (ly per noise cell) and the finest detail layer's base cell. */
-export const CLOUD_SCALE = 3_200;
-export const DETAIL_SCALE = 120;
+/** Cloud size (ly per noise cell) and the haze beneath them. */
+export const CLOUD_SCALE = 220;
+export const HAZE_SCALE = 1_800;
 /** Added to lattice coordinates so the GPU only ever casts positive ints to unsigned. */
 const LATTICE_OFFSET = 1 << 30;
 /** Shader time (seconds) to drift units: the clouds move very slowly. */
-export const DRIFT_RATE = 0.0006;
+export const DRIFT_RATE = 0.0012;
 
 /** Seed uniform for the field: 24 bits, so it is exact as a GLSL float. */
 export function nebulaSeed(galaxySeed: number): number {
   return hashSeed(galaxySeed, 'clouds') & 0xffffff;
-}
-
-/** Fine-detail amplitude for a view width (ly): full up close, a faint texture at galaxy scale. */
-export function nebulaDetail(visibleWidth: number): number {
-  const t = Math.min(1, Math.max(0, Math.log(visibleWidth / 400) / Math.log(12_000 / 400)));
-  return 1 - 0.85 * t * t * (3 - 2 * t);
 }
 
 /** GLSL for the field. The includer declares `uniform float uSeed;` (from `nebulaSeed`). */
@@ -49,8 +41,8 @@ export const NEBULA_GLSL = /* glsl */ `
     return mix(mix(nebHash(i), nebHash(i + vec2(1, 0)), u.x), mix(nebHash(i + vec2(0, 1)), nebHash(i + vec2(1, 1)), u.x), u.y); }
   float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 6; i++) { v += a * noise(p); p = p * 2.03 + 17.0; a *= 0.5; } return v; }
   // Map colour at an absolute galaxy point: rgb and coverage.
-  vec4 nebulaSample(vec2 hit, float t, float detail) {
-    vec2 p = hit / ${CLOUD_SCALE.toFixed(1)} + 11.0;
+  vec4 nebulaSample(vec2 hit, float t) {
+    vec2 p = hit / ${CLOUD_SCALE.toFixed(1)};
     vec2 q = vec2(fbm(p + vec2(0.0, t)), fbm(p + vec2(5.2, 1.3) - t));
     vec2 r = vec2(fbm(p + 3.0 * q + vec2(1.7, 9.2) + 0.5 * t), fbm(p + 3.0 * q + vec2(8.3, 2.8) - 0.4 * t));
     float n = fbm(p + 3.5 * r);
@@ -60,13 +52,11 @@ export const NEBULA_GLSL = /* glsl */ `
     col = mix(col, rose, smoothstep(0.55, 0.95, n * r.x * 1.8));
     col = mix(col, amber, smoothstep(0.78, 1.0, n * q.y * 2.0) * 0.6);
     float dust = smoothstep(0.55, 0.75, fbm(p * 2.7 + 40.0)) * 0.55;
-    // Finer octaves of the same clouds, swept along the large warp: density detail only.
-    float fine = fbm(hit / ${DETAIL_SCALE.toFixed(1)} + 6.0 * r);
-    float dens = smoothstep(0.30, 0.85, n) * (1.0 - dust) * mix(1.0, 2.2 * smoothstep(0.25, 0.8, fine), detail);
-    // A faint, dimmer halo of the cloud's own colour, so the space between clouds is never empty.
-    float halo = smoothstep(0.12, 0.6, n);
-    vec3 haze = mix(col, vec3(0.16, 0.16, 0.45), 0.45);
-    return vec4(mix(haze, col, clamp(dens * 1.6, 0.0, 1.0)), min(dens, 1.0) * 0.62 + 0.13 * halo);
+    float cover = smoothstep(0.30, 0.85, n) * (1.0 - dust);
+    // Faint two-tone haze so the space between clouds is never empty.
+    float hazeN = fbm(hit / ${HAZE_SCALE.toFixed(1)} + 3.0);
+    vec3 haze = mix(vec3(0.10, 0.16, 0.42), vec3(0.32, 0.12, 0.40), hazeN);
+    return vec4(mix(haze, col, clamp(cover * 1.6, 0.0, 1.0)), cover * 0.85 + 0.16 * smoothstep(0.25, 0.75, hazeN));
   }`;
 
 /** One field sample: map colour and coverage. */
@@ -85,7 +75,7 @@ function smoothstep(e0: number, e1: number, x: number): number {
 }
 
 const TEAL = [0.06, 0.45, 0.55], BLUE = [0.12, 0.22, 0.75], VIOLET = [0.45, 0.16, 0.70], ROSE = [0.85, 0.20, 0.42], AMBER = [0.95, 0.55, 0.20];
-const HAZE = [0.16, 0.16, 0.45];
+const HAZE_A = [0.10, 0.16, 0.42], HAZE_B = [0.32, 0.12, 0.40];
 
 /** CPU twin of NEBULA_GLSL. Pure and deterministic; allocation-free per sample. */
 export class NebulaField {
@@ -95,10 +85,10 @@ export class NebulaField {
     this.seed = nebulaSeed(galaxySeed);
   }
 
-  /** Map colour at absolute galaxy (x, z); `time` in shader seconds, `detail` 0..1. */
-  sample(x: number, z: number, time: number, detail: number, out: NebulaColor): NebulaColor {
+  /** Map colour at absolute galaxy (x, z); `time` in shader seconds. */
+  sample(x: number, z: number, time: number, out: NebulaColor): NebulaColor {
     const t = time * DRIFT_RATE;
-    const px = x / CLOUD_SCALE + 11, py = z / CLOUD_SCALE + 11;
+    const px = x / CLOUD_SCALE, py = z / CLOUD_SCALE;
     const qx = this.fbm(px, py + t), qy = this.fbm(px + 5.2 - t, py + 1.3 - t);
     const rx = this.fbm(px + 3 * qx + 1.7 + 0.5 * t, py + 3 * qy + 9.2 + 0.5 * t);
     const ry = this.fbm(px + 3 * qx + 8.3 - 0.4 * t, py + 3 * qy + 2.8 - 0.4 * t);
@@ -106,21 +96,20 @@ export class NebulaField {
     const s1 = smoothstep(0.2, 0.8, qx), s2 = smoothstep(0.35, 0.85, ry);
     const s3 = smoothstep(0.55, 0.95, n * rx * 1.8), s4 = smoothstep(0.78, 1.0, n * qy * 2.0) * 0.6;
     const dust = smoothstep(0.55, 0.75, this.fbm(px * 2.7 + 40, py * 2.7 + 40)) * 0.55;
-    const fine = this.fbm(x / DETAIL_SCALE + 6 * rx, z / DETAIL_SCALE + 6 * ry);
-    const dens = smoothstep(0.30, 0.85, n) * (1 - dust) * mix(1, 2.2 * smoothstep(0.25, 0.8, fine), detail);
-    const halo = smoothstep(0.12, 0.6, n);
-    const k = clamp01(dens * 1.6);
+    const cover = smoothstep(0.30, 0.85, n) * (1 - dust);
+    const hazeN = this.fbm(x / HAZE_SCALE + 3, z / HAZE_SCALE + 3);
+    const k = clamp01(cover * 1.6);
     let r = 0, g = 0, b = 0;
     for (let i = 0; i < 3; i++) {
       let c = mix(BLUE[i], TEAL[i], s1);
       c = mix(c, VIOLET[i], s2);
       c = mix(c, ROSE[i], s3);
       c = mix(c, AMBER[i], s4);
-      c = mix(mix(c, HAZE[i], 0.45), c, k);
+      c = mix(mix(HAZE_A[i], HAZE_B[i], hazeN), c, k);
       if (i === 0) r = c; else if (i === 1) g = c; else b = c;
     }
     out.r = r; out.g = g; out.b = b;
-    out.a = Math.min(dens, 1) * 0.62 + 0.13 * halo;
+    out.a = cover * 0.85 + 0.16 * smoothstep(0.25, 0.75, hazeN);
     return out;
   }
 

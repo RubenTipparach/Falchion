@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hash01 } from '../../core/rng/Rng';
-import { NebulaColor, NebulaField, nebulaDetail, nebulaSeed } from './nebulaField';
+import { NebulaColor, NebulaField, nebulaSeed } from './nebulaField';
 import { NebulaSkyPainter } from './nebulaSky';
 
 const SEED = 1337;
@@ -31,8 +31,8 @@ describe('NebulaField', () => {
     const a: NebulaColor = { r: 0, g: 0, b: 0, a: 0 }, b: NebulaColor = { r: 0, g: 0, b: 0, a: 0 };
     for (let i = 0; i < 50; i++) {
       const x = (i - 25) * 731.3, z = (i % 7) * -911.7;
-      field.sample(x, z, 12, 0, a);
-      field.sample(x, z, 12, 0, b);
+      field.sample(x, z, 12, a);
+      field.sample(x, z, 12, b);
       expect(a).toEqual(b);
       for (const v of [a.r, a.g, a.b]) expect(v).toBeGreaterThanOrEqual(0);
       for (const v of [a.r, a.g, a.b]) expect(v).toBeLessThanOrEqual(1);
@@ -42,27 +42,22 @@ describe('NebulaField', () => {
   });
 });
 
-describe('nebula is one field at every zoom', () => {
+describe('nebula drift', () => {
   const field = new NebulaField(SEED);
 
-  it("keeps a region's hue whether zoomed out (little detail) or in (full detail)", () => {
-    const far: NebulaColor = { r: 0, g: 0, b: 0, a: 0 }, near: NebulaColor = { r: 0, g: 0, b: 0, a: 0 };
-    let checked = 0;
-    for (let i = 0; i < 300; i++) {
-      const x = (i % 17) * 1291 - 11000, z = Math.floor(i / 17) * 1187 - 11000;
-      field.sample(x, z, 0, nebulaDetail(20_000), far);
-      field.sample(x, z, 0, nebulaDetail(50), near);
-      if (far.a < 0.3 || near.a < 0.3) continue;
-      checked++;
-      expect(angleBetween(hue(far), hue(near))).toBeLessThan(0.35);
+  it('drifts subtly: barely changed after a few seconds, more over minutes', () => {
+    const a: NebulaColor = { r: 0, g: 0, b: 0, a: 0 }, b: NebulaColor = { r: 0, g: 0, b: 0, a: 0 };
+    let minute = 0, hour = 0;
+    for (let i = 0; i < 200; i++) {
+      const x = (i % 20) * 37 - 15000, z = Math.floor(i / 20) * 41 + 20000;
+      field.sample(x, z, 0, a);
+      field.sample(x, z, 2, b);
+      minute += Math.abs(a.a - b.a);
+      field.sample(x, z, 300, b);
+      hour += Math.abs(a.a - b.a);
     }
-    expect(checked).toBeGreaterThan(30);
-  });
-
-  it('adds detail as the view zooms in', () => {
-    expect(nebulaDetail(50)).toBe(1);
-    expect(nebulaDetail(2_000)).toBeLessThan(nebulaDetail(750));
-    expect(nebulaDetail(30_000)).toBeCloseTo(0.15);
+    expect(minute / 200).toBeLessThan(0.02); // two seconds
+    expect(hour / 200).toBeGreaterThan(minute / 200);
   });
 });
 
@@ -78,7 +73,24 @@ describe('NebulaSkyPainter', () => {
     expect(c).not.toEqual(a);
   });
 
-  it('never paints black, and the plane is brighter than the poles', () => {
+  it('stays a dark starfield out in empty space', () => {
+    // Find a point with no cloud around it on the map, and one inside a cloud.
+    const s: NebulaColor = { r: 0, g: 0, b: 0, a: 0 };
+    let empty: [number, number] | null = null, full: [number, number] | null = null;
+    for (let i = 0; i < 4000 && !(empty && full); i++) {
+      const x = (i % 63) * 97 - 3000, z = Math.floor(i / 63) * 89 - 3000;
+      field.sample(x, z, 0, s);
+      if (!empty && s.a < 0.05) empty = [x, z];
+      if (!full && s.a > 0.6) full = [x, z];
+    }
+    const lumOf = (sky: Float32Array) => { let l = 0; for (let i = 0; i < sky.length; i += 3) l += 0.3 * sky[i] + 0.55 * sky[i + 1] + 0.15 * sky[i + 2]; return l / (sky.length / 3); };
+    const dark = lumOf(paint('empty', empty![0], empty![1]));
+    const lit = lumOf(paint('full', full![0], full![1]));
+    expect(dark).toBeLessThan(0.06);
+    expect(lit).toBeGreaterThan(dark * 3);
+  });
+
+  it('never paints black inside a cloud, and the plane is brighter than the poles', () => {
     const sky = paint('s1', -4000, 2500);
     let plane = 0, poles = 0, np = 0, nq = 0;
     for (let i = 0; i < dirs.length; i += 3) {
@@ -96,7 +108,7 @@ describe('NebulaSkyPainter', () => {
     const spots: Array<{ x: number; z: number; h: number }> = [];
     for (let i = 0; i < 400 && spots.length < 2; i++) {
       const x = (i % 20) * 977 - 9000, z = Math.floor(i / 20) * 1013 - 9000;
-      field.sample(x, z, 0, 1, s);
+      field.sample(x, z, 0, s);
       if (s.a < 0.4) continue;
       const h = hue(s);
       if (!spots.length || angleBetween(h, spots[0].h) > 1.2) spots.push({ x, z, h });

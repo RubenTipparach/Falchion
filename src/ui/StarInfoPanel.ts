@@ -112,7 +112,7 @@ export class StarInfoPanel {
     );
   }
 
-  /** Card for a selected fleet: yours shows stores and orders; right-click a star to move it. */
+  /** Card for a selected fleet: yours shows stores and orders; right-click a star or empty space to move it. */
   private renderFleet(info: FleetInfo): void {
     const { fleet, group } = info;
     this.el.classList.remove('hidden');
@@ -130,7 +130,7 @@ export class StarInfoPanel {
         h('div', { class: 'row orders' },
           this.orderChip(group, 'autoExplore', 'Auto-explore'),
           this.orderChip(group, 'autoReturn', 'Return to resupply')),
-        h('p', { class: 'notice' }, 'Right-click near a star to send this fleet there. Right-drag to orbit the camera.'))
+        h('p', { class: 'notice' }, 'Right-click a star, or anywhere in empty space, to send this fleet there. Right-drag to orbit the camera.'))
         : h('p', { class: 'small muted' }, fleet.owner.startsWith('alien:') ? 'Hostile alien fleet.' : 'Another empire\'s fleet.'),
       h('div', { class: 'actions' },
         h('button', { class: 'btn', title: 'Centre the camera on this fleet', onclick: () => this.actions.focusFleet(fleet.id) }, icon('locate'), ' Centre'),

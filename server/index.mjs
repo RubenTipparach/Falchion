@@ -67,7 +67,7 @@ const text = (s, max) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007
 function publicIdentity(e) {
   if (!e || typeof e !== 'object' || !text(e.name, 40)) return undefined;
   const part = (x) => (typeof x === 'string' && /^[a-z][a-z-]{0,23}$/.test(x) ? x : 'none');
-  const colors = Array.isArray(e.flag?.colors) ? e.flag.colors.slice(0, 3).map((c) => (typeof c === 'string' && HEX_COLOR.test(c) ? c : '#0b1220')) : [];
+  const colors = Array.isArray(e.flag?.colors) ? e.flag.colors.slice(0, 3).map((c) => (typeof c === 'string' && HEX_COLOR.test(c) ? c : '#10121c')) : [];
   return {
     name: text(e.name, 40), ruler: text(e.ruler, 40), title: text(e.title, 24), capital: text(e.capital, 40),
     flag: { field: part(e.flag?.field), emblem: part(e.flag?.emblem), colors },

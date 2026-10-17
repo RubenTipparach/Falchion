@@ -44,7 +44,7 @@ const EMBLEMS: Record<string, (c: string, field: string) => string> = {
 
 export function flagSvg(flag: Flag, width = 36): string {
   const col = (c: string, fallback: string) => (HEX.test(c) ? c : fallback);
-  const [a, b, e] = [col(flag.colors[0], '#e6b450'), col(flag.colors[1], '#0b1220'), col(flag.colors[2], '#f8fafc')];
+  const [a, b, e] = [col(flag.colors[0], '#f3a833'), col(flag.colors[1], '#10121c'), col(flag.colors[2], '#ffffff')];
   const field = (FIELDS[flag.field] ?? FIELDS.solid)(a, b);
   const emblem = (EMBLEMS[flag.emblem] ?? EMBLEMS.none)(e, a);
   return `<svg class="flag" width="${width}" height="${Math.round((width * 2) / 3)}" viewBox="0 0 60 40" aria-hidden="true">${field}${emblem}<rect width="60" height="40" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/></svg>`;

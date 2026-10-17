@@ -33,7 +33,7 @@ describe('empire identity', () => {
     expect(id.color).toBe(HERALDRY.colors[0]);
     expect(id.flag.field).toBe(HERALDRY.fields[0].id);
     expect(id.flag.emblem).toBe('star');
-    expect(id.flag.colors).toEqual(['#ffffff', '#0b1220', '#123456']);
+    expect(id.flag.colors).toEqual(['#ffffff', '#10121c', '#123456']);
   });
 
   it('is not an identity without a name', () => {

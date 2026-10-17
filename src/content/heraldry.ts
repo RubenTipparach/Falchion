@@ -2,16 +2,22 @@ import type { HeraldryTables } from '../core/empire/Identity';
 
 /* Choices for an empire's identity: colours, flag parts, ruler titles and name parts. */
 
-/** Empire colours: distinct on the dark map and from the alien empires' reds and oranges. */
+/*
+ * Colours come from the Lospec 500 palette (https://lospec.com/palette-list/lospec500),
+ * so every empire and flag shares one coherent look.
+ */
+
+/** Empire colours: the palette's brightest, most distinct hues, readable on the dark map. */
 export const EMPIRE_COLORS: readonly string[] = [
-  '#e6b450', '#4fd1ff', '#6ee7a8', '#c792ea', '#ff8fa3', '#7fd3e6',
-  '#ffd166', '#a98bff', '#f29bc9', '#9be15d', '#5eead4', '#f8fafc',
+  '#f3a833', '#ec273f', '#e98537', '#9de64e', '#5ab552', '#6dead6',
+  '#36c5f4', '#3388de', '#cc99ff', '#c878af', '#fa6e79', '#f7f3b7',
 ];
 
-/** Flag colours: the empire colours plus darks and metals for fields and emblems. */
+/** Flag colours: the empire colours plus the palette's deep darks, earths and metals. */
 export const FLAG_COLORS: readonly string[] = [
   ...EMPIRE_COLORS,
-  '#0b1220', '#1b2a4a', '#3b0d1a', '#14342b', '#2d1b4e', '#c9a227', '#b8c2d0', '#e05252',
+  '#10121c', '#2c1e31', '#6b2643', '#1e4044', '#006554', '#3e3b65',
+  '#3859b3', '#4d3533', '#94493a', '#a26d3f', '#b0a7b8', '#ffffff',
 ];
 
 export interface FlagPart {

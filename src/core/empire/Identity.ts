@@ -86,5 +86,5 @@ export function cleanFlag(raw: unknown, t: HeraldryTables, color: string): Flag 
     typeof id === 'string' && PART_ID.test(id) && list.some((x) => x.id === id) ? id : list[0].id;
   const c = Array.isArray(f?.colors) ? f!.colors : [];
   const col = (i: number, fallback: string) => (typeof c[i] === 'string' && HEX_COLOR.test(c[i]) ? c[i].toLowerCase() : fallback);
-  return { field: known(f?.field, t.fields), emblem: known(f?.emblem, t.emblems), colors: [col(0, color), col(1, '#0b1220'), col(2, '#f8fafc')] };
+  return { field: known(f?.field, t.fields), emblem: known(f?.emblem, t.emblems), colors: [col(0, color), col(1, '#10121c'), col(2, '#ffffff')] };
 }

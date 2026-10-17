@@ -215,7 +215,7 @@ describe('public empire view', async () => {
     });
     expect(v.color).toBe('#e6b450');
     expect(v.empire.name).toBe('img src=x Solar Dominion');
-    expect(v.empire.flag).toEqual({ field: 'cross', emblem: 'none', colors: ['#e6b450', '#0b1220', '#000000'] });
+    expect(v.empire.flag).toEqual({ field: 'cross', emblem: 'none', colors: ['#e6b450', '#10121c', '#000000'] });
     expect(publicView({ empire: { name: '' } }).empire).toBeUndefined();
   });
 });

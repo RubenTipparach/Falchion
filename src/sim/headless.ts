@@ -123,7 +123,7 @@ export function applyCommand(save: unknown, player: Player, worldTime: number, c
 export interface PublicRecord {
   readonly home?: Hex | null;
   readonly colonies?: readonly Hex[];
-  readonly fleets?: ReadonlyArray<{ readonly id?: string; readonly movement?: FleetMovement; readonly armed?: boolean; readonly stance?: string }>;
+  readonly fleets?: ReadonlyArray<{ readonly id?: string; readonly movement?: FleetMovement; readonly armed?: boolean; readonly stance?: string; readonly battle?: { readonly foe?: string; readonly tick?: number } }>;
 }
 
 /** Two fleets of different players that meet at sea and fight (at most one per fleet per year). */
@@ -186,6 +186,43 @@ export function findContacts(players: ReadonlyArray<{ readonly id: string; reado
   return out;
 }
 
+/** A fleet that broke off last year's battle, overtaken by a faster enemy that pursues it. */
+export interface Pursuit extends Contact {
+  readonly pursuit: true;
+}
+
+/**
+ * Pursuits in `tick`: an aggressive armed fleet that fought a round last year and has stayed put
+ * (it was not ordered away), whose foe has since broken off, chases it when its fleet is faster.
+ * The round is fought where the fleeing fleet now is. `a` is the pursuer, `b` the quarry. Fleets
+ * already in a contact this year, and fleets as fast or faster than their pursuer, are left alone.
+ */
+export function findPursuits(players: ReadonlyArray<{ readonly id: string; readonly public?: PublicRecord | null }>, tick: number, busy: readonly Contact[] = []): Pursuit[] {
+  const fleets = new Map<string, { player: string; fleet: string; movement: FleetMovement; armed: boolean; aggressive: boolean; battle?: { foe?: string; tick?: number } }>();
+  for (const p of players) {
+    for (const f of (p.public?.fleets ?? []).slice(0, 50)) {
+      if (typeof f?.id !== 'string' || !isFleetMovement(f.movement)) continue;
+      fleets.set(`${p.id}:${f.id}`, { player: p.id, fleet: f.id, movement: f.movement, armed: f.armed === true, aggressive: f.stance === 'aggressive', battle: f.battle });
+    }
+  }
+  const used = new Set(busy.flatMap((c) => [`${c.a.player}:${c.a.fleet}`, `${c.b.player}:${c.b.fleet}`]));
+  const out: Pursuit[] = [];
+  for (const key of [...fleets.keys()].sort()) {
+    const p = fleets.get(key)!;
+    const q = p.battle?.foe ? fleets.get(p.battle.foe) : undefined;
+    if (!q || used.has(key) || used.has(p.battle!.foe!) || p.battle!.tick !== tick - 1 || q.player === p.player) continue;
+    if (!p.aggressive || !p.armed || !isStationed(p.movement, tick)) continue;
+    const at = hexAt(q.movement, tick);
+    // Still side by side on station: an ordinary contact, not a chase.
+    if (isStationed(q.movement, tick) && hexEquals(at, hexAt(p.movement, tick))) continue;
+    if (p.movement.speed <= q.movement.speed) continue; // as fast or faster: it gets away
+    used.add(key);
+    used.add(p.battle!.foe!);
+    out.push({ a: { player: p.player, fleet: p.fleet }, b: { player: q.player, fleet: q.fleet }, hex: at, pursuit: true });
+  }
+  return out;
+}
+
 interface StationedFleet extends Encounter {
   readonly key: string;
   readonly player: string;
@@ -232,6 +269,33 @@ export function resolveContact(saveA: unknown, playerA: Player, fleetIdA: string
   const battle = resolveRound(first.side, second.side, SHIP_CLASSES, hashSeed(tables().galaxy.params.seed, lo, hi, tick), round);
   simA.applyContact(forceA, foeOf(forceB, keyB), battle, aFirst ? 0 : 1, round, tick);
   simB.applyContact(forceB, foeOf(forceA, keyA), battle, aFirst ? 1 : 0, round, tick);
+  const outA = result(a.store.state, playerA);
+  const outB = result(b.store.state, playerB);
+  return { saveA: outA.save, publicA: outA.public, saveB: outB.save, publicB: outB.public };
+}
+
+/**
+ * A pursuit: the faster pursuer (A) closes on the fleet that broke off (B) where B now is, and the
+ * battle's next round is fought there. Null when either empire is not at `tick`, either fleet is
+ * gone, the pursuer cannot attack, or B is not faster-fled (A no faster than B).
+ */
+export function resolvePursuit(saveA: unknown, playerA: Player, fleetIdA: string, saveB: unknown, playerB: Player, fleetIdB: string, tick: number): ContactResult | null {
+  if (!validSave(saveA) || !validSave(saveB) || playerA.id === playerB.id || !Number.isInteger(tick)) return null;
+  if (saveA.turn !== tick || saveB.turn !== tick) return null;
+  const a = runtime(saveA, playerA, EMPTY_WORLD, []);
+  const b = runtime(saveB, playerB, EMPTY_WORLD, []);
+  const simA = new EmpireSim(a.deps);
+  const simB = new EmpireSim(b.deps);
+  const quarry = simB.contactForce(fleetIdB, tick, true);
+  const keyA = `${playerA.id}:${fleetIdA}`, keyB = `${playerB.id}:${fleetIdB}`;
+  if (!quarry || !simA.pursue(fleetIdA, quarry, keyB, tick)) return null;
+  const pursuer = simA.contactForce(fleetIdA, tick);
+  if (!pursuer || !attacks(pursuer)) return null;
+  const [lo, hi] = keyA < keyB ? [keyA, keyB] : [keyB, keyA];
+  const round = Math.max(nextRound(pursuer.battle, keyB, tick), nextRound(quarry.battle, keyA, tick));
+  const battle = resolveRound(pursuer.side, quarry.side, SHIP_CLASSES, hashSeed(tables().galaxy.params.seed, lo, hi, tick, 'pursuit'), round);
+  simA.applyContact(pursuer, foeOf(quarry, keyB), battle, 0, round, tick);
+  simB.applyContact(quarry, foeOf(pursuer, keyA), battle, 1, round, tick, true);
   const outA = result(a.store.state, playerA);
   const outB = result(b.store.state, playerB);
   return { saveA: outA.save, publicA: outA.public, saveB: outB.save, publicB: outB.public };

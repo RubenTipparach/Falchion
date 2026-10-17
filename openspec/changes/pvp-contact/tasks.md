@@ -25,3 +25,4 @@
 - [x] 6.1 One round a world year (resolveRound), at least one ship lost per round, range closing over rounds
 - [x] 6.2 Fleets remember the battle and its round; the fleet card shows it with Retreat
 - [x] 6.3 `retreat` command: nearest friendly system at once, ending the battle
+- [x] 6.4 Pursuit: a faster aggressive foe runs down a fleet that broke off (findPursuits / resolvePursuit), the round fought where it is caught

@@ -121,6 +121,8 @@ export function publicView(p) {
       id: String(f.id).slice(0, 64), name: String(f.name).slice(0, 64), movement: f.movement, design: f.design,
       // Whether it has warships, and whether it attacks what it meets at sea (anything else is passive).
       armed: f.armed === true, ...(f.stance === 'aggressive' ? { stance: 'aggressive' } : {}),
+      // The fleet it last fought at sea, and the year: how the server tells a pursuit from an escape.
+      ...(typeof f.battle?.foe === 'string' && Number.isInteger(f.battle?.tick) ? { battle: { foe: f.battle.foe.slice(0, 160), tick: f.battle.tick } } : {}),
     })),
   };
 }

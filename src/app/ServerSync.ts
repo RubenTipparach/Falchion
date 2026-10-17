@@ -16,8 +16,12 @@ export interface PublicEmpire {
   readonly empire?: Pick<EmpireIdentity, 'name' | 'ruler' | 'title' | 'capital' | 'flag'>;
   readonly home: Hex;
   readonly colonies: readonly Hex[];
-  /** `armed`: has warships. `stance`: 'aggressive' when it attacks the fleets it meets at sea (absent = passive). */
-  readonly fleets: ReadonlyArray<Pick<FleetView, 'id' | 'name' | 'movement' | 'design'> & { readonly armed: boolean; readonly stance?: 'aggressive' }>;
+  /**
+   * `armed`: has warships. `stance`: 'aggressive' when it attacks the fleets it meets at sea (absent
+   * = passive). `battle`: the fleet it last fought at sea (`${ownerId}:${fleetId}`) and the year, so
+   * the server can tell a fleet that breaks off from one that pursues.
+   */
+  readonly fleets: ReadonlyArray<Pick<FleetView, 'id' | 'name' | 'movement' | 'design'> & { readonly armed: boolean; readonly stance?: 'aggressive'; readonly battle?: { readonly foe: string; readonly tick: number } }>;
 }
 
 /** Another player in the shared galaxy, as /api/players returns them (and the live stream pushes them). */
@@ -63,7 +67,8 @@ export function publicEmpire(s: GameState, color: string): PublicEmpire {
     colonies,
     fleets: s.fleets.filter((f) => f.owner === s.playerName).map((f) => {
       const l = s.loadouts[f.id];
-      return { id: f.id, name: f.name, movement: f.movement, design: f.design, armed: hasWarships(l?.ships ?? []), stance: l?.orders?.stance };
+      const battle = l?.battle ? { battle: { foe: l.battle.foe, tick: l.battle.tick } } : {};
+      return { id: f.id, name: f.name, movement: f.movement, design: f.design, armed: hasWarships(l?.ships ?? []), stance: l?.orders?.stance, ...battle };
     }),
   };
 }

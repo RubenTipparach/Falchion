@@ -11,7 +11,7 @@ import { createWorld } from '../app/World';
 import { Store } from '../app/Store';
 import type { GameState } from '../app/GameState';
 import { SaveGame } from '../app/SaveGame';
-import { advanceSave, applyCommand, findContacts, resolveContact } from './headless';
+import { advanceSave, applyCommand, findContacts, findPursuits, resolveContact, resolvePursuit } from './headless';
 import { decodeArgs, encodeCommand } from './commands';
 import { newEmpireState } from './newEmpireState';
 import type { EmpireSim } from './EmpireSim';
@@ -97,6 +97,39 @@ describe('a battle at sea is a round a year until one side is gone or breaks off
     const a = advanceSave(r.saveA, player(A), T + 1)!.save;
     const b = advanceSave(fled.save, player(B), T + 1)!.save;
     expect(meet(a, b, T + 1)).toBeNull();
+  });
+});
+
+describe('a faster fleet can pursue one that breaks off', () => {
+  /** A fights B for a round; B retreats; both play on a year. A's empire has `drives` speed research. */
+  function breakOff(drives: string[]) {
+    const fast = empireWith(A, interceptors(8), HERE, { stance: 'aggressive' });
+    fast.empire.research.researched.push(...drives);
+    const r = meet(fast, empireWith(B, interceptors(8), HERE))!;
+    const fled = applyCommand(r.saveB, player(B), T + 0.5, encodeCommand('retreat', [fid(B)]))!;
+    const a = advanceSave(r.saveA, player(A), T + 1)!;
+    const b = advanceSave(fled.save, player(B), T + 1)!;
+    const players = [{ id: A, public: a.public }, { id: B, public: b.public }];
+    return { a, b, pursuits: findPursuits(players, T + 1, findContacts(players, T + 1)) };
+  }
+
+  it('runs it down where it is now and fights the next round there', () => {
+    const { a, b, pursuits } = breakOff(['t-fusion', 't-warp-lanes']);
+    expect(pursuits).toHaveLength(1);
+    expect(pursuits[0].a).toEqual({ player: A, fleet: fid(A) });
+    expect(pursuits[0].b).toEqual({ player: B, fleet: fid(B) });
+    const r = resolvePursuit(a.save, player(A), fid(A), b.save, player(B), fid(B), T + 1)!;
+    expect(r).not.toBeNull();
+    expect(news(r.saveA)).toContain('pursues');
+    expect(news(r.saveB)).toContain('Overtaken while breaking off');
+    expect(news(r.saveB)).toMatch(/round 2|destroyed/);
+    // The pursuer now holds where the quarry was caught.
+    const chaser = asSave(r.saveA).fleets.find((f: { id: string }) => f.id === fid(A));
+    expect(chaser.movement.route.at(-1)).toEqual(pursuits[0].hex);
+  });
+
+  it('a fleet no faster than its foe gets away', () => {
+    expect(breakOff([]).pursuits).toEqual([]);
   });
 });
 

@@ -90,6 +90,8 @@ export interface ContactForce extends Encounter {
   readonly spent: number;
   /** The battle it is already in, if any (its round count). */
   readonly battle?: FleetBattle;
+  /** Light years a year it travels: a faster enemy can run it down when it breaks off. */
+  readonly speed: number;
   readonly side: Side;
 }
 
@@ -1186,18 +1188,19 @@ export class EmpireSim {
    * This fleet as it meets another at sea on `turn`: its warships (the whole fleet when it has
    * none), its research bonuses and its ammunition. Null when it is not on station.
    */
-  contactForce(fleetId: string, turn: number): ContactForce | null {
+  contactForce(fleetId: string, turn: number, underway = false): ContactForce | null {
     const s = this.state;
     const f = s.fleets.find((x) => x.id === fleetId);
     const l = s.loadouts[fleetId];
-    if (!f || !l || !isStationed(f.movement, turn)) return null;
+    // A fleet under way can still be caught (a pursuit): `underway` allows it.
+    if (!f || !l || (!underway && !isStationed(f.movement, turn))) return null;
     const warships = warshipsOf(l.ships);
     const ships = warships.length ? warships : l.ships.filter((x) => x.count > 0);
     const fire = firepower(l.ammo, ships, specOf);
     const at = hexAt(f.movement, turn);
     const empire = s.identity?.name ?? s.playerName;
     return {
-      fleetId, fleetName: f.name, empire, at, star: this.deps.galaxy.starAt(at), ships, spent: fire.spent, battle: l.battle,
+      fleetId, fleetName: f.name, empire, at, star: this.deps.galaxy.starAt(at), ships, spent: fire.spent, battle: l.battle, speed: f.movement.speed,
       aggressive: isAggressive(l.orders), armed: warships.length > 0,
       side: { name: empire, ships, bonuses: this.combatBonuses(), firepower: fire.factor },
     };
@@ -1208,7 +1211,7 @@ export class EmpireSim {
    * any it took), the ammunition it fired, the battle it is now in, and the news. `index` is its
    * side in the round; `foe` is the other fleet as it went in.
    */
-  applyContact(force: ContactForce, foe: ContactFoe, result: BattleResult, index: 0 | 1, round: number, tick: number): void {
+  applyContact(force: ContactForce, foe: ContactFoe, result: BattleResult, index: 0 | 1, round: number, tick: number, overtaken = false): void {
     const other = index === 0 ? 1 : 0;
     const delta: Squadron[] = force.ships.map((x) => ({ classId: x.classId, count: -(x.count - countOf(result.survivors[index], x.classId)) }));
     for (const c of result.captured[index]) delta.push({ classId: c.classId, count: c.count });
@@ -1224,7 +1227,24 @@ export class EmpireSim {
     const text = result.winner === index ? `${force.fleetName} destroyed ${foeName} of ${foeEmpire} at ${place} in round ${round}: ${tally}`
       : result.winner === other ? `${force.fleetName} was destroyed by ${foeName} of ${foeEmpire} at ${place} in round ${round}`
       : `Battle at ${place}, round ${round}: ${force.fleetName} against ${foeName} of ${foeEmpire}, ${tally}.${round === 1 ? ' A round a year until one side is gone or breaks off: Retreat from the fleet card.' : ''}`;
-    this.dispatch(text, result.winner === index ? 'good' : result.winner === other || mine > theirs ? 'bad' : undefined);
+    this.dispatch(overtaken ? `Overtaken while breaking off: ${text}` : text, result.winner === index ? 'good' : result.winner === other || mine > theirs ? 'bad' : undefined);
+  }
+
+  /**
+   * Chase a fleet that broke off last year's battle: when this fleet is faster, it closes on the
+   * other where it now is (and stops there). False when it is not faster, or not the foe it fought.
+   */
+  pursue(fleetId: string, quarry: ContactForce, quarryKey: string, tick: number): boolean {
+    const s = this.state;
+    const f = s.fleets.find((x) => x.id === fleetId);
+    const l = s.loadouts[fleetId];
+    if (!f || !l || l.battle?.foe !== quarryKey || l.battle.tick !== tick - 1) return false;
+    const speed = this.fleetSpeed();
+    if (speed <= quarry.speed) return false;
+    const at = positionAt(f.movement, tick, this.pointOf);
+    this.deps.store.update((st) => ({ fleets: st.fleets.map((x) => (x.id === fleetId ? { ...x, movement: planMovement(quarry.at, quarry.at, tick, speed, at) } : x)) }));
+    this.dispatch(`${f.name} pursues ${quarry.fleetName.slice(0, 64)} of ${quarry.empire.slice(0, 100)}: faster ships run it down`);
+    return true;
   }
 
   /**
@@ -1244,7 +1264,7 @@ export class EmpireSim {
     // Retreating ends the fight: the fleet is no longer aggressive.
     if (l.orders?.stance) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { ...l.orders, stance: undefined } } } }));
     this.moveFleet(fleetId, away, true);
-    this.dispatch(`${f.name} breaks off and retreats to ${away.name}`, 'bad');
+    this.dispatch(`${f.name} breaks off and retreats to ${away.name}. An enemy with faster ships can still pursue it.`, 'bad');
   }
 
   // ── NPC empires ────────────────────────────────────────────────────

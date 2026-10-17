@@ -30,8 +30,19 @@ A battle at sea SHALL be fought one round per world year (one real minute) while
 - **THEN** three rounds are fought, each costing at least one ship, and the dispatches count the rounds
 
 #### Scenario: Breaking off
-- **WHEN** the defender presses Retreat between rounds
+- **WHEN** the defender presses Retreat between rounds and the attacker's ships are no faster
 - **THEN** its fleet sets course for the nearest friendly system and no further round is fought
+
+### Requirement: A faster fleet can pursue
+When a fleet breaks off a battle, an aggressive armed foe that fought it the year before and has stayed put SHALL pursue it if the foe's ships are faster: the pursuer closes on the fleeing fleet where it now is and the next round is fought there. A fleet as fast or faster than its pursuer SHALL get away. Both owners SHALL be told of the pursuit.
+
+#### Scenario: Run down
+- **WHEN** a fleet retreats from an enemy whose empire has faster drives
+- **THEN** the next year the enemy catches it where it has got to, and the round is fought there
+
+#### Scenario: A clean escape
+- **WHEN** a fleet retreats from an enemy no faster than itself
+- **THEN** no further round is fought
 
 ### Requirement: The battle is the same for both sides
 The battle SHALL run the game's combat rules with each side's warships, research bonuses and ammunition-scaled firepower. It SHALL be deterministic in both fleets (owner and id) and the year, whichever empire is named first. Each empire's save SHALL record its own losses and a dispatch naming the other fleet and its empire, with those names bounded. Both empires SHALL have played exactly to that year.

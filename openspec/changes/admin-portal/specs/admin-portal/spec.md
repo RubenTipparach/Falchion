@@ -28,7 +28,7 @@ Admins SHALL be able to publish a short announcement that every player sees as a
 - **THEN** players see it within a minute
 
 ### Requirement: Channel notifications
-When `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID` are set, the server SHALL post new players, announcements, and players' battles, colonies and depots to that channel as the bot, with mentions disabled and each player's reports rate-limited; admins SHALL be able to send a test message that explains common failures.
+When `DISCORD_WEBHOOK_URL` (a channel webhook) or `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID` are set, the server SHALL post new players, announcements, and players' battles, colonies and depots to that channel as the bot, with mentions disabled and each player's reports rate-limited; admins SHALL be able to send a test message that explains common failures.
 
 #### Scenario: Missing permission
 - **WHEN** an admin sends a test message and the bot may not post in the channel

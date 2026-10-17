@@ -95,30 +95,40 @@ To find your id, sign in and open `/admin`: the "Not an admin" page shows it. Or
 Discord, turn on **Settings → Advanced → Developer Mode**, then right-click your name →
 **Copy User ID**.
 
-## Channel notifications (the bot)
+## Channel notifications
 
-The Falchion bot posts game news to one channel in your Discord server: new players
-founding an empire, admin announcements, battle results, new colonies and supply depots.
-It never pings anyone, and each player's reports are limited to 12 an hour.
+Falchion posts game news to one channel in your Discord server: new players founding an
+empire, admin announcements, battle results, new colonies and supply depots. It never
+pings anyone, and each player's reports are limited to 12 an hour.
 
-1. **Add the bot to your server** (once): in the Developer Portal open your app →
-   **OAuth2 → URL Generator**, tick the **bot** scope and the **View Channels**,
-   **Send Messages** and **Embed Links** permissions, open the generated URL, pick the
-   server and authorize (you need *Manage Server* there).
-2. **Bot token**: app → **Bot** → **Reset Token**, copy it. Keep it secret.
-3. **Channel id**: in Discord turn on **Settings → Advanced → Developer Mode**, then
-   right-click the channel → **Copy Channel ID**.
-4. Make sure the bot can see and post in that channel (channel → Edit Channel →
-   Permissions: add the bot or its role with *View Channel* and *Send Messages*).
-5. Add two GitHub secrets and redeploy:
+### Easiest: a channel webhook (no bot token)
 
-   | Name | Value |
-   |---|---|
-   | `DISCORD_BOT_TOKEN` | the token from step 2 |
-   | `DISCORD_CHANNEL_ID` | the channel id from step 3 |
+1. In Discord: the channel → **Edit Channel → Integrations → Webhooks → New Webhook**.
+   Name it *Falchion* if you like, then **Copy Webhook URL**.
+2. Add the GitHub secret `DISCORD_WEBHOOK_URL` with that URL and redeploy.
+3. Open `/admin` and click **Send test message**.
 
-6. Open `/admin` and click **Send test message**. If it fails, the page says why
-   (missing permission, wrong channel id, or a rejected token).
+Anyone with the URL can post to that channel, so keep it secret like a password.
+
+### Or: as the bot
+
+Use this if you want the posts to come from the bot user itself.
+
+1. **Add the bot to your server** (once): Developer Portal → your app → **OAuth2 → URL
+   Generator**, tick the **bot** scope and **View Channels** + **Send Messages**, open
+   the URL, pick the server and authorize.
+2. **Bot token**: app → **Bot** → **Reset Token**. This is *not* the OAuth2 client
+   secret: the two are different values, and Discord rejects the client secret here.
+   Discord only shows a bot token once, so if you never copied it you have to reset it
+   (resetting does not affect sign-in).
+3. **Channel id**: Discord **Settings → Advanced → Developer Mode**, then right-click the
+   channel → **Copy Channel ID**.
+4. Give the bot *View Channel* and *Send Messages* in that channel.
+5. GitHub secrets `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID`, redeploy, then **Send test
+   message** in `/admin`.
+
+If both are set, the webhook is used. When the test fails, `/admin` says why (missing
+permission, wrong channel id, rejected token, deleted webhook).
 
 ## Running it locally
 

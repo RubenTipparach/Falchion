@@ -172,6 +172,18 @@ describe('discord channel notifications', async () => {
     expect(await n.report({ id: '2', name: 'Friend' }, 'depot', 'built a depot')).toBe(true);
   });
 
+  it('posts through a channel webhook without a bot token', async () => {
+    sent.length = 0;
+    const url = 'https://discord.com/api/webhooks/123456789012345678/abc-DEF_123';
+    const n = createNotifier({ webhookUrl: url, fetchImpl: fakeFetch });
+    expect(n.mode).toBe('webhook');
+    await n.joined('Ruben');
+    expect(sent[0].url).toBe(`${url}?wait=true`);
+    expect(sent[0].auth).toBeUndefined();
+    expect(sent[0].allowed_mentions).toEqual({ parse: [] });
+    expect(createNotifier({ webhookUrl: 'https://evil.example/api/webhooks/1/x' }).enabled).toBe(false);
+  });
+
   it('admin test explains a missing channel permission', async () => {
     const { adminIds, createAdmin } = await import('./admin.mjs');
     const auth = make();

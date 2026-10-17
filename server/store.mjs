@@ -7,7 +7,10 @@ import { join } from 'node:path';
 const validId = (id) => typeof id === 'string' && /^\d{5,25}$/.test(id);
 
 export function createStore(dir) {
-  const ready = mkdir(dir, { recursive: true });
+  // Created on first real use (never as a floating promise, so a store that is only asked
+  // about invalid ids never touches the disk).
+  let made = null;
+  const ready = () => (made ??= mkdir(dir, { recursive: true }));
   const file = (id) => join(dir, `${id}.json`);
 
   return {
@@ -15,7 +18,7 @@ export function createStore(dir) {
     /** { player, save, public } for a player, or null. */
     async load(id) {
       if (!validId(id)) return null;
-      await ready;
+      await ready();
       try {
         return JSON.parse(await readFile(file(id), 'utf8'));
       } catch {
@@ -25,14 +28,14 @@ export function createStore(dir) {
     /** Write atomically (temp file + rename) so a crash never leaves half a save. */
     async save(id, record) {
       if (!validId(id)) throw new Error('invalid player id');
-      await ready;
+      await ready();
       const tmp = `${file(id)}.${process.pid}.tmp`;
       await writeFile(tmp, JSON.stringify(record));
       await rename(tmp, file(id));
     },
     /** Public view of every player: name, avatar, home, colonies and fleets. */
     async players() {
-      await ready;
+      await ready();
       const names = (await readdir(dir)).filter((n) => /^\d{5,25}\.json$/.test(n));
       const out = [];
       for (const n of names) {

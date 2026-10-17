@@ -642,6 +642,33 @@ export class GameController implements GameActions, GameQueries {
     return haul;
   }
 
+  /**
+   * Collect what one explored planet holds: its one-time resource cache and its loot crate.
+   * The player's acknowledgement that they got it.
+   */
+  collectPlanet(planet: Planet): void {
+    const s = this.state;
+    const star = this.starById(planet.starId);
+    const cache = star ? this.pendingCaches(star).find((c) => c.planet.id === planet.id)?.cache : undefined;
+    const crate = s.explored[planet.id]?.crate && !s.openedCrates.includes(planet.id) ? s.explored[planet.id].crate! : null;
+    if (!cache && !crate) return;
+    let haul: Haul = cache ?? {};
+    const materials = { ...s.empire.materials };
+    for (const [r, n] of Object.entries(haul)) materials[r as Resource] += n!;
+    let empire = { ...s.empire, materials };
+    if (crate) {
+      for (const c of crate.cards) if (c.type === 'materials') haul = addHaul(haul, { [c.material]: c.amount });
+      empire = applyCrate(empire, crate, this.deps.tree);
+    }
+    this.deps.store.update({
+      empire,
+      openedCrates: crate ? [...s.openedCrates, planet.id] : s.openedCrates,
+      collectedCaches: cache ? [...s.collectedCaches, planet.id] : s.collectedCaches,
+    });
+    const text = Object.entries(haul).map(([r, n]) => `+${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`).join('  ');
+    this.dispatch(`Collected from ${planet.name}: ${text || 'cards'}${crate ? ' · crate opened' : ''}`, 'good');
+  }
+
   collectAllLoot(): void {
     const ids = this.unopenedCrates();
     if (!ids.length) return;

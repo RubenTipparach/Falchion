@@ -55,8 +55,8 @@ export class ExplorePanel extends Drawer {
       h('div', { class: 'loot-bar' },
         h('button', { class: 'btn', disabled: !unexplored.length || !supply, title: `Needs ${need} supply in total`, onclick: () => this.actions.exploreAll(star) }, icon('explore'),
           unexplored.length ? ` Explore all ${unexplored.length} (${need} supply)` : ' All planets explored'),
-        h('button', { class: 'btn primary collect', disabled: !caches.length && !unopened, title: haulText, onclick: () => this.actions.collectResources(star) }, icon('crate'),
-          caches.length ? ` Collect resources (${caches.length} world${caches.length > 1 ? 's' : ''})` : unopened ? ` Open ${unopened} crate${unopened > 1 ? 's' : ''}` : ' Nothing to collect')),
+        // Collecting happens on each planet below; this gathers every world here at once.
+        caches.length + unopened > 1 ? h('button', { class: 'btn', title: haulText, onclick: () => this.actions.collectResources(star) }, icon('crate'), ' Collect all') : ''),
       caches.length ? h('p', { class: 'small haul' }, 'Waiting: ', haulText, unopened ? ` · ${unopened} crate${unopened > 1 ? 's' : ''}` : '') : '',
     );
     if (!planets.length) this.body.append(h('p', {}, 'No planets in this system.'));
@@ -77,7 +77,8 @@ export class ExplorePanel extends Drawer {
         h('img', { class: 'planet-thumb', src: this.thumb(p), alt: `${p.name}, ${biome.name}` }),
         h('div', {}, h('b', {}, p.name), colony ? h('span', { class: 'tag good' }, 'COLONY') : null, h('div', { class: 'muted small' }, `${biome.name} · size ${p.size}`)),
         locateButton(`Zoom to ${p.name}`, () => this.actions.focusPlanet(star, p)),
-        !result && !colony ? h('button', { class: 'btn primary', disabled: !canExplore, title: canExplore ? '' : 'Needs a ship on station with enough supply', onclick: () => this.actions.explore(p) }, `Explore · ${cost}`, icon('supply')) : null));
+        !result && !colony ? h('button', { class: 'btn primary', disabled: !canExplore, title: canExplore ? '' : 'Needs a ship on station with enough supply', onclick: () => this.actions.explore(p) }, `Explore · ${cost}`, icon('supply')) : null,
+        this.collectButton(star, p)));
     if (result) {
       const kind = ENCOUNTER_KINDS.find((k) => k.id === result.kind)!;
       card.append(
@@ -93,11 +94,24 @@ export class ExplorePanel extends Drawer {
     return card;
   }
 
+  /** Collect on the planet that holds something: its resource cache and/or loot crate. */
+  private collectButton(star: StarSystem, p: Planet): HTMLElement | null {
+    const s = this.store.state;
+    const cache = this.q.pendingCaches(star).find((c) => c.planet.id === p.id)?.cache;
+    const crate = !!s.explored[p.id]?.crate && !s.openedCrates.includes(p.id);
+    if (!cache && !crate) return null;
+    const what = [
+      ...Object.entries(cache ?? {}).map(([r, n]) => `+${fmt(n!)} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`),
+      ...(crate ? [`${s.explored[p.id].crate!.tier} crate`] : []),
+    ].join(' · ');
+    return h('button', { class: 'btn primary collect', title: `Collect ${what}`, onclick: () => this.actions.collectPlanet(p) }, icon('crate'), ' Collect');
+  }
+
   private crateView(planetId: string, tier: string, cards: readonly Card[]): HTMLElement {
     const opened = this.store.state.openedCrates.includes(planetId);
     if (!opened) {
-      return h('button', { class: `crate ${tier}`, onclick: () => this.actions.collectCrate(planetId) },
-        icon('crate'), `Open ${tier} loot crate (${cards.length} cards)`);
+      // Unopened: the planet's Collect button opens it.
+      return h('div', { class: `crate ${tier} closed` }, icon('crate'), `${tier} loot crate (${cards.length} cards) · Collect to open`);
     }
     return h('div', { class: 'cards' }, ...cards.map((c, i) => h('div', { class: `card ${c.rarity}`, style: `animation-delay:${i * 90}ms` },
       h('span', { class: 'card-rarity' }, c.rarity), h('span', { class: 'card-icon' }, icon(cardIcon(c))), h('span', { class: 'card-text' }, this.cardText(c)))));

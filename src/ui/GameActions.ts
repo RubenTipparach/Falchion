@@ -116,6 +116,8 @@ export interface GameActions {
   /** Open every unopened loot crate. */
   collectAllLoot(): void;
   /** Open every crate and collect the resource caches of newly explored planets in a system. */
+  /** Collect one explored planet's resource cache and loot crate. */
+  collectPlanet(planet: Planet): void;
   collectResources(star: StarSystem): Haul | null;
   research(nodeId: string): void;
   setFocus(nodeId: string | null): void;

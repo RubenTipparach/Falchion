@@ -21,7 +21,7 @@ export interface FleetGroup {
   readonly star: StarSystem | null;
   /** On station (arrived), so it can act there. */
   readonly stationed: boolean;
-  /** Turns until arrival (0 when on station). */
+  /** Years (minutes) until arrival (0 when on station). */
   readonly eta: number;
   readonly friendly: boolean;
 }
@@ -97,6 +97,9 @@ export interface GameActions {
   toggleSpy(empire: string): void;
   /** Fight with ships from a group on station at the target. */
   engage(targetId: string, ships: Squadron[], groupId: string): CombatOutcome | null;
-  endTurn(): void;
+  /** Development aid: advance one year now. */
+  skipYear(): void;
+  /** Abandon the saved empire and start again. */
+  resetEmpire(): void;
   openPanel(id: PanelId): void;
 }

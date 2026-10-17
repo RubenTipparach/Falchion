@@ -48,6 +48,18 @@ export function progressAt(m: FleetMovement, turn: number): number {
   return last === 0 ? 1 : routeIndexAt(m, turn) / last;
 }
 
+/**
+ * Continuous journey fraction at a fractional time (tick + fraction of the
+ * minute), for drawing ships gliding between ticks. Matches progressAt on
+ * whole ticks.
+ */
+export function progressAtTime(m: FleetMovement, time: number): number {
+  const last = m.route.length - 1;
+  if (last === 0) return 1;
+  const steps = Math.max(0, time - m.departTurn) * m.speed;
+  return Math.min(last, steps) / last;
+}
+
 export function formatTurns(turns: number): string {
   return turns === 1 ? '1 turn' : `${turns.toLocaleString('en-US')} turns`;
 }

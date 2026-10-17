@@ -4,6 +4,8 @@ import { isSurveyClass, isWarship, specOf } from '../../content/logistics';
 import { SHIP_CLASSES } from '../../content/shipClasses';
 import type { Squadron } from '../../core/combat/Combat';
 import { capacity } from '../../core/fleet/Logistics';
+import { formatDuration } from '../../core/time/WorldTime';
+import { CLOCK } from '../../app/WorldClock';
 import type { StarSystem } from '../../core/galaxy/GalaxyModel';
 import { Drawer } from '../Drawer';
 import type { FleetGroup, GameActions, GameQueries } from '../GameActions';
@@ -42,7 +44,7 @@ export class FleetsPanel extends Drawer {
   private where(g: FleetGroup): string {
     const name = g.star?.name ?? 'deep space';
     if (g.id === 'dock') return `Docked at ${name}`;
-    return g.stationed ? `On station at ${name}` : `En route to ${name} · ETA ${g.eta} turn${g.eta === 1 ? '' : 's'}`;
+    return g.stationed ? `On station at ${name}` : `En route to ${name} · ETA ${formatDuration(g.eta, CLOCK)}`;
   }
 
   private card(g: FleetGroup, target: StarSystem | null): HTMLElement {
@@ -50,7 +52,7 @@ export class FleetsPanel extends Drawer {
     const atHome = g.stationed && g.star?.id === s.home.id;
     return h('section', { class: 'group-card' },
       h('header', {}, icon('fleet'), h('h4', {}, g.name),
-        g.friendly ? h('span', { class: 'tag good', title: 'Refills supply and ammunition each turn' }, 'RESUPPLYING') : null,
+        g.friendly ? h('span', { class: 'tag good', title: 'Refills supply and ammunition every year' }, 'RESUPPLYING') : null,
         locateButton(`Locate ${g.name}`, () => this.actions.focusFleet(g.id))),
       h('div', { class: 'where' }, this.where(g)),
       h('div', { class: 'small' }, shipsText(g.ships)),

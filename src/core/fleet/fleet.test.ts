@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hex, hexDistance } from '../hex/Hex';
-import { arrivalTurn, formatTurns, hexAt, planMovement, progressAt, routeIndexAt, travelTurns } from './Fleet';
+import { arrivalTurn, formatTurns, hexAt, planMovement, progressAt, progressAtTime, routeIndexAt, travelTurns } from './Fleet';
 
 describe('turn-based fleet movement', () => {
   it('route has distance+1 adjacent hexes', () => {
@@ -35,5 +35,12 @@ describe('turn-based fleet movement', () => {
   it('rejects fractional speeds and turns', () => {
     expect(() => planMovement(hex(0, 0), hex(1, 0), 0, 1.5)).toThrow();
     expect(() => planMovement(hex(0, 0), hex(1, 0), 0.5, 1)).toThrow();
+  });
+
+  it('glides continuously between ticks and lands on the tick position', () => {
+    const m = planMovement(hex(0, 0), hex(10, 0), 0, 2);
+    expect(progressAtTime(m, 1)).toBeCloseTo(progressAt(m, 1));
+    expect(progressAtTime(m, 1.5)).toBeCloseTo(0.3);
+    expect(progressAtTime(m, 99)).toBe(1);
   });
 });

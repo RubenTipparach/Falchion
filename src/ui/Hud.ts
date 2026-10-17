@@ -23,7 +23,7 @@ export class Hud {
         h('div', { class: 'hud-row' }, this.mode, this.width),
         h('div', { class: 'ruler' }, this.rulerBar, this.rulerLabel),
         this.hover),
-      h('div', { class: 'hud-help' }, 'Scroll zoom · Drag pan · Right-drag tilt · G toggle view · Enter end turn'));
+      h('div', { class: 'hud-help' }, 'Scroll zoom · Drag pan · Right-drag tilt · G toggle view · 1 year = 1 minute'));
     const track = h('div', { class: 'ladder-track' }, this.thumb);
     for (const [label, alt] of ZOOM_MARKS) {
       track.append(h('button', { class: 'ladder-mark', style: `top:${this.pos(alt) * 100}%`, onclick: () => onZoomTo(alt) }, h('span', {}, label)));

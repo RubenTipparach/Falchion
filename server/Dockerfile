@@ -11,6 +11,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY index.html tsconfig.json vite.config.ts ./
 COPY src/ ./src/
+COPY server/clock.json ./server/clock.json
 RUN npx vite build
 
 # 2) Runtime: zero-dependency Node server + built client

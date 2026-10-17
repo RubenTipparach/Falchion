@@ -53,7 +53,7 @@ export class StarInfoPanel {
       h('dl', {},
         h('dt', {}, 'Address'), h('dd', {}, d.address),
         h('dt', {}, 'From home'), h('dd', {}, `${fmt(d.distanceFromHome)} ly`),
-        h('dt', {}, 'Travel time'), h('dd', {}, `${d.travel} at ${d.speed} ly/turn`)),
+        h('dt', {}, 'Travel time'), h('dd', {}, `${d.travel} at ${d.speed} ly/min`)),
       here.length ? h('div', { class: 'here' }, h('span', { class: 'eyebrow' }, 'On station'), ...here.map((g) => h('div', { class: 'here-group' }, h('b', {}, g.name), h('div', { class: 'small muted' }, shipsText(g.ships)), storesView(g)))) : '',
       friendly && !isHome ? h('p', { class: 'small green' }, 'Friendly system: fleets here resupply and rearm.') : '',
       h('div', { class: 'planet-row' }, ...d.planets.map((p) => {
@@ -89,7 +89,7 @@ export class StarInfoPanel {
         h('button', { class: 'icon-btn', 'aria-label': 'Back to system', title: 'Back to system (Esc)', onclick: () => this.actions.focusPlanet(star, null) }, icon('close'))),
       h('img', { class: 'planet-portrait', src: this.thumb(p), alt: `${p.name}, ${biome?.name}` }),
       h('dl', {},
-        !colony ? h('dt', {}, 'If colonised') : '', !colony ? h('dd', {}, yields.length ? yields.map(([r, n]) => `+${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`).join('  ') + ' / turn' : '—') : '',
+        !colony ? h('dt', {}, 'If colonised') : '', !colony ? h('dd', {}, yields.length ? yields.map(([r, n]) => `+${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`).join('  ') + ' / yr' : '—') : '',
         h('dt', {}, 'Survey'), h('dd', {}, colony ? 'Settled' : done ? `${done.kind} · ${done.success ? 'success' : 'failed'}` : 'Unexplored')),
       done ? h('p', { class: 'small muted' }, done.narrative) : '',
       colony ? h('div', {}, h('span', { class: 'eyebrow' }, colony.capital ? 'Capital' : 'Your colony'), colonyView(colony, s.empire.materials, (b) => this.actions.build(p.id, b), this.tables)) : '',

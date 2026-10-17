@@ -1,7 +1,10 @@
 import '../ui/styles.css';
 import { EncounterResolver } from '../core/encounters/Encounters';
 import { newEmpire } from '../core/empire/Empire';
-import { formatTurns, planMovement, travelTurns } from '../core/fleet/Fleet';
+import { planMovement, travelTurns } from '../core/fleet/Fleet';
+import { formatDuration } from '../core/time/WorldTime';
+import { CLOCK, connectWorldClock } from './WorldClock';
+import { SaveGame } from './SaveGame';
 import { DEFAULT_ADDRESS_SCHEME } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel } from '../core/galaxy/GalaxyModel';
 import { hexAdd, hexDistance, hexToWorld } from '../core/hex/Hex';
@@ -93,11 +96,15 @@ async function bootstrap(): Promise<void> {
     const p = star && star.id !== world.home.id ? planetsOf(star, galaxy.params.seed).find((x) => x.biome !== 'gas') : undefined;
     if (p && !colonies.some((x) => x.planetId === p.id)) colonies.push(colonyOf(p, ['farm']));
   }
-  const start = initialFleets(galaxy, world, identity.displayName);
+  const clock = await connectWorldClock();
+  const saveGame = new SaveGame(galaxy.params.seed);
+  const saved = saveGame.load();
+  const t0 = clock.tick();
+  const start = initialFleets(galaxy, world, identity.displayName, t0);
   const houseDesign = { ...DEFAULT_DESIGN, colors: { primary: '#c8d0dc', secondary: '#2b3448', accent: '#ffb547' } };
 
-  const store = new Store<GameState>({
-    turn: 1, empire,
+  const fresh: GameState = {
+    turn: t0, empire,
     economy: {
       roster: start.roster, government: 'council', policies: [], routes: [{ partnerId: partners[0].id }],
       faith: null, spyNetworks: [], focus: 't-fusion', colonies,
@@ -106,10 +113,12 @@ async function bootstrap(): Promise<void> {
     shipyardClass: 'prospector', hiddenTraits: [], home: world.home,
     selected: null, selectedPlanet: null, explored: {}, openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0, ammo: 0 }, depots: [], contact: null, playerName: identity.displayName,
     lastReport: null, engaged: [],
-    dispatches: [{ turn: 1, text: 'Welcome, Commander. Survey Group Alpha is on station nearby: explore its planets, collect what you find, then end the turn. Ships need supply to explore and ammunition to fight; both refill in friendly systems.' }],
-  });
+    dispatches: [{ turn: t0, text: 'Welcome, Commander. One year passes every minute. Survey Group Alpha is on station nearby: explore its planets and collect what you find. Ships need supply to explore and ammunition to fight; both refill in friendly systems.' }],
+  };
+  // A saved empire carries on where it left off; the missed years are caught up below.
+  const store = new Store<GameState>(saved ? { ...fresh, ...saved } : fresh);
 
-  const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables });
+  const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame });
 
   // ── Views ──
   const app = document.getElementById('app')!;
@@ -129,10 +138,10 @@ async function bootstrap(): Promise<void> {
   map.layers.add(new NearStarLayer(galaxy));
   const system = map.layers.add(new SystemLayer(galaxy, { isHome: (s) => s.id === world.home.id, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet) }));
   const selection = map.layers.add(new SelectionLayer());
-  const fleetLayer = map.layers.add(new FleetLayer(factory, formatTurns));
+  const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK)));
 
   const zoomCfg = map.controller.zoom.config;
-  const topBar = new TopBar(store, controller, identity.displayName);
+  const topBar = new TopBar(store, controller, identity.displayName, clock);
   const hud = new Hud({ min: zoomCfg.minAltitude, max: zoomCfg.maxAltitude }, (alt) => controller.zoomTo(alt));
   const thumbs = new PlanetThumbnails(80);
   const thumb = (p: Planet) => thumbs.url(p);
@@ -169,13 +178,22 @@ async function bootstrap(): Promise<void> {
     if (e.key === 'g' || e.key === 'G') controller.toggleView();
     if (e.key === 'Escape') { if (store.state.selectedPlanet && store.state.selected) controller.focusPlanet(store.state.selected, null); else controller.select(null); }
     if (e.key === 'h' || e.key === 'H') controller.flyTo(world.home, true);
-    if (e.key === 'Enter' && tag !== 'BUTTON') controller.endTurn();
+    if (import.meta.env.DEV && e.key === 'Enter' && tag !== 'BUTTON') controller.skipYear();
   });
+  // The world runs on: one year per minute, pushed by the server when there is one.
+  clock.onTick((tick) => controller.advanceTo(tick));
+  controller.advanceTo(clock.tick());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) controller.advanceTo(clock.tick()); });
+  let saveTimer = 0;
+  store.subscribe(() => { clearTimeout(saveTimer); saveTimer = window.setTimeout(() => saveGame.save(store.state), 1500); });
+  window.addEventListener('pagehide', () => saveGame.save(store.state));
+  saveGame.save(store.state);
   map.start();
   if (import.meta.env.DEV) Object.assign(window, { falchion: controller });
 }
 
-function initialFleets(galaxy: GalaxyModel, world: ReturnType<typeof createWorld>, player: string) {
+/** Starting fleets, timed relative to the year the empire is founded (t0). */
+function initialFleets(galaxy: GalaxyModel, world: ReturnType<typeof createWorld>, player: string, t0: number) {
   const home = world.home.hex;
   const near = (dq: number, dr: number) => galaxy.nearestStar(hexAdd(home, { q: dq, r: dr }), 10) ?? world.home;
   const target = near(22, -9);
@@ -188,15 +206,15 @@ function initialFleets(galaxy: GalaxyModel, world: ReturnType<typeof createWorld
   const toVossk = { q: Math.round(home.q + (vossk.home.hex.q - home.q) * 0.15), r: Math.round(home.r + (vossk.home.hex.r - home.r) * 0.15) };
   const raiders = galaxy.nearestStar(toVossk, 12) ?? world.home;
   const fleets: FleetView[] = [
-    { id: 'scout-1', name: 'Scout Wing I', owner: player, color: '#e6b450', movement: planMovement(home, target.hex, -2, 4), design: house('Scout', 7, 'technological') },
-    { id: 'survey-1', name: 'Survey Group Alpha', owner: player, color: '#e6b450', movement: planMovement(home, survey.hex, -6, 3), design: house('Survey', 9, 'technological') },
-    { id: 'strike-1', name: '1st Strike Group', owner: player, color: '#e6b450', movement: planMovement(home, raiders.hex, 3 - hexDistance(home, raiders.hex), 1), design: house('Strike', 21, 'classic') },
-    // Nova's survey fleet is heading to the same star: contact (lockstep) a few turns in.
-    { id: 'nova-1', name: 'Nova Survey Group', owner: 'Nova Collective', color: '#4fd1ff', movement: planMovement(nova.home.hex, target.hex, 7 - travelTurns(hexDistance(nova.home.hex, target.hex), 3), 3),
+    { id: 'scout-1', name: 'Scout Wing I', owner: player, color: '#e6b450', movement: planMovement(home, target.hex, t0 - 2, 4), design: house('Scout', 7, 'technological') },
+    { id: 'survey-1', name: 'Survey Group Alpha', owner: player, color: '#e6b450', movement: planMovement(home, survey.hex, t0 - 6, 3), design: house('Survey', 9, 'technological') },
+    { id: 'strike-1', name: '1st Strike Group', owner: player, color: '#e6b450', movement: planMovement(home, raiders.hex, t0 + 3 - hexDistance(home, raiders.hex), 1), design: house('Strike', 21, 'classic') },
+    // Nova's survey fleet is heading to the same star: contact a few minutes in.
+    { id: 'nova-1', name: 'Nova Survey Group', owner: 'Nova Collective', color: '#4fd1ff', movement: planMovement(nova.home.hex, target.hex, t0 + 7 - travelTurns(hexDistance(nova.home.hex, target.hex), 3), 3),
       design: { ...DEFAULT_DESIGN, name: 'Nova', style: 'geometric', seed: 31, colors: { primary: '#e8f6ff', secondary: '#1b4b6b', accent: '#4fd1ff' } } },
-    { id: 'vossk-1', name: 'Vossk Raiders', owner: 'alien:Vossk', color: '#ff5d5d', movement: planMovement(vossk.home.hex, world.home.hex, -10, 2),
+    { id: 'vossk-1', name: 'Vossk Raiders', owner: 'alien:Vossk', color: '#ff5d5d', movement: planMovement(vossk.home.hex, world.home.hex, t0 - 10, 2),
       design: { ...DEFAULT_DESIGN, name: 'Vossk', style: 'organic', seed: 66, colors: { primary: '#5a1f1f', secondary: '#2a0d0d', accent: '#ff3b3b' }, weapons: 4 } },
-    { id: 'arrakai-1', name: 'Arrakai Expedition', owner: 'House Arrakai', color: '#c792ea', movement: planMovement(arrakai.home.hex, world.home.hex, -100, 3),
+    { id: 'arrakai-1', name: 'Arrakai Expedition', owner: 'House Arrakai', color: '#c792ea', movement: planMovement(arrakai.home.hex, world.home.hex, t0 - 100, 3),
       design: { ...DEFAULT_DESIGN, name: 'Arrakai', style: 'classic', seed: 12, colors: { primary: '#f2f2f2', secondary: '#c9a227', accent: '#7ad7ff' } } },
   ];
   const loadout = (ships: Squadron[], supply?: number): Loadout => ({ ships, ...fullStores(ships, specOf), ...(supply === undefined ? {} : { supply }) });

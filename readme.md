@@ -13,7 +13,7 @@ npm test         # core unit tests
 ## How to play
 
 - **Scroll**: exponential zoom from a single planet to the whole galaxy; **drag**: pan; **right-drag**: tilt/rotate; **G**: hex / galaxy view
-- **Enter** or **End Turn**: advance one turn. Fleets move a whole number of light years per turn, in straight lines.
+- **Realtime**: the server advances the world one tick per minute, and each tick is one year. At base speed a ship crosses one light year per minute, in a straight line. The top bar shows the year and the countdown to the next. Your empire is saved in the browser and keeps running while you are away (up to a week of years is simulated when you return).
 - **Ships act where they are.** Exploring, fighting, mining, settling, building depots, missionaries and spies all need a ship on location.
 - **Supply** is spent exploring (Survey Cutters carry the most); **ammunition** is spent in battle and sets firepower. Both refill in friendly systems; ammunition slowly regenerates elsewhere. Fleets can return home and dock.
 - **Colonies** are planets with building slots: farms (food), mines, trade hubs, research labs, temples and shipyards. Ships are built at a shipyard and start in that system. **Colony Arks** settle explored worlds; **Construction Tenders** build forward supply depots.

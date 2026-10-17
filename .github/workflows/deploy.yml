@@ -45,6 +45,8 @@ jobs:
           for i in $(seq 1 20); do curl -fsS localhost:8090/healthz && break; sleep 0.5; done
           curl -fsS localhost:8090/ | grep -q '<div id="app">'
           curl -fsS localhost:8090/api/info
+          curl -fsS localhost:8090/api/clock | grep -q '"msPerTick":60000'
+          (curl -sN --max-time 2 localhost:8090/api/ticks || true) | grep -q 'event: tick'
           kill %1
       # Pre-bootstrap is "skip, don't fail": until Pages is enabled with
       # source "GitHub Actions" (Settings -> Pages), the Pages deploy skips.

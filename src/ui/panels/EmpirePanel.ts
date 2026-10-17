@@ -21,7 +21,7 @@ export class EmpirePanel extends Drawer {
   private readonly content = h('div', { class: 'empire-content' });
 
   constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly t: EconomyTables, private readonly empires: string[]) {
-    super('empire', 'Empire', 'Colonies and their buildings, trade, politics, religion and espionage. Income arrives when you end the turn.', true);
+    super('empire', 'Empire', 'Colonies and their buildings, trade, politics, religion and espionage. Income arrives every year: one minute.', true);
     this.body.append(this.tabsEl, this.content);
     store.subscribe((s, prev) => { if (this.opened && (s.economy !== prev.economy || s.empire !== prev.empire || s.lastReport !== prev.lastReport || s.fleets !== prev.fleets || s.turn !== prev.turn)) this.render(); });
   }
@@ -80,11 +80,14 @@ export class EmpirePanel extends Drawer {
         h('section', { class: 'card' }, h('h4', {}, 'State of the empire'),
           h('ul', { class: 'plain' },
             h('li', {}, `Stability ${stabilityOf(approval)}%`),
-            h('li', {}, `Science +${sciencePerTurn(this.econ, this.t, s.empire.research)} shards per turn`),
+            h('li', {}, `Science +${sciencePerTurn(this.econ, this.t, s.empire.research)} shards per year`),
             h('li', {}, `Trade bonus +${tradePctOf(this.econ, this.t, s.empire.research)}%`),
             h('li', {}, `Ships in service ${Object.values(s.economy.roster).reduce((a, b) => a + b, 0)}`)))),
-      h('section', { class: 'card' }, h('h4', {}, r ? 'Last turn' : 'End a turn to see your first report'),
+      h('section', { class: 'card' }, h('h4', {}, r ? 'Last year' : 'Your first yearly report arrives within a minute'),
         r ? h('ul', { class: 'plain' }, ...r.lines.map((l) => h('li', {}, l))) : null),
+      h('section', { class: 'card' }, h('h4', {}, 'Your empire is saved'),
+        h('p', { class: 'small muted' }, `The world advances one year per minute, even while you are away. Progress is saved in this browser.`),
+        h('button', { class: 'btn', onclick: () => { if (confirm('Abandon this empire and found a new one? This cannot be undone.')) this.actions.resetEmpire(); } }, 'Found a new empire')),
     ];
   }
 
@@ -96,7 +99,7 @@ export class EmpirePanel extends Drawer {
     return [
       h('p', { class: 'muted' }, `Each route needs a Bulk Freighter and earns credits that fall off with distance. Routes: ${s.economy.routes.length} of ${slots} active (${freighters} freighter${freighters === 1 ? '' : 's'}, route limit ${2 + bonusOf(this.t.tree, s.empire.research, 'routes')}).`),
       h('table', { class: 'data' },
-        h('thead', {}, h('tr', {}, h('th', {}, 'Partner'), h('th', {}, 'Type'), h('th', { class: 'num' }, 'Distance'), h('th', { class: 'num' }, 'Credits / turn'), h('th', {}, ''))),
+        h('thead', {}, h('tr', {}, h('th', {}, 'Partner'), h('th', {}, 'Type'), h('th', { class: 'num' }, 'Distance'), h('th', { class: 'num' }, 'Credits / yr'), h('th', {}, ''))),
         h('tbody', {}, ...this.t.partners.map((p) => {
           const on = s.economy.routes.some((r) => r.partnerId === p.id);
           const idx = s.economy.routes.findIndex((r) => r.partnerId === p.id);
@@ -151,7 +154,7 @@ export class EmpirePanel extends Drawer {
         return b;
       });
       return [
-        h('p', { class: 'muted' }, 'A faith earns Faith and Influence from every follower, at home and in other empires. Missionaries convert other empires a few percent each turn.'),
+        h('p', { class: 'muted' }, 'A faith earns Faith and Influence from every follower, at home and in other empires. Missionaries convert other empires a few percent each year.'),
         h('section', { class: 'card' }, h('h4', {}, 'Found a faith'),
           canFound ? null : h('p', { class: 'warn' }, 'Research Cathedral Ships, Spore Missions or Harmony of the Spheres first.'),
           h('label', { class: 'field' }, h('span', {}, 'Name'), name),
@@ -179,7 +182,7 @@ export class EmpirePanel extends Drawer {
     const slots = maxSpies(this.t, s.empire.research);
     const espionage = 3 + bonusOf(this.t.tree, s.empire.research, 'espionage');
     return [
-      h('p', { class: 'muted' }, `Spy networks steal ${espionage} research shards a turn from the target's technology, even for nodes you are not connected to. Networks: ${s.economy.spyNetworks.length} of ${slots}.`),
+      h('p', { class: 'muted' }, `Spy networks steal ${espionage} research shards a year from the target's technology, even for nodes you are not connected to. Networks: ${s.economy.spyNetworks.length} of ${slots}.`),
       h('div', { class: 'option-grid' }, ...Object.entries(this.t.alienTech).map(([empire, techs]) => {
         const on = s.economy.spyNetworks.includes(empire);
         const left = techs.filter((id) => !s.empire.research.researched.includes(id));

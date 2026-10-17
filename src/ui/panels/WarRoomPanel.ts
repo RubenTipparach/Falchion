@@ -96,13 +96,13 @@ export class WarRoomPanel extends Drawer {
       })) : '',
       fireNote,
       h('button', { class: 'btn primary wide', disabled: !group || !warships.length || s.engaged.includes(this.targetId), onclick: () => this.fight() },
-        s.engaged.includes(this.targetId) ? 'Already engaged this turn' : target.kind === 'planet' ? 'Launch assault' : 'Engage'),
+        s.engaged.includes(this.targetId) ? 'Already engaged this year' : target.kind === 'planet' ? 'Launch assault' : 'Engage'),
       h('h4', {}, 'Doctrine counters'),
       this.matrix(),
     );
     updateFire();
     clear(this.right);
-    this.right.append(this.outcome ? this.report(this.outcome) : h('div', { class: 'empty' }, h('b', {}, 'No battle yet'), h('p', { class: 'muted' }, 'Pick a target and a strike group, then engage. Results are deterministic for this turn, so the same fight always plays out the same way.')));
+    this.right.append(this.outcome ? this.report(this.outcome) : h('div', { class: 'empty' }, h('b', {}, 'No battle yet'), h('p', { class: 'muted' }, 'Pick a target and a strike group, then engage. Results are deterministic for this year, so the same fight always plays out the same way.')));
   }
 
   private fight(): void {

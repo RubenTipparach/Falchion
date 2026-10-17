@@ -22,7 +22,7 @@ const STATUS_LABEL: Record<Availability, string> = {
   unavailable: 'Prerequisites unmet', locked: 'Locked',
 };
 
-/** Seven research areas × five branches, crossovers between branches, shard progress and a per-turn focus. */
+/** Seven research areas × five branches, crossovers between branches, shard progress and a yearly focus. */
 export class ResearchPanel extends Drawer {
   private readonly tabs = h('div', { class: 'seg' });
   private readonly summary = h('div', { class: 'research-summary' });
@@ -88,7 +88,7 @@ export class ResearchPanel extends Drawer {
     const science = sciencePerTurn({ ...s.economy, stock: s.empire.materials }, this.tables, state);
     this.summary.replaceChildren(
       h('div', { class: 'kv' }, h('span', {}, 'Researched'), h('b', {}, `${state.researched.length} / ${this.tree.nodes.length}`)),
-      h('div', { class: 'kv' }, h('span', {}, 'Science'), h('b', {}, `+${science} shards / turn`)),
+      h('div', { class: 'kv' }, h('span', {}, 'Science'), h('b', {}, `+${science} shards / yr`)),
       h('div', { class: 'kv grow' }, h('span', {}, 'Focus'), h('b', {}, focus ? focus.name : 'None — pick a node and press Set focus')),
     );
     this.tabs.replaceChildren(
@@ -212,7 +212,7 @@ export class ResearchPanel extends Drawer {
         })),
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', disabled: status !== 'researchable', onclick: () => this.actions.research(node.id) }, status === 'researched' ? 'Researched' : 'Research'),
-        h('button', { class: `btn ${isFocus ? 'on' : ''}`, disabled: status === 'researched' || status === 'locked', onclick: () => this.actions.setFocus(isFocus ? null : node.id) }, isFocus ? 'Focused — science flows here each turn' : 'Set focus')),
+        h('button', { class: `btn ${isFocus ? 'on' : ''}`, disabled: status === 'researched' || status === 'locked', onclick: () => this.actions.setFocus(isFocus ? null : node.id) }, isFocus ? 'Focused — science flows here each year' : 'Set focus')),
     );
   }
 }

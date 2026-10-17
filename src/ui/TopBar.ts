@@ -3,20 +3,25 @@ import type { GameState } from '../app/GameState';
 import type { GameActions, PanelId } from './GameActions';
 import { h, fmt } from './dom';
 import { icon, IconName } from './icons';
+import type { WorldClock } from '../app/WorldClock';
 
 export class TopBar {
   readonly el: HTMLElement;
   private readonly stats = h('div', { class: 'stats' });
   private readonly turnNum = h('span', { class: 'turn-num' });
-  private readonly endTurnBtn: HTMLButtonElement;
+  private readonly clockEl = h('div', { class: 'year-clock' });
+  private readonly ring = h('span', { class: 'year-ring' });
+  private readonly countdown = h('span', { class: 'year-next mono' });
+  private lastLeft = -1;
   private readonly viewBtn: HTMLButtonElement;
   private readonly viewLabel = h('span', {}, 'Galaxy');
   private readonly tabs: Record<PanelId, HTMLButtonElement>;
   private readonly lootBadge = h('span', { class: 'badge', hidden: true });
 
-  constructor(store: Store<GameState>, actions: GameActions, identityName: string) {
-    this.endTurnBtn = h('button', { class: 'end-turn', title: 'End turn (Enter)', onclick: () => actions.endTurn() },
-      h('span', {}, 'End turn'), icon('endTurn'));
+  constructor(store: Store<GameState>, actions: GameActions, identityName: string, private readonly clock: WorldClock) {
+    const skip = import.meta.env.DEV ? h('button', { class: 'chip', title: 'Development only: advance one year now', onclick: () => actions.skipYear() }, '+1 yr') : '';
+    this.clockEl.title = clock.source === 'server' ? 'World clock from the Falchion server: one year passes every minute for everyone' : 'Offline world clock (no server here): one year passes every minute';
+    this.clockEl.append(this.ring, h('span', { class: 'year-meta' }, h('span', { class: 'year-src' }, clock.source === 'server' ? '● LIVE' : '○ LOCAL'), this.countdown), skip);
     this.viewBtn = h('button', { class: 'tab', title: 'Toggle hex / galaxy view (G)', onclick: () => actions.toggleView() }, icon('galaxy'), this.viewLabel);
     const tab = (id: PanelId, label: string, ic: IconName) =>
       h('button', { class: 'tab', onclick: () => actions.openPanel(id) }, icon(ic), h('span', {}, label));
@@ -26,8 +31,8 @@ export class TopBar {
       h('div', { class: 'brand' }, icon('logo'), h('span', { class: 'wordmark' }, 'Falchion')),
       this.stats,
       h('div', { class: 'turn' },
-        h('div', { class: 'turn-dial' }, h('span', { class: 'turn-label' }, 'Turn'), this.turnNum),
-        this.endTurnBtn),
+        h('div', { class: 'turn-dial' }, h('span', { class: 'turn-label' }, 'Year'), this.turnNum),
+        this.clockEl),
       h('nav', { class: 'tabs' }, this.viewBtn, this.tabs.shipyard, this.tabs.research, this.tabs.empire, this.tabs.fleets, this.tabs.explore, this.tabs.war),
       h('div', { class: 'identity', title: 'Discord sign-in is mocked in this preview' },
         h('span', { class: 'avatar' }, identityName.slice(0, 1)),
@@ -35,11 +40,13 @@ export class TopBar {
     store.subscribe((s, prev) => {
       if (s.empire !== prev.empire) this.renderStats(s);
       if (s.turn !== prev.turn) this.renderTurn(s.turn);
-      if (s.contact !== prev.contact) this.endTurnBtn.classList.toggle('lockstep', !!s.contact);
       if (s.explored !== prev.explored || s.openedCrates !== prev.openedCrates) this.renderLoot(s);
     });
     this.renderStats(store.state);
     this.renderTurn(store.state.turn);
+    const tickClock = () => this.renderClock();
+    tickClock();
+    setInterval(tickClock, 250);
   }
 
   setGalaxyMode(on: boolean): void {
@@ -58,8 +65,18 @@ export class TopBar {
     this.lootBadge.title = `${n} unopened loot crate${n === 1 ? '' : 's'}`;
   }
 
+  /** Countdown to the next year (the next server tick). */
+  private renderClock(): void {
+    const f = this.clock.fraction();
+    const left = Math.ceil((1 - f) * this.clock.config.msPerTick / 1000);
+    this.ring.style.setProperty('--p', String(f));
+    if (left === this.lastLeft) return;
+    this.lastLeft = left;
+    this.countdown.textContent = `next ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  }
+
   private renderTurn(turn: number): void {
-    this.turnNum.textContent = String(turn).padStart(4, '0');
+    this.turnNum.textContent = turn.toLocaleString('en-US');
     this.turnNum.classList.remove('tick');
     void this.turnNum.offsetWidth;
     this.turnNum.classList.add('tick');

@@ -10,7 +10,10 @@ import { CombatBonuses, resolveAssault, resolveBattle, Squadron } from '../core/
 import { bonusOf, canAfford, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn } from '../core/economy/Economy';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
 import { addHaul, Haul, planetCache } from '../core/encounters/PlanetCache';
-import { arrivalTurn, formatTurns, hexAt, planMovement, travelTurns } from '../core/fleet/Fleet';
+import { arrivalTurn, hexAt, planMovement, travelTurns } from '../core/fleet/Fleet';
+import { catchUpTicks, formatDuration } from '../core/time/WorldTime';
+import { CLOCK, WorldClock } from './WorldClock';
+import type { SaveGame } from './SaveGame';
 import { capacity, clampStores, exploreCost, firepower, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
 import { adjustShips, countOf, dockedShips, hasShips, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
@@ -43,6 +46,8 @@ export interface ControllerDeps {
   readonly encounters: EncounterResolver;
   readonly world: World;
   readonly economy: EconomyTables;
+  readonly clock: WorldClock;
+  readonly save: SaveGame;
 }
 
 export interface ViewDeps {
@@ -57,7 +62,12 @@ export interface ViewDeps {
   readonly system: SystemLayer;
 }
 
-const BASE_SPEED = 2; // hexes (ly) per turn
+const BASE_SPEED = 1; // ly per year (one year = one minute)
+/** At most a week of missed years is simulated on return; older years only move fleets. */
+const MAX_CATCH_UP = 7 * 24 * 60;
+/** Per-year report lines that would repeat every minute. */
+const ROUTINE = /^(Science: \+|Trade: \d)/;
+const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
 const ROLE_TRAIT: Partial<Record<string, string>> = {
   long: 'role-long', short: 'role-short', barrage: 'role-barrage', siege: 'role-siege', suppression: 'role-suppression',
   capture: 'role-capture', assault: 'role-assault', support: 'role-support',
@@ -76,11 +86,9 @@ export class GameController implements GameActions, GameQueries {
     view.hexGrid.setHome(this.deps.world.home.hex.q, this.deps.world.home.hex.r);
     this.deps.store.subscribe((s, prev) => {
       if (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts) view.fleets.setFleets(this.fleetViews());
-      if (s.turn !== prev.turn) view.fleets.setTurn(s.turn);
       if (s.contact !== prev.contact) view.hud.setContact(s.contact);
     });
     for (const [id, panel] of Object.entries(view.panels)) panel.onChange(() => view.topBar.setActivePanel(this.openPanelId() ?? (panel.opened ? (id as PanelId) : null)));
-    view.fleets.setTurn(this.deps.store.state.turn);
     view.fleets.setFleets(this.fleetViews());
     this.updateContact();
   }
@@ -137,7 +145,7 @@ export class GameController implements GameActions, GameQueries {
     return {
       address: formatAddress(addressOf(star.hex)),
       distanceFromHome: dist,
-      travel: dist === 0 ? '—' : formatTurns(travelTurns(dist, speed)),
+      travel: dist === 0 ? '—' : formatDuration(travelTurns(dist, speed), CLOCK),
       speed,
       planets: this.planets(star),
       owner: owner?.name ?? null,
@@ -359,7 +367,7 @@ export class GameController implements GameActions, GameQueries {
     const fleet = { id, name: label, owner: s.playerName, color: '#e6b450', movement: planMovement(s.home.hex, to.hex, s.turn, speed), design: this.designOf(wanted) };
     // Ships leave with full holds: the dock's spending this turn stays with the dock.
     this.deps.store.update({ fleets: [...s.fleets, fleet], loadouts: { ...s.loadouts, [id]: { ships: wanted, ...fullStores(wanted, specOf) } } });
-    this.dispatch(`${label} departs for ${to.name} (${formatTurns(travelTurns(hexDistance(s.home.hex, to.hex), speed))})`);
+    this.dispatch(`${label} departs for ${to.name} (${formatDuration(travelTurns(hexDistance(s.home.hex, to.hex), speed), CLOCK)})`);
   }
 
   moveFleet(fleetId: string, to: StarSystem): void {
@@ -372,7 +380,7 @@ export class GameController implements GameActions, GameQueries {
     const speed = this.speedOf(l.ships);
     const moved = { ...f, movement: planMovement(from, to.hex, s.turn, speed) };
     this.deps.store.update({ fleets: s.fleets.map((x) => (x.id === fleetId ? moved : x)) });
-    this.dispatch(`${f.name} sets course for ${to.name} (${formatTurns(travelTurns(hexDistance(from, to.hex), speed))})`);
+    this.dispatch(`${f.name} sets course for ${to.name} (${formatDuration(travelTurns(hexDistance(from, to.hex), speed), CLOCK)})`);
   }
 
   returnHome(fleetId: string): void {
@@ -740,10 +748,49 @@ export class GameController implements GameActions, GameQueries {
     return outcome;
   }
 
-  // ── Turn ───────────────────────────────────────────────────────────
+  // ── World time ─────────────────────────────────────────────────────
 
-  /** Resolve the economy and advance the world one turn. Inside a lockstep zone this is the player's submission. */
-  endTurn(): void {
+  /**
+   * Advance the empire to the world's current year. Live ticks arrive once a
+   * minute; after time away the missed years are simulated in one batch
+   * (capped) and summarised in a single dispatch.
+   */
+  advanceTo(tick: number): void {
+    const { run, skipped } = catchUpTicks(this.state.turn, tick, MAX_CATCH_UP);
+    if (!run && !skipped) return;
+    if (run === 1 && !skipped) { this.step(false); return; }
+    const income: Partial<Record<Resource, number>> = {};
+    const arrivals: string[] = [];
+    this.deps.store.batch(() => {
+      // Years beyond the cap are the oldest ones: they pass unsimulated (fleets still move, their
+      // position is a function of time) so the most recent week is resolved in full.
+      if (skipped) this.deps.store.update((st) => ({ turn: st.turn + skipped, dockSpent: { supply: 0, ammo: 0 } }));
+      for (let i = 0; i < run; i++) {
+        const r = this.step(true);
+        for (const [k, n] of Object.entries(r.income)) income[k as Resource] = (income[k as Resource] ?? 0) + n!;
+        arrivals.push(...r.arrivals);
+      }
+      const gained = RESOURCES.filter((r) => income[r.id]).map((r) => `${income[r.id]! > 0 ? '+' : ''}${fmtInt(income[r.id]!)} ${r.short}`).join('  ');
+      const away = formatDuration(run + skipped, CLOCK);
+      this.dispatch(`While you were away (${away}, ${(run + skipped).toLocaleString('en-US')} years): ${gained || 'no income'}${arrivals.length ? ` · ${arrivals.length} arrival${arrivals.length > 1 ? 's' : ''}` : ''}${skipped ? ` · the earliest ${skipped.toLocaleString('en-US')} years were not simulated` : ''}`, 'good');
+      for (const a of arrivals.slice(-5)) this.dispatch(a, 'good');
+    });
+    this.updateContact();
+  }
+
+  /** Abandon this empire and found a new one in the current year. */
+  resetEmpire(): void {
+    this.deps.save.clear();
+    location.reload();
+  }
+
+  /** Development aid: advance one year now instead of waiting a minute. */
+  skipYear(): void {
+    this.step(false);
+  }
+
+  /** Resolve one year: economy, research, logistics. */
+  private step(quiet: boolean): { income: Partial<Record<Resource, number>>; arrivals: string[] } {
     const s = this.state;
     const { economy, research, report } = resolveTurn({ ...s.economy, stock: s.empire.materials }, s.empire.research, s.turn, this.deps.economy, this.presence());
     const next = s.turn + 1;
@@ -762,7 +809,12 @@ export class GameController implements GameActions, GameQueries {
       }
     }
     const { stock, ...settings } = economy;
-    const gained = RESOURCES.filter((r) => (report.income[r.id] ?? 0) !== 0).map((r) => `${report.income[r.id]! > 0 ? '+' : ''}${report.income[r.id]} ${r.short}`).join('  ');
+    // Live years only report news: arrivals, and report lines that changed since last year.
+    const previous = new Set(s.lastReport?.lines ?? []);
+    const news = quiet ? [] : [
+      ...arrivals.map((text) => ({ turn: next, text, tone: 'good' as const })),
+      ...report.lines.filter((l) => !previous.has(l) && !ROUTINE.test(l)).map((text) => ({ turn: next, text })),
+    ];
     this.deps.store.update({
       turn: next,
       loadouts,
@@ -771,14 +823,10 @@ export class GameController implements GameActions, GameQueries {
       economy: settings,
       lastReport: report,
       engaged: [],
-      dispatches: [
-        ...arrivals.map((text) => ({ turn: s.turn, text, tone: 'good' as const })),
-        ...report.lines.map((text) => ({ turn: s.turn, text })),
-        ...(gained ? [{ turn: s.turn, text: `Income ${gained}` }] : []),
-        ...s.dispatches,
-      ].slice(0, 40),
+      dispatches: news.length ? [...news, ...s.dispatches].slice(0, 40) : s.dispatches,
     });
-    this.updateContact();
+    if (!quiet) this.updateContact();
+    return { income: report.income, arrivals };
   }
 
   private dispatch(text: string, tone?: 'good' | 'bad'): void {
@@ -839,12 +887,14 @@ export class GameController implements GameActions, GameQueries {
 
   onFrame = (view: ViewState): void => {
     this.view.topBar.setGalaxyMode(view.galaxyMode);
+    // Ships glide through the current year toward next year's position.
+    this.view.fleets.setTime(this.state.turn + this.deps.clock.fraction());
     const mode = this.state.selectedPlanet ? 'Planet view' : view.visibleWidth < SYSTEM_VIEW_WIDTH ? 'System view' : view.visibleWidth < 420 ? 'Hex view' : view.visibleWidth < 7_000 ? 'Sector view' : 'Galaxy view';
     const pxPerLy = this.view.map.viewportWidth() / view.visibleWidth;
     this.view.hud.setScale(view.visibleWidth, pxPerLy, mode, view.altitude);
   };
 
-  /** Fleets of different players within the lockstep radius resolve that zone in lockstep. */
+  /** Fleets of different players close together are in contact (peaceful: no PvP). */
   private updateContact(): void {
     const s = this.state;
     const mine = s.fleets.filter((f) => f.owner === s.playerName);
@@ -852,7 +902,7 @@ export class GameController implements GameActions, GameQueries {
     let contact: string | null = null;
     for (const a of mine) for (const b of others) {
       if (inContact(hexAt(a.movement, s.turn), hexAt(b.movement, s.turn))) {
-        contact = `Contact with ${b.owner}. Lockstep: both players submit before this turn resolves. Peaceful; PvP is off.`;
+        contact = `Contact with ${b.owner}. Peaceful: PvP is off.`;
       }
     }
     if (contact !== s.contact) this.deps.store.update({ contact });

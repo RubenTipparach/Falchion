@@ -131,9 +131,11 @@ jobs:
           DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
           DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          # Same secret as High Frontier: comma-separated Discord ids for the /admin portal.
+          ADMIN_DISCORD_ID: ${{ secrets.ADMIN_DISCORD_ID }}
         run: |
           args=()
-          for name in DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET SESSION_SECRET; do
+          for name in DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET SESSION_SECRET ADMIN_DISCORD_ID; do
             [ -n "${!name}" ] && args+=("$name=${!name}")
           done
           if [ ${#args[@]} -eq 0 ]; then

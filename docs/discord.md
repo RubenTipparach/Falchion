@@ -53,6 +53,7 @@ secret**. Add:
 | `DISCORD_CLIENT_ID` | the Client ID from step 1 |
 | `DISCORD_CLIENT_SECRET` | the Client Secret from step 1 |
 | `SESSION_SECRET` | the random string from step 2 |
+| `ADMIN_DISCORD_ID` | optional: your Discord user id(s), comma-separated (see Admin portal) |
 
 ## 4. Deploy
 
@@ -78,6 +79,21 @@ Send them **https://falchion.fly.dev**. They click **Sign in with Discord**, app
 land in their new empire. Each new player's home is placed 60–260 ly from the original
 starting system, so friends start within an hour or two of each other at base speed.
 **Sign out** is under your name in the top-right corner.
+
+## Admin portal
+
+**https://falchion.fly.dev/admin**: server overview, every player (year, colonies,
+fleets, last save) with a **Reset empire** button, and an **announcement** banner shown
+to all players.
+
+Access uses the same secret as High Frontier: add a GitHub secret **`ADMIN_DISCORD_ID`**
+holding your Discord user id. For several admins, separate ids with commas
+(`123456789012345678,234567890123456789`); `ADMIN_DISCORD_IDS` also works. Redeploy
+after changing it.
+
+To find your id, sign in and open `/admin`: the "Not an admin" page shows it. Or, in
+Discord, turn on **Settings → Advanced → Developer Mode**, then right-click your name →
+**Copy User ID**.
 
 ## Running it locally
 

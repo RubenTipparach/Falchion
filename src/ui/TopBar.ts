@@ -39,7 +39,9 @@ export class TopBar {
       h('div', { class: 'identity', title: identity.provider === 'discord' ? 'Signed in with Discord: your empire is saved on the server' : 'Guest: your empire is saved in this browser only' },
         identity.avatar ? h('img', { class: 'avatar', src: identity.avatar, alt: '' }) : h('span', { class: 'avatar' }, identity.displayName.slice(0, 1)),
         h('span', { class: 'who' }, h('b', {}, identity.displayName),
-          identity.provider === 'discord' ? h('a', { class: 'signout', href: './auth/logout' }, 'Discord · sign out') : h('small', {}, 'Guest · this browser'))));
+          identity.provider === 'discord'
+            ? h('span', {}, identity.admin ? h('a', { class: 'signout', href: './admin', title: 'Admin portal' }, 'Admin · ') : '', h('a', { class: 'signout', href: './auth/logout' }, 'Discord · sign out'))
+            : h('small', {}, 'Guest · this browser'))));
     store.subscribe((s, prev) => {
       if (s.empire !== prev.empire || s.economy.colonies !== prev.economy.colonies) this.renderStats(s);
       if (s.turn !== prev.turn) this.renderTurn(s.turn);

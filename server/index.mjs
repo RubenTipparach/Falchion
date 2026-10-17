@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { adminIds, createAdmin } from './admin.mjs';
 import { createAuth } from './auth.mjs';
 import { createStore } from './store.mjs';
 
@@ -29,6 +30,13 @@ export const auth = createAuth({
 });
 export const store = createStore(resolve(process.env.DATA_DIR ?? join(here, '..', 'data')));
 const MAX_SAVE_BYTES = 3 * 1024 * 1024;
+const STARTED_AT = Date.now();
+// Same secret as High Frontier: ADMIN_DISCORD_ID (or ADMIN_DISCORD_IDS), comma-separated.
+export const admins = adminIds(process.env);
+const admin = createAdmin({
+  auth, store, admins,
+  info: () => ({ version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000) }),
+});
 
 function json(res, status, body) {
   send(res, status, JSON.stringify(body), { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -58,7 +66,7 @@ function publicView(p) {
 
 async function api(req, res, pathname) {
   const user = auth.userFrom(req);
-  if (pathname === '/api/me') return user ? json(res, 200, user) : json(res, 401, { authEnabled: auth.enabled, login: '/auth/discord' });
+  if (pathname === '/api/me') return user ? json(res, 200, { ...user, admin: admins.has(user.id) }) : json(res, 401, { authEnabled: auth.enabled, login: '/auth/discord' });
   if (!user) return json(res, 401, { error: 'sign in with Discord first' });
   if (pathname === '/api/save' && req.method === 'GET') {
     const record = await store.load(user.id);
@@ -156,7 +164,8 @@ export const server = createServer(async (req, res) => {
   }
   if (pathname === '/api/clock') return send(res, 200, JSON.stringify(clockInfo()), { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   if (pathname === '/api/ticks') return streamTicks(req, res);
-  if (pathname === '/auth/discord') return auth.enabled ? auth.login(res) : send(res, 404, 'Discord sign-in is not configured on this server (see docs/discord.md).');
+  if (pathname === '/auth/discord') return auth.enabled ? auth.login(res, new URL(req.url ?? '/', 'http://localhost').searchParams.get('next') ?? '/') : send(res, 404, 'Discord sign-in is not configured on this server (see docs/discord.md).');
+  if (await admin(req, res, pathname)) return;
   if (pathname === '/auth/discord/callback') return auth.enabled ? auth.callback(req, res, new URL(req.url ?? '/', 'http://localhost')) : send(res, 404, 'not configured');
   if (pathname === '/auth/logout') return auth.logout(res);
   if (pathname === '/api/me' || pathname === '/api/save' || pathname === '/api/players') return api(req, res, pathname);

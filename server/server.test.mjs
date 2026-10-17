@@ -88,3 +88,54 @@ describe('player store', () => {
     await expect(store.save('../../x', { save: {} })).rejects.toThrow();
   });
 });
+
+describe('admin portal', async () => {
+  const { adminIds, createAdmin } = await import('./admin.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'falchion-admin-'));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const auth = make();
+  const store = createStore(dir);
+  const admin = createAdmin({ auth, store, admins: adminIds({ ADMIN_DISCORD_ID: '123456789012345678, 999999999999999999 ,junk' }), info: () => ({ version: 't' }) });
+  const as = (id) => ({ headers: { cookie: `fal_session=${encodeURIComponent(auth.issue({ id, name: 'X' }))}` }, method: 'GET' });
+  const call = async (req, path) => { const res = fakeRes(); await admin(req, res, path); return res; };
+
+  it('reads the allowlist like High Frontier: a comma-separated ADMIN_DISCORD_ID (or ADMIN_DISCORD_IDS)', () => {
+    expect([...adminIds({ ADMIN_DISCORD_ID: '123456789012345678, 999999999999999999 ,junk' })]).toEqual(['123456789012345678', '999999999999999999']);
+    expect([...adminIds({ ADMIN_DISCORD_IDS: '111111111111111111' })]).toEqual(['111111111111111111']);
+  });
+
+  it('sends signed-out visitors to Discord and refuses non-admins', async () => {
+    expect((await call({ headers: {}, method: 'GET' }, '/admin')).headers.Location).toBe('/auth/discord?next=/admin');
+    const res = await call(as('555555555555555555'), '/admin');
+    expect(res.status).toBe(403);
+    expect(res.body).toContain('555555555555555555');
+    expect((await call(as('555555555555555555'), '/api/admin/players')).status).toBe(403);
+  });
+
+  it('lists players, resets an empire, and needs the admin header to write', async () => {
+    await store.save('222222222222222222', { player: { id: '222222222222222222', name: 'Friend' }, save: { turn: 9, economy: { colonies: [{}, {}] } }, public: { fleets: [] }, updatedAt: 1 });
+    const list = JSON.parse((await call(as('123456789012345678'), '/api/admin/players')).body);
+    expect(list[0]).toMatchObject({ id: '222222222222222222', year: 9, colonies: 2 });
+    const noHeader = await call({ ...as('123456789012345678'), method: 'DELETE' }, '/api/admin/players/222222222222222222');
+    expect(noHeader.status).toBe(403);
+    const ok = await call({ headers: { ...as('123456789012345678').headers, 'x-falchion-admin': '1' }, method: 'DELETE' }, '/api/admin/players/222222222222222222');
+    expect(ok.status).toBe(200);
+    expect(await store.load('222222222222222222')).toBeNull();
+  });
+
+  it('publishes an announcement everyone can read', async () => {
+    const req = { headers: { ...as('999999999999999999').headers, 'x-falchion-admin': '1' }, method: 'PUT', async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ text: 'Maintenance at 20:00' })); } };
+    expect((await call(req, '/api/admin/announcement')).status).toBe(200);
+    const pub = await call({ headers: {}, method: 'GET' }, '/api/announcement');
+    expect(JSON.parse(pub.body).text).toBe('Maintenance at 20:00');
+  });
+});
+
+describe('sign-in redirect', async () => {
+  const { safeNext } = await import('./auth.mjs');
+  it('only returns to paths on this site', () => {
+    expect(safeNext('/admin')).toBe('/admin');
+    expect(safeNext('//evil.example')).toBe('/');
+    expect(safeNext('https://evil.example')).toBe('/');
+  });
+});

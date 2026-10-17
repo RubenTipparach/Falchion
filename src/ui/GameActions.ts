@@ -1,4 +1,4 @@
-import type { AssaultResult, BattleResult, Squadron } from '../core/combat/Combat';
+import type { AssaultResult, BattleResult, PlanetTarget, Squadron } from '../core/combat/Combat';
 import type { Planet } from '../core/galaxy/Planets';
 import type { Collected, Haul } from '../core/encounters/PlanetCache';
 import type { StarSystem } from '../core/galaxy/GalaxyModel';
@@ -67,6 +67,10 @@ export interface GameQueries {
   yards(): Colony[];
   /** Star a War Room target sits at. */
   targetStar(targetId: string): StarSystem;
+  /** NPC worlds of the empires you know, to attack from the War Room. */
+  warTargets(): WarTarget[];
+  /** Empires you know: for missionaries and spies. */
+  knownEmpires(): Array<{ name: string; tech: readonly string[] }>;
   /** Is one of our ships inside this empire's space? */
   reached(empire: string): boolean;
   isFriendly(star: StarSystem): boolean;
@@ -90,6 +94,26 @@ export interface GameQueries {
   saleValue(goods: number, from: StarSystem, market: Market): number;
   /** Storage caps for each resource. */
   caps(): Partial<Record<Resource, number>>;
+}
+
+/** An NPC world the War Room can attack. */
+export interface WarTarget {
+  /** `${npcId}@${starId}`. */
+  readonly id: string;
+  readonly npc: string;
+  /** The NPC empire's name. */
+  readonly owner: string;
+  readonly color: string;
+  readonly star: StarSystem;
+  readonly kind: 'planet';
+  readonly name: string;
+  readonly blurb: string;
+  readonly tier: number;
+  /** Technologies a conquest yields fragments of. */
+  readonly tech: readonly string[];
+  /** Its raider fleets at home, defending alongside the garrison. */
+  readonly docked: readonly string[];
+  readonly planet: PlanetTarget;
 }
 
 export type CombatOutcome =

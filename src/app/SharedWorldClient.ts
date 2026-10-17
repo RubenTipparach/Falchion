@@ -12,6 +12,7 @@ const GUEST_KEY = 'falchion.world';
  */
 export class SharedWorldClient implements SharedLink {
   private current: SharedWorld = EMPTY_WORLD;
+  private readonly listeners = new Set<() => void>();
 
   private constructor(private readonly storage: Storage | null) {}
 
@@ -42,8 +43,19 @@ export class SharedWorldClient implements SharedLink {
     return this.current;
   }
 
+  /** Calls back whenever the world changes (an announcement, or this empire's own effects). */
+  onChange(fn: () => void): void {
+    this.listeners.add(fn);
+  }
+
+  private changed(): void {
+    for (const fn of this.listeners) fn();
+  }
+
   emit(effects: readonly SharedEffect[]): void {
+    const before = this.current;
     this.current = applyEffects(this.current, effects);
+    if (this.current !== before) queueMicrotask(() => this.changed());
     try {
       this.storage?.setItem(GUEST_KEY, JSON.stringify(this.current));
     } catch {
@@ -53,7 +65,9 @@ export class SharedWorldClient implements SharedLink {
 
   /** The server's world replaces ours (its announcement, or the start-up fetch). */
   adopt(world: unknown): void {
-    if (validWorld(world)) this.current = world;
+    if (!validWorld(world)) return;
+    this.current = world;
+    this.changed();
   }
 }
 

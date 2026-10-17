@@ -12,7 +12,7 @@ const BROADCAST_MS = 2_000;
 /**
  * @param {{
  *   file: string,
- *   loadSim: () => Promise<{ applyEffects(world: any, effects: any[]): any, EMPTY_WORLD: any, validWorld(w: unknown): boolean } | null>,
+ *   loadSim: () => Promise<{ applyEffects(world: any, effects: any[]): any, stepWorld?(world: any, tick: number, players: any[]): { world: any, raids: any[] }, EMPTY_WORLD: any, validWorld(w: unknown): boolean } | null>,
  *   withLock: (key: string, fn: () => Promise<any>) => Promise<any>,
  *   broadcast?: (event: string, data: unknown) => void,
  *   now?: () => number,
@@ -57,6 +57,23 @@ export function createSharedWorld({ file, loadSim, withLock, broadcast = () => {
   return {
     /** The world as it is now (loaded on first use). */
     get: load,
+    /**
+     * The NPC empires' year: step every discovered NPC to `tick` against every empire's public
+     * view (colonies, fleets). Returns the raids that struck, for each empire to resolve.
+     */
+    async step(tick, players) {
+      return withLock(LOCK, async () => {
+        const sim = await loadSim();
+        if (!sim?.stepWorld) return [];
+        const before = await load();
+        if (tick <= before.tick) return [];
+        const r = sim.stepWorld(before, tick, players);
+        world = r.world;
+        await persist();
+        if (Object.keys(world.npcs).length) announce();
+        return r.raids;
+      });
+    },
     /** Apply effects an empire emitted, in order; save and tell everyone. */
     async apply(effects) {
       if (!Array.isArray(effects) || !effects.length) return world ?? load();

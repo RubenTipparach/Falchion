@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { specOf } from '../content/logistics';
-import { arrivalTurn, hexAt } from '../core/fleet/Fleet';
+import { arrivalTurn, hexAt, planMovement } from '../core/fleet/Fleet';
+import { territoryOf } from '../core/npc/NpcCatalog';
+import { hashSeed } from '../core/rng/Rng';
+import { DEFAULT_DESIGN } from '../core/ships/ShipDesign';
+import type { TerritoryClaim } from '../render/map/TerritoryLayer';
 import { WorldClock } from './WorldClock';
 import type { SaveGame } from './SaveGame';
 import { capacity } from '../core/fleet/Logistics';
@@ -101,10 +105,34 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     this.view.fleets.setFleets(this.fleetViews());
   }
 
+  private npcFleets: FleetView[] = [];
+  private npcKey = '';
+
+  /** The NPC empires you know, on the map: territory (claims) and raider fleets. Redrawn only when they change. */
+  drawNpcs(territory: { setNpcs(claims: readonly TerritoryClaim[]): void }): void {
+    const known = this.knownNpcs();
+    const claims: TerritoryClaim[] = known.map(({ def, state }) => ({
+      name: def.name, color: def.color, kind: 'alien', home: def.home.hex,
+      colonies: state.colonies.filter((c) => !c.capturedBy).map((c) => this.starById(c.starId)).filter((x): x is StarSystem => !!x).map((st) => ({ hex: st.hex, radius: territoryOf(def, st.id) })),
+    }));
+    const fleets: FleetView[] = known.flatMap(({ def, state }) => state.fleets.map((f): FleetView => ({
+      id: `npc:${f.id}`, name: f.name, owner: `alien:${def.name}`, color: def.color,
+      movement: planMovement(f.from, f.to, f.depart, 1),
+      design: { ...DEFAULT_DESIGN, name: def.name, style: def.archetype.style, seed: hashSeed(f.id) % 1000, colors: { ...def.archetype.hull }, weapons: 3 },
+      status: f.mission === 'raid' ? 'Raiding' : f.mission === 'return' ? 'Returning home' : `${f.ships.reduce((n, x) => n + x.count, 0)} warships`,
+    })));
+    const key = JSON.stringify([claims, fleets.map((f) => [f.id, f.movement, f.status])]);
+    if (key === this.npcKey) return;
+    this.npcKey = key;
+    territory.setNpcs(claims);
+    this.npcFleets = fleets;
+    this.view.fleets.setFleets(this.fleetViews());
+  }
+
   /** Map fleets with a supply/ammunition line for the player's own. */
   private fleetViews(): FleetView[] {
     const s = this.state;
-    return [...this.others, ...s.fleets.map((f): FleetView => {
+    return [...this.others, ...this.npcFleets, ...s.fleets.map((f): FleetView => {
       const l = s.loadouts[f.id];
       if (!l) return f;
       const cap = capacity(l.ships, specOf);
@@ -214,7 +242,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
       }
       return;
     }
-    if (!this.state.fleets.some((f) => f.id === fleetId) && !this.others.some((f) => f.id === fleetId)) return;
+    if (!this.state.fleets.some((f) => f.id === fleetId) && !this.others.some((f) => f.id === fleetId) && !this.npcFleets.some((f) => f.id === fleetId)) return;
     if (this.state.selectedPlanet) { this.deps.store.update({ selectedPlanet: null }); this.view.system.setSelected(null); }
     this.deps.store.update({ selectedFleet: fleetId });
     this.view.fleets.setSelected(fleetId);
@@ -224,7 +252,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
 
   fleetInfo = (fleetId: string): FleetInfo | null => {
     const s = this.state;
-    const fleet = s.fleets.find((f) => f.id === fleetId) ?? this.others.find((f) => f.id === fleetId);
+    const fleet = s.fleets.find((f) => f.id === fleetId) ?? this.others.find((f) => f.id === fleetId) ?? this.npcFleets.find((f) => f.id === fleetId);
     if (!fleet) return null;
     const m = fleet.movement;
     return {
@@ -371,7 +399,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     if (shipUnder) {
       const f = this.state.fleets.find((x) => x.id === shipUnder);
       this.view.map.canvas.style.cursor = 'pointer';
-      const other = f ? null : this.others.find((x) => x.id === shipUnder);
+      const other = f ? null : this.others.find((x) => x.id === shipUnder) ?? this.npcFleets.find((x) => x.id === shipUnder);
       // Another player's fleet: its name (labelled "name · empire" on the map) and the owning empire.
       if (other) this.view.hud.setHover(`${other.name.replace(` · ${other.owner}`, '')}  ·  fleet of the ${other.owner}`);
       else this.view.hud.setHover(`${f?.name ?? 'Fleet'}  ·  ${f?.owner === this.state.playerName ? 'click to select, then right-click a star or empty space to move' : f?.owner.replace('alien:', '') ?? ''}`);

@@ -28,7 +28,7 @@ export class EmpirePanel extends Drawer {
   /** Flag, name and ruler, with Edit to reopen the founding screen. */
   private readonly banner = h('div', { class: 'empire-banner' });
 
-  constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly t: EconomyTables, private readonly empires: string[], private readonly thumb: (p: Planet) => string) {
+  constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly t: EconomyTables, private readonly thumb: (p: Planet) => string) {
     super('empire', 'Empire', 'Colonies, trade, politics, religion and espionage. Income arrives every year: one minute.');
     this.body.append(this.banner, this.tabsEl, this.content);
     store.subscribe((s, prev) => { if (this.opened && (s.identity !== prev.identity || s.economy !== prev.economy || s.empire !== prev.empire || s.lastReport !== prev.lastReport || s.fleets !== prev.fleets || s.turn !== prev.turn || s.construction !== prev.construction)) this.render(); });
@@ -210,7 +210,7 @@ export class EmpirePanel extends Drawer {
       h('section', { class: 'card' }, h('h4', {}, faith.name),
         h('p', { class: 'muted' }, 'Tenets: ', faith.tenets.map((id) => TENETS.find((t) => t.id === id)?.name).join(' · '))),
       h('section', { class: 'card' }, h('h4', {}, 'Followers by empire ', h('span', { class: 'muted small' }, '(missionaries work on up to 3)')),
-        h('div', { class: 'factions' }, ...[s.playerName, ...this.empires].map((e) => {
+        h('div', { class: 'factions' }, ...[s.playerName, ...this.q.knownEmpires().map((k) => k.name)].map((e) => {
           const pct = faith.adherents[e] ?? 0;
           const on = faith.missions.includes(e);
           return h('div', { class: 'faction' },
@@ -226,7 +226,7 @@ export class EmpirePanel extends Drawer {
     const espionage = 3 + bonusOf(this.t.tree, s.empire.research, 'espionage');
     return [
       h('p', { class: 'muted' }, `Spy networks steal ${espionage} research shards a year from the target's technology, even for nodes you are not connected to. Networks: ${s.economy.spyNetworks.length} of ${slots}.`),
-      h('div', { class: 'option-grid' }, ...Object.entries(this.t.alienTech).map(([empire, techs]) => {
+      h('div', { class: 'option-grid' }, ...this.q.knownEmpires().map(({ name: empire, tech: techs }) => {
         const on = s.economy.spyNetworks.includes(empire);
         const left = techs.filter((id) => !s.empire.research.researched.includes(id));
         return h('section', { class: `card spy ${on ? 'active' : ''}` },

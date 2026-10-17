@@ -22,6 +22,11 @@ import { applyEffects, EMPTY_WORLD, validWorld, type SharedEffect, type SharedWo
 /** The server applies empires' changes to the shared world with the same rules. */
 export { applyEffects, EMPTY_WORLD, validWorld };
 import { CommandError, decodeArgs, type Command } from './commands';
+import { stepNpcs, type RaidTargets } from '../core/npc/NpcSim';
+import type { NpcRaid } from '../core/npc/types';
+import { hexAt, type FleetMovement } from '../core/fleet/Fleet';
+import { isStationed } from '../core/fleet/Presence';
+import type { Hex } from '../core/hex/Hex';
 
 /**
  * The game rules without a browser: the server runs this to keep every empire going while its
@@ -64,12 +69,15 @@ export interface Advanced {
  * name: the name owns the fleets). Null when the save is invalid or already up to date. A long
  * absence is caught up as the client would (the most recent week in full).
  */
-export function advanceSave(save: unknown, player: Player, toTurn: number, world: SharedWorld = EMPTY_WORLD): Advanced | null {
-  if (!validSave(save) || !Number.isInteger(toTurn) || save.turn >= toTurn) return null;
+export function advanceSave(save: unknown, player: Player, toTurn: number, world: SharedWorld = EMPTY_WORLD, raids: readonly NpcRaid[] = []): Advanced | null {
+  // Up to date already (an order caught it up), but raided: still resolve the raids.
+  if (!validSave(save) || !Number.isInteger(toTurn) || (save.turn >= toTurn && !raids.length)) return null;
   const { deps, store, link } = runtime(save, player, world);
   const from = store.state.turn;
   const sim = new EmpireSim(deps);
   sim.advanceTo(toTurn);
+  // NPC raiders that reached this empire this year (stepWorld found them).
+  sim.resolveRaids(raids);
   sim.retimeFleets();
   return { ...result(store.state, player), effects: link.effects, years: store.state.turn - from };
 }
@@ -104,6 +112,30 @@ export function applyCommand(save: unknown, player: Player, worldTime: number, c
     const error = err instanceof CommandError ? err.message : `command failed: ${(err as Error)?.message ?? err}`;
     return { ...result(store.state, player), effects: link.effects, ok: false, error };
   }
+}
+
+/** What other players may see of an empire, as the server keeps it (server/index.mjs publicView). */
+interface PublicRecord {
+  readonly home?: Hex | null;
+  readonly colonies?: readonly Hex[];
+  readonly fleets?: ReadonlyArray<{ readonly movement?: FleetMovement }>;
+}
+
+/**
+ * The NPC empires' year on the server: step every discovered NPC to `tick`, with every empire's
+ * colonies and fleets on station as what their raiders can strike. Returns the new world and the
+ * raids, which each struck empire resolves when it plays its year (advanceSave).
+ */
+export function stepWorld(world: unknown, tick: number, players: ReadonlyArray<{ readonly id: string; readonly public?: PublicRecord | null }>): { world: SharedWorld; raids: NpcRaid[] } {
+  const w = validWorld(world) ? world : EMPTY_WORLD;
+  const isHex = (h: unknown): h is Hex => !!h && Number.isInteger((h as Hex).q) && Number.isInteger((h as Hex).r);
+  const targets: RaidTargets[] = players.map((p) => {
+    const pub = p.public ?? {};
+    const colonies = [pub.home, ...(pub.colonies ?? [])].filter(isHex);
+    const fleets = (pub.fleets ?? []).map((f) => f.movement).filter((m): m is FleetMovement => !!m && Array.isArray(m.route) && m.route.length > 0 && isStationed(m, tick)).map((m) => hexAt(m, tick));
+    return { player: p.id, targets: [...colonies.map((hex) => ({ hex, what: 'colony' as const })), ...fleets.map((hex) => ({ hex, what: 'fleet' as const }))] };
+  });
+  return stepNpcs(w, tick, tables().galaxy, targets);
 }
 
 /** How far back (in years) a player's order may be dated: a few seconds of latency. */
@@ -142,7 +174,7 @@ function runtime(saved: SavedGame, player: Player, shared: SharedWorld): { deps:
   };
   const store = new Store<GameState>(state);
   const link = snapshotLink(validWorld(shared) ? shared : EMPTY_WORLD);
-  return { deps: { store, galaxy, tree, encounters, world, economy, shared: link }, store, link };
+  return { deps: { store, galaxy, tree, encounters, world, economy, shared: link, playerId: player.id }, store, link };
 }
 
 function result(state: GameState, player: Player): { save: Record<string, unknown>; public: PublicEmpire } {

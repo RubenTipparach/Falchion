@@ -1,4 +1,3 @@
-import { ALIEN_TARGETS } from '../content/aliens';
 import { RESOURCES, Resource } from '../content/resources';
 import { BUILDINGS, slotsOf } from '../content/buildings';
 import { buildYears, isSurveyClass, isWarship, specOf } from '../content/logistics';
@@ -17,6 +16,9 @@ import { adjustShips, countOf, dockedShips, FleetOrders, hasShips, isStationed, 
 import { planSurvey } from '../core/fleet/Survey';
 import { fieldLeft, fieldsOf, homeBelt, yearsToFull, type AsteroidField } from '../core/galaxy/Asteroids';
 import { applyEffects, EMPTY_WORLD, type SharedEffect, type SharedWorld } from '../core/world/SharedWorld';
+import { DISCOVERY_RANGE, gridNpcsNear, HOME_TERRITORY, initialNpcState, nearNpc, npcById, spawnNpcs, territoryOf, worldDefense, type NpcDef } from '../core/npc/NpcCatalog';
+import { stepNpcs, type RaidTargets } from '../core/npc/NpcSim';
+import type { NpcRaid, NpcState } from '../core/npc/types';
 import { due, enqueue, Job } from '../core/construction/Construction';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
@@ -30,7 +32,7 @@ import type { GameState } from '../app/GameState';
 import type { Store } from '../app/Store';
 import type { World } from '../app/World';
 import { CLOCK } from '../app/WorldClock';
-import type { CombatOutcome, FleetGroup } from '../ui/GameActions';
+import type { CombatOutcome, FleetGroup, WarTarget } from '../ui/GameActions';
 import type { StarDetails } from '../ui/StarInfoPanel';
 
 /** The shared world as an empire's simulation sees it: what it holds now, and where its changes go. */
@@ -54,6 +56,17 @@ export interface FieldReport {
   readonly fullIn: number;
 }
 
+/** What raiders take from an undefended colony system: a share of each, capped. */
+const RAID_LOOT: readonly Resource[] = ['credits', 'metals', 'food', 'goods'];
+const RAID_SHARE = 0.08;
+const RAID_CAP = 300;
+
+function mergeShips(ships: readonly Squadron[]): Squadron[] {
+  const m = new Map<string, number>();
+  for (const x of ships) m.set(x.classId, (m.get(x.classId) ?? 0) + x.count);
+  return [...m].filter(([, n]) => n > 0).map(([classId, count]) => ({ classId, count }));
+}
+
 const poolKey = (starId: string, resource: Resource) => `${starId}|${resource}`;
 const parsePool = (key: string) => { const i = key.lastIndexOf('|'); return { starId: key.slice(0, i), resource: key.slice(i + 1) as Resource }; };
 
@@ -67,6 +80,10 @@ export interface SimDeps {
   readonly economy: EconomyTables;
   /** Share notable news (founding, battles, colonies, depots, surveyed systems) with the galaxy feed and Discord. */
   readonly report?: (kind: ReportKind, text: string, place?: ActivityPlace) => void;
+  /** The player's id in the shared world (the server's Discord id; a guest is 'local'). */
+  readonly playerId?: string;
+  /** 'local': this simulation steps the NPC empires itself (a guest's browser, tests). */
+  readonly npcs?: 'local';
   /** The galaxy's shared state (asteroid fields, NPC empires): read it, and hand it this empire's changes. */
   readonly shared?: SharedLink;
   /** Markets beyond your own colonies and the neighbours (other players' worlds). */
@@ -166,13 +183,14 @@ export class EmpireSim {
     // Every fleet travels at the empire's speed: 1 ly a year to start, plus drive research.
     const speed = this.fleetSpeed();
     const owner = this.deps.world.claims.find((c) => c.colonies.some((col) => hexDistance(col.hex, star.hex) <= col.radius));
+    const npc = owner ? null : this.knownNpcs().find(({ def, state }) => state.colonies.some((c) => !c.capturedBy && nearNpc(def, star.hex) && hexDistance(this.starById(c.starId)?.hex ?? star.hex, star.hex) <= territoryOf(def, c.starId)));
     return {
       address: formatAddress(addressOf(star.hex)),
       distanceFromHome: dist,
       travel: dist === 0 ? '—' : formatDuration(travelTurns(dist, speed), CLOCK),
       speed,
       planets: this.planets(star),
-      owner: owner?.kind === 'player' ? this.state.identity?.name ?? owner.name : owner?.name ?? null,
+      owner: owner?.kind === 'player' ? this.state.identity?.name ?? owner.name : owner?.name ?? npc?.def.name ?? null,
     };
   };
 
@@ -251,17 +269,10 @@ export class EmpireSim {
 
   yards = (): Colony[] => this.state.economy.colonies.filter((c) => (c.buildings ?? []).some((b) => BUILDINGS.find((x) => x.id === b)?.shipyard));
 
+  /** Star a War Room target sits at. */
   targetStar = (targetId: string): StarSystem => {
-    const cached = this.targetStars.get(targetId);
-    if (cached) return cached;
-    const t = ALIEN_TARGETS.find((x) => x.id === targetId)!;
-    const owner = this.deps.world.neighbours.find((n) => n.name === t.owner);
-    const home = this.deps.world.home.hex;
-    const to = owner?.home.hex ?? home;
-    const at = { q: Math.round(home.q + (to.q - home.q) * t.reach), r: Math.round(home.r + (to.r - home.r) * t.reach) };
-    const star = this.deps.galaxy.nearestStar(at, 12) ?? this.deps.world.home;
-    this.targetStars.set(targetId, star);
-    return star;
+    const t = this.warTargets().find((x) => x.id === targetId);
+    return t?.star ?? this.state.home;
   };
 
   /** Where each of our fleets is right now. */
@@ -270,10 +281,11 @@ export class EmpireSim {
     return s.fleets.filter((f) => s.loadouts[f.id]).map((f) => hexAt(f.movement, s.turn));
   }
 
+  /** Is one of our fleets inside (or at the edge of) a known empire's space? */
   reached = (empire: string): boolean => {
-    const claim = this.deps.world.claims.find((c) => c.name === empire);
-    if (!claim) return false;
-    return this.fleetHexes().some((h) => claim.colonies.some((c) => hexDistance(c.hex, h) <= c.radius));
+    const npc = this.knownNpcs().find((n) => n.def.name === empire);
+    if (!npc) return false;
+    return this.fleetHexes().some((h) => nearNpc(npc.def, h, 2));
   };
 
   // ── The shared world: asteroid fields ──────────────────────────────
@@ -319,8 +331,10 @@ export class EmpireSim {
       if (g.id === 'dock') continue;
       for (const x of g.ships) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, pool: g.stationed ? at(g.star, x.classId) : undefined });
     }
-    const reached = this.deps.world.claims.map((c) => c.name).filter((n) => this.reached(n));
-    return { miners, pools, reached };
+    const known = this.knownNpcs();
+    const reached = known.map((n) => n.def.name).filter((n) => this.reached(n));
+    const techOf = Object.fromEntries(known.map((n) => [n.def.name, n.def.archetype.tech]));
+    return { miners, pools, reached, techOf };
   }
 
   /** What was mined from each pool, taken from its fields (fullest first) and shared. */
@@ -890,8 +904,11 @@ export class EmpireSim {
       const star = this.starById(id);
       if (star) out.set(id, { starId: id, name: star.name, kind: 'own' });
     }
-    for (const n of this.deps.world.neighbours) {
-      if (!out.has(n.home.id)) out.set(n.home.id, { starId: n.home.id, name: n.home.name, kind: n.kind === 'alien' ? 'npc' : 'player' });
+    for (const { def, state } of this.knownNpcs()) {
+      for (const c of state.colonies) {
+        const star = this.starById(c.starId);
+        if (star && !c.capturedBy && !out.has(c.starId)) out.set(c.starId, { starId: c.starId, name: `${star.name} (${def.name})`, kind: 'npc' });
+      }
     }
     for (const m of this.deps.markets?.() ?? []) if (!out.has(m.starId)) out.set(m.starId, m);
     return [...out.values()];
@@ -1029,10 +1046,10 @@ export class EmpireSim {
 
   engage(targetId: string, ships: Squadron[], groupId: string): CombatOutcome | null {
     const s = this.state;
-    const target = ALIEN_TARGETS.find((t) => t.id === targetId);
+    const target = this.warTargets().find((t) => t.id === targetId);
     const committed = ships.filter((x) => x.count > 0);
     if (!target || s.engaged.includes(targetId) || !committed.length) return null;
-    const at = this.targetStar(targetId);
+    const at = target.star;
     const group = this.groupsAt(at).find((g) => g.id === groupId);
     if (!group || !hasShips(group.ships, committed)) return null;
     // Ammunition decides how hard the strike group can hit.
@@ -1052,37 +1069,167 @@ export class EmpireSim {
     const applySurvivors = (survivors: readonly Squadron[]) => {
       for (const x of committed) delta.push({ classId: x.classId, count: -(x.count - countOf(survivors, x.classId)) });
     };
-    let outcome: CombatOutcome;
+    const result = resolveAssault(me, target.planet, SHIP_CLASSES, seed);
+    applySurvivors(result.survivors);
+    if (result.space) reverseEngineer(result.space.captured[0]);
     let colonies = s.economy.colonies;
-    if (target.kind === 'fleet') {
-      const result = resolveBattle(me, target.fleet!, SHIP_CLASSES, seed);
-      applySurvivors(result.survivors[0]);
-      reverseEngineer(result.captured[0]);
-      const caps = result.captured[0].reduce((a, x) => a + x.count, 0);
-      const summary = result.winner === 0 ? `Victory over the ${target.name}${caps ? `; ${caps} ship${caps > 1 ? 's' : ''} captured for reverse engineering` : ''}` : result.winner === 1 ? `Defeat against the ${target.name}` : `Stalemate with the ${target.name}`;
-      outcome = { kind: 'fleet', result, summary };
-    } else {
-      const result = resolveAssault(me, target.planet!, SHIP_CLASSES, seed);
-      applySurvivors(result.survivors);
-      if (result.space) reverseEngineer(result.space.captured[0]);
-      if (result.captured) {
-        colonies = [...colonies, { name: target.planet!.name, biome: target.owner.startsWith('Krell') ? 'toxic' : 'volcanic', starId: at.id, size: 3, buildings: [] }];
-        const pool = (this.deps.economy.alienTech[target.owner] ?? []).filter((id) => !research.researched.includes(id));
-        for (const id of pool.slice(0, 2)) research = this.deps.tree.grantShards(research, id, 'reverse-engineering', 40);
-      }
-      const summary = result.captured ? `${target.planet!.name} captured — new colony and alien tech fragments`
-        : result.phaseReached === 'space' ? `Assault on ${target.planet!.name} failed in orbit`
-        : result.phaseReached === 'bombardment' ? `Bombardment of ${target.planet!.name} could not break its defences — bring siege ships`
-        : `Landing on ${target.planet!.name} repelled: ${result.troopsLanded} troops vs ${result.troopsNeeded} needed`;
-      outcome = { kind: 'planet', result, summary };
+    const effects: SharedEffect[] = [];
+    // The NPC's ships in orbit (its garrison and raiders at home) fought as one: the survivors hold the world.
+    const garrison = result.space ? result.space.survivors[1] : target.planet.garrison.ships;
+    effects.push({ kind: 'npcColony', npc: target.npc, star: at.id, garrison, ...(result.captured ? { capturedBy: this.me } : {}) });
+    if (result.space) for (const f of target.docked) effects.push({ kind: 'npcFleet', npc: target.npc, fleet: f, ships: [] });
+    if (result.captured) {
+      const planet = [...this.planets(at)].sort((a, b) => b.size - a.size || (a.id < b.id ? -1 : 1))[0];
+      colonies = [...colonies, { name: planet?.name ?? at.name, biome: planet?.biome ?? 'barren', planetId: planet?.id, starId: at.id, size: planet?.size ?? 3, buildings: [] }];
+      const pool = target.tech.filter((id) => !research.researched.includes(id));
+      for (const id of pool.slice(0, 2)) research = this.deps.tree.grantShards(research, id, 'reverse-engineering', 40);
     }
-    if (fire.factor < 1) outcome = { ...outcome, summary: `${outcome.summary} (fought at ${Math.round(fire.factor * 100)}% firepower: low ammunition)` };
+    let summary = result.captured ? `${target.name} captured from the ${target.owner}: a new colony and alien tech fragments`
+      : result.phaseReached === 'space' ? `Assault on ${target.name} failed in orbit`
+      : result.phaseReached === 'bombardment' ? `Bombardment of ${target.name} could not break its defences: bring siege ships`
+      : `Landing on ${target.name} repelled: ${result.troopsLanded} troops vs ${result.troopsNeeded} needed`;
+    if (fire.factor < 1) summary = `${summary} (fought at ${Math.round(fire.factor * 100)}% firepower: low ammunition)`;
+    const outcome: CombatOutcome = { kind: 'planet', result, summary };
     this.deps.store.update({ empire: { ...s.empire, research }, engaged: [...s.engaged, targetId], economy: { ...s.economy, colonies } });
     this.adjustGroup(groupId, delta, { ammo: group.stores.ammo - fire.spent });
-    this.dispatch(outcome.summary, /Victory|captured/.test(outcome.summary) ? 'good' : 'bad');
+    this.emit(effects);
+    this.dispatch(outcome.summary, result.captured ? 'good' : 'bad');
     this.deps.report?.('battle', `${outcome.summary} at ${at.name}`, placeOf(at));
     return outcome;
   }
+
+  // ── NPC empires ────────────────────────────────────────────────────
+
+  /** Who this empire is in the shared world. */
+  protected get me(): string {
+    return this.deps.playerId ?? 'local';
+  }
+
+  /** NPC empires this empire has met, with who they are and what they hold now. */
+  knownNpcs = (): Array<{ def: NpcDef; state: NpcState }> => {
+    const out: Array<{ def: NpcDef; state: NpcState }> = [];
+    for (const state of Object.values(this.sharedWorld().npcs)) {
+      if (!state.knownBy.includes(this.me)) continue;
+      const def = npcById(this.deps.galaxy, state.id);
+      if (def) out.push({ def, state });
+    }
+    return out.sort((a, b) => a.def.id.localeCompare(b.def.id));
+  };
+
+  /** Known empires to send missionaries and spies to, with the technology spies can steal. */
+  knownEmpires = (): Array<{ name: string; tech: readonly string[] }> => this.knownNpcs().map((n) => ({ name: n.def.name, tech: n.def.archetype.tech }));
+
+  /** NPC worlds you can attack from the War Room: their garrison, with any raiders at home. */
+  warTargets = (): WarTarget[] => {
+    const out: WarTarget[] = [];
+    for (const { def, state } of this.knownNpcs()) {
+      const docked = state.fleets.filter((f) => f.mission === 'home');
+      for (const c of state.colonies) {
+        const star = this.starById(c.starId);
+        if (!star || c.capturedBy) continue;
+        const isHome = star.id === def.home.id;
+        const ships = mergeShips([...c.garrison, ...(isHome ? docked.flatMap((f) => f.ships) : [])]);
+        out.push({
+          id: `${def.id}@${star.id}`, npc: def.id, owner: def.name, color: def.color, star, kind: 'planet', tier: def.tier,
+          name: `${star.name}${isHome ? ' (capital)' : ''}`, blurb: def.archetype.blurb, tech: def.archetype.tech,
+          docked: isHome ? docked.map((f) => f.id) : [],
+          planet: { name: star.name, ...worldDefense(def, star.id), garrison: { name: `${def.name} garrison`, ships, bonuses: def.archetype.bonuses } },
+        });
+      }
+    }
+    return out;
+  };
+
+  /** Where raiders can strike this empire: its colony systems and its fleets on station. */
+  raidTargets = (): RaidTargets => {
+    const s = this.state;
+    const colonies = [...new Set([s.home.id, ...this.colonyStars()])].map((id) => this.starById(id)).filter((x): x is StarSystem => !!x);
+    const fleets = s.fleets.filter((f) => s.loadouts[f.id] && isStationed(f.movement, s.turn)).map((f) => hexAt(f.movement, s.turn));
+    return { player: this.me, targets: [...colonies.map((c) => ({ hex: c.hex, what: 'colony' as const })), ...fleets.map((hex) => ({ hex, what: 'fleet' as const }))] };
+  };
+
+  /**
+   * Meet the NPCs nearby: your home's neighbours are known from the start; others once a fleet
+   * comes within range of their space. Discovering one wakes it for the whole galaxy.
+   */
+  protected discover(): string[] {
+    const s = this.state, galaxy = this.deps.galaxy, w = this.sharedWorld();
+    const known = new Set(Object.values(w.npcs).filter((n) => n.knownBy.includes(this.me)).map((n) => n.id));
+    const found = new Map<string, NpcDef>();
+    for (const d of spawnNpcs(galaxy, s.home.hex)) if (!known.has(d.id)) found.set(d.id, d);
+    const spots = [s.home.hex, ...this.fleetHexes()];
+    for (const h of spots) {
+      for (const d of gridNpcsNear(galaxy, h, HOME_TERRITORY + DISCOVERY_RANGE)) if (!known.has(d.id) && nearNpc(d, h, DISCOVERY_RANGE)) found.set(d.id, d);
+    }
+    // Other players' neighbours, already awake.
+    for (const n of Object.values(w.npcs)) {
+      if (known.has(n.id) || found.has(n.id)) continue;
+      const d = npcById(galaxy, n.id);
+      if (d && spots.some((h) => nearNpc(d, h, DISCOVERY_RANGE))) found.set(d.id, d);
+    }
+    if (!found.size) return [];
+    this.emit([...found.values()].map((d) => ({ kind: 'discover' as const, npc: w.npcs[d.id] ?? initialNpcState(d, s.turn), by: this.me })));
+    return [...found.values()].map((d) => `First contact: the ${d.name} at ${d.home.name}. ${d.archetype.blurb}`);
+  }
+
+  /** Raids that struck this empire: defenders fight, an undefended colony system is plundered. */
+  resolveRaids(raids: readonly NpcRaid[]): void {
+    for (const raid of raids) {
+      if (raid.player !== this.me) continue;
+      const def = npcById(this.deps.galaxy, raid.npc);
+      if (def) this.resolveRaid(raid, def);
+    }
+  }
+
+  protected resolveRaid(raid: NpcRaid, def: NpcDef): void {
+    const s = this.state;
+    const star = this.deps.galaxy.starAt(raid.at);
+    const place = star?.name ?? 'deep space';
+    const raiders = this.sharedWorld().npcs[def.id]?.fleets.find((f) => f.id === raid.fleet)?.name ?? `${def.name} raiders`;
+    const atHome = hexEquals(raid.at, s.home.hex);
+    // Defenders: warships of the dock (at home) and of fleets on station there; a fleet with no warships fights with what it has.
+    const candidates = this.groups().filter((g) => g.stationed && shipTotal(g.ships) > 0 && (g.id === 'dock' ? atHome : hexEquals(hexAt(s.fleets.find((f) => f.id === g.id)!.movement, s.turn), raid.at)));
+    const armed = (g: FleetGroup) => g.ships.filter((x) => { const c = this.classById.get(x.classId); return !!c && isWarship(c); });
+    const defender = [...candidates].sort((a, b) => this.groupPower(armed(b)) - this.groupPower(armed(a)))[0];
+    const colony = !!star && (atHome || this.colonyStars().has(star.id));
+    let lost = !defender;
+    if (defender) {
+      const fighting = defender.id === 'dock' || armed(defender).length ? armed(defender) : defender.ships;
+      if (fighting.length) {
+        const fire = firepower(defender.stores.ammo, fighting, specOf);
+        const result = resolveBattle(
+          { name: raiders, ships: raid.ships, bonuses: def.archetype.bonuses },
+          { name: s.playerName, ships: fighting, bonuses: this.combatBonuses(), firepower: fire.factor },
+          SHIP_CLASSES, hashSeed(this.deps.galaxy.params.seed, raid.year, raid.fleet));
+        const delta: Squadron[] = fighting.map((x) => ({ classId: x.classId, count: -(x.count - countOf(result.survivors[1], x.classId)) }));
+        for (const c of result.captured[1]) delta.push({ classId: c.classId, count: c.count });
+        this.adjustGroup(defender.id, delta, { ammo: defender.stores.ammo - fire.spent });
+        this.emit([{ kind: 'npcFleet', npc: def.id, fleet: raid.fleet, ships: result.survivors[0] }]);
+        const mine = -delta.filter((d) => d.count < 0).reduce((n, d) => n + d.count, 0);
+        const theirs = shipTotal(raid.ships) - shipTotal(result.survivors[0]);
+        const text = result.winner === 1 ? `${defender.name} beat off ${raiders} at ${place}: ${theirs} of theirs destroyed, ${mine} of ours lost`
+          : result.winner === 0 ? `${raiders} defeated ${defender.name} at ${place}: ${mine} ships lost, ${theirs} of theirs destroyed`
+          : `${defender.name} fought ${raiders} to a standstill at ${place}: ${mine} ships lost, ${theirs} of theirs destroyed`;
+        this.dispatch(text, result.winner === 1 ? 'good' : 'bad');
+        if (star) this.deps.report?.('battle', text, placeOf(star));
+        lost = result.winner !== 1;
+      } else lost = true;
+    }
+    if (lost && colony) {
+      const m = s.empire.materials;
+      const taken: Partial<Record<Resource, number>> = {};
+      for (const r of RAID_LOOT) taken[r] = Math.min(RAID_CAP, Math.floor((this.state.empire.materials[r] ?? 0) * RAID_SHARE));
+      const materials = { ...this.state.empire.materials };
+      for (const [r, n] of Object.entries(taken)) materials[r as Resource] -= n!;
+      this.deps.store.update((st) => ({ empire: { ...st.empire, materials } }));
+      const list = Object.entries(taken).filter(([, n]) => n! > 0).map(([r, n]) => `${n} ${RESOURCES.find((x) => x.id === r)?.name.toLowerCase()}`).join(', ');
+      this.dispatch(`${raiders} plundered ${place}${list ? `: ${list} taken` : ''}. Station warships there to defend it.`, 'bad');
+      void m;
+    } else if (!defender) {
+      this.dispatch(`${raiders} struck at ${place} but found nothing to take`);
+    }
+  }
+
 
   // ── World time ─────────────────────────────────────────────────────
 
@@ -1120,6 +1267,8 @@ export class EmpireSim {
 
   /** Resolve one year: economy, research, logistics. */
   protected step(quiet: boolean): { income: Partial<Record<Resource, number>>; arrivals: string[] } {
+    // First contact with any NPC in range (reported even in a quiet catch-up year).
+    const met = this.discover();
     const s = this.state;
     const { economy, research, report, mined } = resolveTurn({ ...s.economy, stock: s.empire.materials }, s.empire.research, s.turn, this.deps.economy, this.presence());
     this.drawFields(mined);
@@ -1141,10 +1290,10 @@ export class EmpireSim {
     const { stock, ...settings } = economy;
     // Live years only report news: arrivals, and report lines that changed since last year.
     const previous = new Set(s.lastReport?.lines ?? []);
-    const news = quiet ? [] : [
+    const news = [...met.map((text) => ({ turn: next, text, tone: 'bad' as const })), ...(quiet ? [] : [
       ...arrivals.map((text) => ({ turn: next, text, tone: 'good' as const })),
       ...report.lines.filter((l) => !previous.has(l) && !ROUTINE.test(l)).map((text) => ({ turn: next, text })),
-    ];
+    ])];
     this.deps.store.update({
       turn: next,
       loadouts,
@@ -1155,6 +1304,12 @@ export class EmpireSim {
       engaged: [],
       dispatches: news.length ? [...news, ...s.dispatches].slice(0, 40) : s.dispatches,
     });
+    // A guest's browser runs the NPCs itself (the server does for everyone else).
+    if (this.deps.npcs === 'local') {
+      const r = stepNpcs(this.sharedWorld(), next, this.deps.galaxy, [this.raidTargets()]);
+      this.emit([{ kind: 'npcStep', npcs: r.world.npcs, tick: r.world.tick }]);
+      this.resolveRaids(r.raids);
+    }
     // Construction finishing this year, then fleets acting on standing orders.
     const done = [...this.completeConstruction(), ...this.followOrders()];
     if (!quiet && done.length) this.deps.store.update((st) => ({ dispatches: [...done.map((text) => ({ turn: next, text, tone: 'good' as const })), ...st.dispatches].slice(0, 40) }));

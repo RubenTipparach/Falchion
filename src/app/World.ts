@@ -1,24 +1,16 @@
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
 import { Hex, hexAdd, worldToHex } from '../core/hex/Hex';
-import { Rng, hash01, hashSeed } from '../core/rng/Rng';
+import { hash01, hashSeed } from '../core/rng/Rng';
 import type { TerritoryClaim } from '../render/map/TerritoryLayer';
-
-export interface Neighbour {
-  readonly name: string;
-  readonly color: string;
-  readonly home: StarSystem;
-  readonly kind: TerritoryClaim['kind'];
-}
 
 /** Territory (hex radius) around a home system; settled systems add COLONY_RADIUS around themselves. */
 export const HOME_RADIUS = 5;
 export const COLONY_RADIUS = 3;
 
-/** The player's home and the nearby empires, all derived from the galaxy seed. */
+/** The player's home and its territory, derived from the galaxy seed. NPC empires live in the shared world. */
 export interface World {
   readonly home: StarSystem;
   readonly claims: readonly TerritoryClaim[];
-  readonly neighbours: readonly Neighbour[];
 }
 
 /**
@@ -28,11 +20,6 @@ export interface World {
  * saved empire's home system, kept as it is.
  */
 export function createWorld(galaxy: GalaxyModel, playerKey?: string, homeHint?: Hex | null): World {
-  const rng = new Rng(playerKey ? hashSeed(galaxy.params.seed, 'world', playerKey) : hashSeed(galaxy.params.seed, 'world'));
-  const offset = (dist: number): Hex => {
-    const a = rng.next() * Math.PI * 2;
-    return { q: Math.round(Math.cos(a) * dist), r: Math.round(Math.sin(a) * dist) };
-  };
   const starNear = (h: Hex): StarSystem | null => galaxy.nearestStar(h, 60);
 
   // Home on a spiral arm around 18,000 ly from the core.
@@ -53,20 +40,9 @@ export function createWorld(galaxy: GalaxyModel, playerKey?: string, homeHint?: 
   // A saved empire keeps its home, even if the galaxy's star layout has changed since.
   const kept = homeHint ? galaxy.starAt(homeHint) : null;
   if (kept) home = kept;
-  const around = (dist: number): StarSystem => starNear(hexAdd(home.hex, offset(dist))) ?? home;
-
-  const neighbours: Neighbour[] = [
-    { name: 'Vossk Hegemony', color: '#ff5d5d', home: around(70), kind: 'alien' },
-    { name: 'Krell Swarm', color: '#ff9f43', home: around(320), kind: 'alien' },
-    { name: 'Nova Collective', color: '#4fd1ff', home: around(140), kind: 'other-player' },
-    { name: 'House Arrakai', color: '#c792ea', home: around(1_800), kind: 'other-player' },
-    { name: 'Lumen Accord', color: '#ffd166', home: around(9_000), kind: 'other-player' },
-  ];
-
   // Every empire starts with exactly one star system: its home.
   const claims: TerritoryClaim[] = [
     { name: 'Your Empire', color: '#e6b450', kind: 'player', home: home.hex, colonies: [{ hex: home.hex, radius: HOME_RADIUS }] },
-    ...neighbours.map((n) => ({ name: n.name, color: n.color, kind: n.kind, home: n.home.hex, colonies: [{ hex: n.home.hex, radius: HOME_RADIUS }] })),
   ];
-  return { home, claims, neighbours };
+  return { home, claims };
 }

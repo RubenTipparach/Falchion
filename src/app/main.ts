@@ -97,7 +97,10 @@ async function bootstrap(): Promise<void> {
 
   // Asteroid fields and NPC empires everyone shares (the server's when signed in).
   const shared = await SharedWorldClient.connect(!!serverSaves && probe.server);
+  // The server runs the NPC empires for signed-in players; a guest's browser runs its own.
+  const onlineWorld = !!serverSaves && probe.server;
   const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame, shared,
+    playerId: onlineWorld ? identity.id : 'local', ...(onlineWorld ? {} : { npcs: 'local' as const }),
     // Signed-in players' notable news goes to the galaxy feed and the Discord channel (the server rate-limits it).
     report: signedIn ? reportActivity : undefined,
   });
@@ -180,7 +183,7 @@ async function bootstrap(): Promise<void> {
       buildDiscount: () => Math.min(40, controller.bonus('build')),
     }),
     research: new ResearchPanel(store, controller, tree, BRANCHES, DOMAINS, economyTables),
-    empire: new EmpirePanel(store, controller, controller, economyTables, world.neighbours.map((n) => n.name), thumb),
+    empire: new EmpirePanel(store, controller, controller, economyTables, thumb),
     war: new WarRoomPanel(store, controller, controller),
     explore: new ExplorePanel(store, controller, controller, controller.planets, tree, thumb),
     fleets: new FleetsPanel(store, controller, controller),
@@ -188,6 +191,11 @@ async function bootstrap(): Promise<void> {
   app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, dispatches.el, ...Object.values(panels).map((p) => p.el));
 
   controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system });
+  // The NPC empires you know: drawn now, every year, and whenever the shared world changes.
+  const drawNpcs = () => controller.drawNpcs(territory);
+  drawNpcs();
+  shared.onChange(drawNpcs);
+  store.subscribe((s, prev) => { if (s.turn !== prev.turn) drawNpcs(); });
   // Other players, live: the Players drawer, Galaxy feed, toasts and their fleets and territory (see PlayersSetup).
   const players = setupPlayers({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, store, territory,
     fetchPlayers: serverSaves && (() => serverSaves.players()), message: (id) => chat.openThread(id) });

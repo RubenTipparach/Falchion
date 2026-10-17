@@ -30,13 +30,14 @@ const HEX_GEO = new THREE.CircleGeometry(HEX_SIZE * 0.96, 6).rotateX(-Math.PI / 
 
 /**
  * Filled hex territory for each empire, plus an always-visible name marker.
- * Fixed claims (the generated neighbours) are drawn once; your own empire (setOwn)
- * and other players' claims (setDynamic) are replaced whenever they change.
+ * Fixed claims are drawn once; your own empire (setOwn), other players' claims (setDynamic)
+ * and the NPC empires you know (setNpcs) are replaced whenever they change.
  */
 export class TerritoryLayer implements MapLayer {
   readonly object3d = new THREE.Group();
   private readonly fixed: ClaimSet;
   private dynamic: ClaimSet | null = null;
+  private npcs: ClaimSet | null = null;
   private own: ClaimSet | null = null;
   /** Called when the name marker of a claim with an id (another player) is clicked. */
   onMarkerClick: ((claim: TerritoryClaim) => void) | null = null;
@@ -49,6 +50,11 @@ export class TerritoryLayer implements MapLayer {
   /** Replace the live claims (other players in the shared galaxy). */
   setDynamic(claims: readonly TerritoryClaim[]): void {
     this.dynamic = this.replace(this.dynamic, claims);
+  }
+
+  /** Replace the NPC empires' claims (the ones you know). */
+  setNpcs(claims: readonly TerritoryClaim[]): void {
+    this.npcs = this.replace(this.npcs, claims);
   }
 
   /** Replace your own empire's claim (it grows with colonies and takes your colours). */

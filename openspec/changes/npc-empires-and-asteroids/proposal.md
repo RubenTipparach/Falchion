@@ -10,7 +10,7 @@
   - Discovered NPCs show on the map with their territory and fleets, the same for every player.
 - **Combat with NPCs.**
   - NPC raiders that reach a player's fleet fight it, and ones that reach an undefended colony system steal resources.
-  - The War Room lists the fleets and worlds of the NPCs you know. Attacking needs a fleet at the target, and a captured world becomes your colony.
+  - The War Room lists the worlds of the NPCs you know; raiders at home defend their capital. Attacking needs a fleet at the target, and a captured world becomes your colony.
   - The server resolves every battle with the existing deterministic combat rules. Both sides keep the outcome.
 - **Asteroid fields.**
   - Systems have 0–3 asteroid fields, each holding one resource. Mining ships mine only asteroid fields, at three times the old rate.

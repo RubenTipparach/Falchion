@@ -301,7 +301,7 @@ export const server = createServer(async (req, res) => {
   if (await activity.handle(req, res, pathname)) return;
   if (pathname === '/auth/discord/callback') return auth.enabled ? auth.callback(req, res, new URL(req.url ?? '/', 'http://localhost')) : send(res, 404, 'not configured');
   if (pathname === '/auth/logout') return auth.logout(res);
-  if (pathname === '/api/me' || pathname === '/api/save' || pathname === '/api/command' || pathname === '/api/players') return api(req, res, pathname);
+  if (pathname === '/api/me' || pathname === '/api/world' || pathname === '/api/save' || pathname === '/api/command' || pathname === '/api/players') return api(req, res, pathname);
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed');
   return serveStatic(pathname, res);
 });

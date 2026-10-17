@@ -1,11 +1,10 @@
 import type { GameState } from '../../app/GameState';
 import type { Store } from '../../app/Store';
-import { ALIEN_TARGETS } from '../../content/aliens';
 import { DOCTRINES, SHIP_CLASSES } from '../../content/shipClasses';
 import type { Squadron } from '../../core/combat/Combat';
 import { BAND_MULT } from '../../core/combat/Combat';
 import { Drawer } from '../Drawer';
-import type { CombatOutcome, FleetGroup, GameActions, GameQueries } from '../GameActions';
+import type { CombatOutcome, FleetGroup, GameActions, GameQueries, WarTarget } from '../GameActions';
 import { locateButton, storesView } from '../widgets';
 import { firepower } from '../../core/fleet/Logistics';
 import { specOf } from '../../content/logistics';
@@ -14,9 +13,9 @@ import { clear, h } from '../dom';
 const nameOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)?.name ?? id;
 const docOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)?.doctrine ?? 'civilian';
 
-/** Automated, deterministic combat against alien fleets and planets. */
+/** Automated, deterministic assaults on the worlds of the NPC empires you know. */
 export class WarRoomPanel extends Drawer {
-  private targetId = ALIEN_TARGETS[0].id;
+  private targetId = '';
   private committed: Record<string, number> = {};
   private groupId: string | null = null;
   private outcome: CombatOutcome | null = null;
@@ -37,9 +36,17 @@ export class WarRoomPanel extends Drawer {
     this.render();
   }
 
+  /** The selected target (the first known one when none is chosen). */
+  private target(): WarTarget | null {
+    const all = this.q.warTargets();
+    return all.find((t) => t.id === this.targetId) ?? all[0] ?? null;
+  }
+
   /** Groups on station at the current target. */
   private groupsHere(): FleetGroup[] {
-    return this.q.groupsAt(this.q.targetStar(this.targetId)).filter((g) => g.ships.some((x) => SHIP_CLASSES.find((c) => c.id === x.classId)!.attack > 0));
+    const t = this.target();
+    if (!t) return [];
+    return this.q.groupsAt(t.star).filter((g) => g.ships.some((x) => SHIP_CLASSES.find((c) => c.id === x.classId)!.attack > 0));
   }
 
   private group(): FleetGroup | null {
@@ -59,8 +66,17 @@ export class WarRoomPanel extends Drawer {
 
   private render(): void {
     const s = this.store.state;
-    const target = ALIEN_TARGETS.find((t) => t.id === this.targetId)!;
-    const star = this.q.targetStar(this.targetId);
+    const target = this.target();
+    clear(this.left);
+    clear(this.right);
+    if (!target) {
+      this.left.append(h('div', { class: 'empty' }, h('b', {}, 'No enemies known yet'),
+        h('p', { class: 'muted' }, 'NPC empires appear here once you meet them: your home\'s neighbours within a year, others when your fleets come near their space. Their raiders will come for you; their worlds can be taken.')));
+      return;
+    }
+    this.targetId = target.id;
+    const star = target.star;
+    const targets = this.q.warTargets();
     const group = this.group();
     const here = this.groupsHere();
     const roster: Record<string, number> = Object.fromEntries((group?.ships ?? []).map((x) => [x.classId, x.count]));
@@ -73,16 +89,16 @@ export class WarRoomPanel extends Drawer {
       fireNote.textContent = `Firepower ${Math.round(f.factor * 100)}% · this battle uses ${f.spent} ammunition`;
       fireNote.className = `small ${f.factor < 1 ? 'red' : 'muted'}`;
     };
-    clear(this.left);
     this.left.append(
       h('h4', {}, 'Target'),
-      h('div', { class: 'target-list' }, ...ALIEN_TARGETS.map((t) => h('button', { class: `option ${t.id === this.targetId ? 'active' : ''}`, onclick: () => { this.targetId = t.id; this.outcome = null; this.groupId = null; this.resetCommit(); this.render(); } },
-        h('b', {}, t.name), h('span', {}, `${t.owner} · ${t.kind === 'planet' ? 'planetary assault' : 'fleet battle'} · at ${this.q.targetStar(t.id).name}`), h('small', { class: 'muted' }, t.blurb)))),
+      h('div', { class: 'target-list' }, ...targets.map((t) => h('button', { class: `option ${t.id === this.targetId ? 'active' : ''}`, onclick: () => { this.targetId = t.id; this.outcome = null; this.groupId = null; this.resetCommit(); this.render(); } },
+        h('b', {}, h('span', { class: 'doc-dot', style: `--doc:${t.color}` }), t.name), h('span', {}, `${t.owner} · strength ${t.tier} · ${this.q.groupsAt(t.star).length ? 'your ships are there' : 'planetary assault'}`), h('small', { class: 'muted' }, t.blurb)))),
       h('div', { class: 'row-between' }, h('span', { class: 'small' }, `Target location: `, h('b', {}, star.name)),
         locateButton(`Locate ${star.name}`, (closeUp) => { this.actions.select(star); this.actions.flyTo(star, closeUp); })),
       h('h4', {}, 'Enemy order of battle'),
-      h('ul', { class: 'plain oob' }, ...(target.kind === 'fleet' ? target.fleet!.ships : target.planet!.garrison.ships).map((x) => h('li', {}, h('span', { class: 'doc-dot', style: `--doc:${DOCTRINES[docOf(x.classId)].color}` }), `${x.count} × ${nameOf(x.classId)}`)),
-        target.planet ? h('li', { class: 'muted' }, `Planetary defence ${target.planet.defense} · garrison troops ${target.planet.troops}`) : null),
+      h('ul', { class: 'plain oob' }, ...target.planet.garrison.ships.map((x) => h('li', {}, h('span', { class: 'doc-dot', style: `--doc:${DOCTRINES[docOf(x.classId)].color}` }), `${x.count} × ${nameOf(x.classId)}`)),
+        target.docked.length ? h('li', { class: 'muted' }, `Includes ${target.docked.length} raider fleet${target.docked.length > 1 ? 's' : ''} at home`) : null,
+        h('li', { class: 'muted' }, `Planetary defence ${target.planet.defense} · garrison troops ${target.planet.troops}`)),
       h('h4', {}, 'Strike group'),
       here.length > 1 ? h('div', { class: 'row' }, ...here.map((g) => h('button', { class: `chip ${g.id === group?.id ? 'active' : ''}`, onclick: () => { this.groupId = g.id; this.resetCommit(); this.render(); } }, g.name))) : '',
       group ? h('div', {}, h('div', { class: 'small' }, h('b', {}, group.name), ` · on station at ${star.name}`), storesView(group)) : '',
@@ -96,12 +112,11 @@ export class WarRoomPanel extends Drawer {
       })) : '',
       fireNote,
       h('button', { class: 'btn primary wide', disabled: !group || !warships.length || s.engaged.includes(this.targetId), onclick: () => this.fight() },
-        s.engaged.includes(this.targetId) ? 'Already engaged this year' : target.kind === 'planet' ? 'Launch assault' : 'Engage'),
+        s.engaged.includes(this.targetId) ? 'Already engaged this year' : 'Launch assault'),
       h('h4', {}, 'Doctrine counters'),
       this.matrix(),
     );
     updateFire();
-    clear(this.right);
     this.right.append(this.outcome ? this.report(this.outcome) : h('div', { class: 'empty' }, h('b', {}, 'No battle yet'), h('p', { class: 'muted' }, 'Pick a target and a strike group, then engage. Results are deterministic for this year, so the same fight always plays out the same way.')));
   }
 

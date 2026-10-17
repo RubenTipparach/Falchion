@@ -33,17 +33,20 @@ export function savedHome(save: SavedGame | null): Hex | null {
 /**
  * A save in today's terms. Saves from before the three raw materials have their old minerals
  * folded into metals, gases and crystals (and gain trade goods); abstract trade routes, which
- * freighters replaced, are dropped. Idempotent: an up-to-date save comes back unchanged.
+ * freighters replaced, are dropped, and so are the scenery fleets of the old fake neighbours
+ * (fleets with no ships of yours aboard). Idempotent: an up-to-date save comes back unchanged.
  */
 export function upgradeSave<T extends SavedGame>(save: T): T {
   const old = save.empire?.materials as Record<string, number> | undefined;
   const routes = 'routes' in (save.economy ?? {});
-  if (!old || (!routes && 'goods' in old && !Object.keys(old).some((k) => k in LEGACY_MATERIALS))) return save;
+  const scenery = (save.fleets ?? []).some((f) => !save.loadouts?.[f.id]);
+  if (!old || (!routes && !scenery && 'goods' in old && !Object.keys(old).some((k) => k in LEGACY_MATERIALS))) return save;
   const materials: Record<string, number> = {};
   for (const r of RESOURCES) materials[r.id] = Number(old[r.id]) || 0;
   for (const [k, [to, rate]] of Object.entries(LEGACY_MATERIALS)) materials[to] += Math.round((Number(old[k]) || 0) * rate);
   const { routes: _routes, ...economy } = save.economy as typeof save.economy & { routes?: unknown };
-  return { ...save, economy, empire: { ...save.empire, materials } };
+  const fleets = (save.fleets ?? []).filter((f) => save.loadouts?.[f.id]);
+  return { ...save, economy, fleets, empire: { ...save.empire, materials } };
 }
 
 const VERSION = 1;

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { SHIP_CLASSES } from '../../content/shipClasses';
-import { ALIEN_TARGETS } from '../../content/aliens';
 import { resolveAssault, resolveBattle } from './Combat';
 
-const raiders = ALIEN_TARGETS.find((t) => t.id === 'vossk-raiders')!.fleet!;
+const vosskBonuses = { short: 3, capture: 2, hull: 1 };
+const raiders = { name: 'Vossk Raiders', bonuses: vosskBonuses, ships: [{ classId: 'brawler', count: 4 }, { classId: 'boarding-corvette', count: 2 }, { classId: 'interceptor', count: 3 }] };
 
 describe('combat', () => {
   it('is deterministic', () => {
@@ -41,7 +41,7 @@ describe('combat', () => {
   });
 
   it('planet assault needs siege then troops', () => {
-    const outpost = ALIEN_TARGETS.find((t) => t.id === 'vossk-outpost')!.planet!;
+    const outpost = { name: 'Ixal Outpost', defense: 260, troops: 30, garrison: { name: 'Ixal Guard', bonuses: vosskBonuses, ships: [{ classId: 'brawler', count: 2 }] } };
     const noTroops = resolveAssault({ name: 'Me', ships: [{ classId: 'lancer', count: 6 }, { classId: 'bombard', count: 3 }] }, outpost, SHIP_CLASSES, 2);
     expect(noTroops.captured).toBe(false);
     const full = resolveAssault({ name: 'Me', ships: [{ classId: 'lancer', count: 6 }, { classId: 'bombard', count: 4 }, { classId: 'drop-ship', count: 4 }] }, outpost, SHIP_CLASSES, 2);

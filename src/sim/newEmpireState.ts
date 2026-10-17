@@ -2,7 +2,7 @@ import { specOf } from '../content/logistics';
 import type { Squadron } from '../core/combat/Combat';
 import type { Colony } from '../core/economy/Economy';
 import { newEmpire } from '../core/empire/Empire';
-import { planMovement, travelTurns } from '../core/fleet/Fleet';
+import { planMovement } from '../core/fleet/Fleet';
 import { fullStores } from '../core/fleet/Logistics';
 import type { Loadout } from '../core/fleet/Presence';
 import type { GalaxyModel } from '../core/galaxy/GalaxyModel';
@@ -73,29 +73,18 @@ function initialFleets(galaxy: GalaxyModel, world: World, player: string, t0: nu
   const near = (dq: number, dr: number) => galaxy.nearestStar(hexAdd(home, { q: dq, r: dr }), 10) ?? world.home;
   const target = near(22, -9);
   const survey = near(5, -3);
-  const nova = world.neighbours.find((n) => n.name === 'Nova Collective')!;
-  const vossk = world.neighbours.find((n) => n.name === 'Vossk Hegemony')!;
-  const arrakai = world.neighbours.find((n) => n.name === 'House Arrakai')!;
   const house = (name: string, seed: number, style = DEFAULT_DESIGN.style) => ({ ...DEFAULT_DESIGN, name, style, seed, colors: { primary: '#c8d0dc', secondary: '#2b3448', accent: '#ffb547' } });
-  // Raiders sit 15% of the way to Vossk space; a strike group is already on its way.
-  const toVossk = { q: Math.round(home.q + (vossk.home.hex.q - home.q) * 0.15), r: Math.round(home.r + (vossk.home.hex.r - home.r) * 0.15) };
-  const raiders = galaxy.nearestStar(toVossk, 12) ?? world.home;
+  // A strike group is on patrol nearby, arriving shortly.
+  const patrol = near(-8, 6);
   const fleets: FleetView[] = [
     { id: 'scout-1', name: 'Scout Wing I', owner: player, color: '#e6b450', movement: planMovement(home, target.hex, t0 - 2, 1), design: house('Scout', 7, 'technological') },
     { id: 'survey-1', name: 'Survey Group Alpha', owner: player, color: '#e6b450', movement: planMovement(home, survey.hex, t0 - 6, 1), design: house('Survey', 9, 'technological') },
-    { id: 'strike-1', name: '1st Strike Group', owner: player, color: '#e6b450', movement: planMovement(home, raiders.hex, t0 + 3 - hexDistance(home, raiders.hex), 1), design: house('Strike', 21, 'classic') },
-    { id: 'nova-1', name: 'Nova Survey Group', owner: 'Nova Collective', color: '#4fd1ff', movement: planMovement(nova.home.hex, target.hex, t0 + 7 - travelTurns(hexDistance(nova.home.hex, target.hex), 1), 1),
-      design: { ...DEFAULT_DESIGN, name: 'Nova', style: 'geometric', seed: 31, colors: { primary: '#e8f6ff', secondary: '#1b4b6b', accent: '#4fd1ff' } } },
-    { id: 'vossk-1', name: 'Vossk Raiders', owner: 'alien:Vossk', color: '#ff5d5d', movement: planMovement(vossk.home.hex, world.home.hex, t0 - 10, 1),
-      design: { ...DEFAULT_DESIGN, name: 'Vossk', style: 'organic', seed: 66, colors: { primary: '#5a1f1f', secondary: '#2a0d0d', accent: '#ff3b3b' }, weapons: 4 } },
-    { id: 'arrakai-1', name: 'Arrakai Expedition', owner: 'House Arrakai', color: '#c792ea', movement: planMovement(arrakai.home.hex, world.home.hex, t0 - 100, 1),
-      design: { ...DEFAULT_DESIGN, name: 'Arrakai', style: 'classic', seed: 12, colors: { primary: '#f2f2f2', secondary: '#c9a227', accent: '#7ad7ff' } } },
+    { id: 'strike-1', name: '1st Strike Group', owner: player, color: '#e6b450', movement: planMovement(home, patrol.hex, Math.max(0, t0 + 3 - hexDistance(home, patrol.hex)), 1), design: house('Strike', 21, 'classic') },
   ];
   const loadout = (ships: Squadron[], supply?: number): Loadout => ({ ships, ...fullStores(ships, specOf), ...(supply === undefined ? {} : { supply }) });
   const loadouts: Record<string, Loadout> = {
     'scout-1': loadout([{ classId: 'pathfinder', count: 2 }]),
     'survey-1': { ...loadout([{ classId: 'survey-cutter', count: 2 }], 15), orders: { autoReturn: true } },
-    // Wins against the raiders with full magazines, loses at half: ammunition matters.
     'strike-1': loadout([{ classId: 'lancer', count: 6 }, { classId: 'railgun-monitor', count: 2 }, { classId: 'interceptor', count: 2 }]),
   };
   // Roster = every ship owned: deployed fleets plus the home dock.

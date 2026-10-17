@@ -12,7 +12,7 @@ The galaxy SHALL hold NPC empires generated from its seed: two or three near eve
 - **THEN** it has no state and is not simulated
 
 ### Requirement: Players fight NPCs
-Active NPCs SHALL build raider fleets that raid the empires that know them. An NPC fleet that meets a player fleet SHALL fight it, and one that reaches an undefended colony system SHALL steal resources. Players SHALL be able to attack known NPC fleets and worlds from the War Room with a fleet at the target, and a captured world SHALL become their colony. The server SHALL resolve every battle deterministically, and both sides SHALL keep the outcome.
+Active NPCs SHALL build raider fleets that raid the empires that know them. An NPC fleet that meets a player fleet SHALL fight it, and one that reaches an undefended colony system SHALL steal resources. Players SHALL be able to attack known NPC worlds from the War Room with a fleet at the target (raider fleets at home defend their capital), and a captured world SHALL become their colony. The server SHALL resolve every battle deterministically, and both sides SHALL keep the outcome.
 
 #### Scenario: Raiders strike a fleet
 - **WHEN** an NPC raider fleet arrives in the hex where a player's fleet is stationed

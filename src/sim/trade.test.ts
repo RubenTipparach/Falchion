@@ -50,14 +50,16 @@ describe('trade goods', () => {
 
   it('a trade run loads goods at home, sells them at a foreign market, and comes back for more', () => {
     const { sim: s } = sim((st) => ({ empire: { ...st.empire, materials: { ...st.empire.materials, goods: 400 } } }));
+    s.skipYear(); // meet the neighbouring NPCs: their worlds are markets
     const market = s.markets().find((m) => m.kind !== 'own')!;
     const to = s.starById(market.starId)!;
+    const goods = s.state.empire.materials.goods;
     s.tradeRun('dock', to);
     const fleet = s.state.fleets.find((f) => s.state.loadouts[f.id]?.orders?.trade)!;
     expect(fleet).toBeTruthy();
     const loaded = s.state.loadouts[fleet.id];
     expect(loaded.cargo).toBe(50);
-    expect(s.state.empire.materials.goods).toBe(350);
+    expect(s.state.empire.materials.goods).toBe(goods - 50);
     const trip = hexDistance(s.state.home.hex, to.hex);
     s.advanceTo(T + trip + 2);
     const l = s.state.loadouts[fleet.id];
@@ -81,6 +83,8 @@ describe('trade goods', () => {
 
   it('stopping a run keeps the fleet and its cargo; docking returns the cargo to the stockpile', () => {
     const { sim: s } = sim((st) => ({ empire: { ...st.empire, materials: { ...st.empire.materials, goods: 100 } } }));
+    s.skipYear();
+    const goods = s.state.empire.materials.goods;
     const to = s.starById(s.markets().find((m) => m.kind !== 'own')!.starId)!;
     s.tradeRun('dock', to);
     const id = s.state.fleets.find((f) => s.state.loadouts[f.id]?.orders?.trade)!.id;
@@ -88,7 +92,7 @@ describe('trade goods', () => {
     expect(s.state.loadouts[id].orders?.trade).toBeUndefined();
     s.returnHome(id);
     s.dockFleet(id);
-    expect(s.state.empire.materials.goods).toBe(100);
+    expect(s.state.empire.materials.goods).toBe(goods);
   });
 });
 
@@ -98,12 +102,14 @@ describe('saves from before the three raw materials', () => {
     const save = new SaveGame(galaxy.params.seed, null).snapshot(store.state) as unknown as SavedGame;
     const old = {
       ...save,
+      fleets: [...save.fleets, { id: 'vossk-1', name: 'Vossk Raiders', owner: 'alien:Vossk', color: '#ff5d5d', movement: save.fleets[0].movement, design: save.fleets[0].design }],
       economy: { ...save.economy, routes: [{ partnerId: 'Vossk' }] },
       empire: { ...save.empire, materials: { credits: 100, influence: 5, faith: 0, food: 10, metals: 50, volatiles: 20, ice: 30, crystals: 4, rareEarths: 6, exotics: 2, darkMatter: 1 } },
     } as unknown as SavedGame;
     const up = upgradeSave(old);
     expect(up.empire.materials).toEqual({ credits: 100, influence: 5, faith: 0, food: 10, goods: 0, metals: 50, gases: 50, crystals: 4 + 6 + 4 + 4 });
     expect('routes' in up.economy).toBe(false);
+    expect(up.fleets.map((f) => f.id)).toEqual(save.fleets.map((f) => f.id));
     expect(upgradeSave(up)).toBe(up);
   });
 });

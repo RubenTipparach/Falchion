@@ -104,6 +104,8 @@ export interface Presence {
   readonly pools?: Readonly<Record<string, number>>;
   /** Empires with at least one of our ships inside their territory. */
   readonly reached: readonly string[];
+  /** Technology spies can steal from each empire (beyond the tables' alienTech). */
+  readonly techOf?: Readonly<Record<string, readonly string[]>>;
 }
 
 export interface TurnReport {
@@ -308,7 +310,7 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   const espionage = 3 + bonusOf(t.tree, research, 'espionage');
   for (const target of e.spyNetworks) {
     if (!reached(target)) { lines.push(`Spy network in ${target} dark: no ship in their space`); continue; }
-    const pool = (t.alienTech[target] ?? []).filter((id) => !res.researched.includes(id));
+    const pool = (presence?.techOf?.[target] ?? t.alienTech[target] ?? []).filter((id) => !res.researched.includes(id));
     if (!pool.length) continue;
     const rng = new Rng(hashSeed(turn, 'spy', target));
     const nodeId = rng.pick(pool);

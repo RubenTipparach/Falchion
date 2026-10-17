@@ -32,12 +32,15 @@ export type SharedEffect =
   /** An NPC fleet after a battle a player started: its survivors (none: destroyed). */
   | { readonly kind: 'npcFleet'; readonly npc: string; readonly fleet: string; readonly ships: readonly Squadron[] }
   /** An NPC world after an assault: its garrison now, and who took it if it fell. */
-  | { readonly kind: 'npcColony'; readonly npc: string; readonly star: string; readonly garrison: readonly Squadron[]; readonly capturedBy?: string };
+  | { readonly kind: 'npcColony'; readonly npc: string; readonly star: string; readonly garrison: readonly Squadron[]; readonly capturedBy?: string }
+  /** The NPC empires after a year of their own (stepped by whoever runs them: the server, or a guest's browser). */
+  | { readonly kind: 'npcStep'; readonly npcs: Readonly<Record<string, NpcState>>; readonly tick: number };
 
 /** The world after some effects, in order. Pure. */
 export function applyEffects(world: SharedWorld, effects: readonly SharedEffect[]): SharedWorld {
   let npcs = world.npcs;
   let asteroids = world.asteroids;
+  let tick = world.tick;
   for (const e of effects) {
     switch (e.kind) {
       case 'mined': {
@@ -60,6 +63,11 @@ export function applyEffects(world: SharedWorld, effects: readonly SharedEffect[
         npcs = { ...npcs, [e.npc]: { ...n, fleets } };
         break;
       }
+      case 'npcStep': {
+        npcs = e.npcs;
+        tick = e.tick;
+        break;
+      }
       case 'npcColony': {
         const n = npcs[e.npc];
         if (!n) break;
@@ -69,5 +77,5 @@ export function applyEffects(world: SharedWorld, effects: readonly SharedEffect[
       }
     }
   }
-  return npcs === world.npcs && asteroids === world.asteroids ? world : { ...world, npcs, asteroids };
+  return npcs === world.npcs && asteroids === world.asteroids && tick === world.tick ? world : { ...world, tick, npcs, asteroids };
 }

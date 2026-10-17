@@ -91,9 +91,8 @@ describe('player commands run on the server exactly as in the browser', () => {
   it("cannot move another empire's fleet, and an empire is founded only once", () => {
     const save = snap(fresh());
     const star = galaxy.nearestStar({ q: world.home.hex.q + 6, r: world.home.hex.r }, 10)!;
-    const r = applyCommand(save, PLAYER, T, encodeCommand('moveFleet', ['vossk-1', star, false]))!;
-    const vossk = (r.save.fleets as GameState['fleets']).find((f) => f.id === 'vossk-1')!;
-    expect(vossk.movement).toEqual((save.fleets as GameState['fleets']).find((f) => f.id === 'vossk-1')!.movement);
+    const r = applyCommand(save, PLAYER, T, encodeCommand('moveFleet', ['someone-elses-fleet', star, false]))!;
+    expect(r.save.fleets).toEqual(save.fleets);
     const founded = applyCommand(save, PLAYER, T, encodeCommand('setIdentity', [suggestIdentity(1, 'Ruben', 'Cap', HERALDRY), true]))!;
     const again = applyCommand(founded.save, PLAYER, T, encodeCommand('setIdentity', [suggestIdentity(2, 'Ruben', 'Cap', HERALDRY), true]))!;
     const style = (founded.save.identity as { shipStyle?: string }).shipStyle;

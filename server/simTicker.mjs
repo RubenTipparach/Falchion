@@ -9,7 +9,7 @@
  *   store: { ids(): Promise<string[]>, load(id: string): Promise<any>, save(id: string, record: any): Promise<void> },
  *   loadSim: () => Promise<{ advanceSave(save: unknown, player: { id: string, name: string }, toTurn: number, world?: unknown): { save: object, public: object, effects?: any[], years: number } | null } | null>,
  *   withLock?: (key: string, fn: () => Promise<any>) => Promise<any>,
- *   world?: { get(): Promise<any>, apply(effects: any[]): Promise<any> },
+ *   world?: { get(): Promise<any>, apply(effects: any[]): Promise<any>, step?(tick: number, players: any[]): Promise<any[]> },
  *   publish?: (player: object) => void,
  *   notifyOwner?: (id: string, save: object) => void,
  *   publicView?: (p: unknown) => object,
@@ -27,14 +27,34 @@ export function createSimTicker({ store, loadSim, world = null, withLock = (_key
       const sim = await loadSim();
       if (!sim) return 0;
       let advanced = 0;
-      for (const id of await store.ids()) {
+      const ids = await store.ids();
+      // First the NPC empires' year, against every empire as others see it; then each empire plays
+      // its year and resolves the raids that reached it.
+      let raids = [];
+      if (world?.step) {
+        const players = [];
+        for (const id of ids) {
+          try {
+            players.push({ id, public: (await store.load(id))?.public ?? null });
+          } catch {
+            // Unreadable record: its empire is skipped below too.
+          }
+        }
+        try {
+          raids = await world.step(worldTick, players);
+        } catch (err) {
+          log(`sim: NPC year skipped (${err?.message ?? err})`);
+        }
+      }
+      for (const id of ids) {
         try {
           const done = await withLock(id, async () => {
             const record = await store.load(id);
             if (!record?.save) return false;
             const player = { id, name: String(record.player?.name ?? 'Commander') };
             // Each empire plays on the shared world as the ones before it left it.
-            const result = sim.advanceSave(record.save, player, worldTick, world ? await world.get() : undefined);
+            const mine = raids.filter((r) => r.player === id);
+            const result = sim.advanceSave(record.save, player, worldTick, world ? await world.get() : undefined, mine);
             if (!result) return false;
             if (world && result.effects?.length) await world.apply(result.effects);
             const pub = publicView(result.public);

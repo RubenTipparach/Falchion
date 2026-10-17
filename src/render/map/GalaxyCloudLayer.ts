@@ -18,14 +18,19 @@ export class GalaxyCloudLayer implements MapLayer {
     const size = new Float32Array(samples.length);
     const core = new THREE.Color('#ffd9a0'), arm = new THREE.Color('#a9c8ff'), hii = new THREE.Color('#ff7aa8');
     const c = new THREE.Color();
-    const R = galaxy.params.radius;
+    const R = galaxy.params.radius, B = galaxy.params.bulgeRadius;
     samples.forEach((s, i) => {
       pos.set([s.x, 0, s.z], i * 3);
-      const t = Math.min(1, Math.hypot(s.x, s.z) / (R * 0.35));
+      const r = Math.hypot(s.x, s.z);
+      const t = Math.min(1, r / (R * 0.35));
       c.copy(core).lerp(arm, t);
       if (t > 0.5 && s.d > 0.35 && rng.next() < 0.04) c.copy(hii);
+      // So many stars crowd the core that full-bright points add up to flat white: dim and
+      // shrink them there, letting the disc shader's golden glow carry the core.
+      const crowd = 0.3 + 0.7 * smoothstep(B * 0.5, B * 2.2, r);
+      c.multiplyScalar(crowd);
       col.set([c.r, c.g, c.b], i * 3);
-      size[i] = 0.5 + rng.next() * (0.6 + s.d);
+      size[i] = (0.5 + rng.next() * (0.6 + s.d)) * (0.55 + 0.45 * crowd);
     });
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -51,4 +56,9 @@ export class GalaxyCloudLayer implements MapLayer {
     });
     this.material.dispose();
   }
+}
+
+function smoothstep(e0: number, e1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
 }

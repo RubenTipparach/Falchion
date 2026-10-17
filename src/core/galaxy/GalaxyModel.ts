@@ -58,9 +58,17 @@ export class GalaxyModel {
     const r = Math.hypot(x, z);
     if (r >= radius) return 0;
     const theta = Math.atan2(z, x);
-    const bulge = Math.exp(-((r / bulgeRadius) ** 2));
     const spiralPhase = arms * (theta - Math.log(Math.max(r, 1) / 1_500) / Math.tan(pitch));
-    const arm = (0.5 + 0.5 * Math.cos(spiralPhase)) ** 3;
+    let arm = (0.5 + 0.5 * Math.cos(spiralPhase)) ** 3;
+    let bulge = Math.exp(-((r / bulgeRadius) ** 2));
+    // The core: arms do not wind into the centre but dissolve into a bright oval bulge, its long
+    // axis on the arms' roots (like M101 or the Milky Way). Everything is unchanged beyond
+    // CORE_OUTER x bulgeRadius, so stars (and saved homes) in the disc keep their places.
+    if (r < bulgeRadius * CORE_OUTER) {
+      const c = coreShape(x, z, r, bulgeRadius, pitch);
+      arm = arm * c.armFade + 0.45 * (1 - c.armFade);
+      bulge += (c.oval - bulge) * c.blend;
+    }
     const disk = Math.exp(-r / 14_000);
     const edge = 1 - smoothstep(radius * 0.8, radius, r);
     const noise = 0.75 + 0.5 * this.valueNoise(x / 900, z / 900);
@@ -130,6 +138,27 @@ export class GalaxyModel {
     const c = hash01(s, xi, yi + 1), d = hash01(s, xi + 1, yi + 1);
     return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
   }
+}
+
+/** The core reaches out to this many bulge radii; beyond it density is the plain spiral. */
+export const CORE_OUTER = 2.5;
+
+/**
+ * The oval core: its long axis lies where the arms would reach the core, so arms grow out of
+ * its ends. `oval` is the core's brightness, `armFade` how much spiral survives (0 at the
+ * centre, 1 outside the core) and `blend` how much the oval replaces the plain round bulge.
+ */
+export function coreShape(x: number, z: number, r: number, bulgeRadius: number, pitch: number): { oval: number; armFade: number; blend: number } {
+  const length = bulgeRadius * 1.15, width = bulgeRadius * 0.72;
+  const axis = Math.log(length / 1_500) / Math.tan(pitch);
+  const u = x * Math.cos(axis) + z * Math.sin(axis);
+  const v = -x * Math.sin(axis) + z * Math.cos(axis);
+  const oval = Math.exp(-((u / length) ** 2) - (v / width) ** 2) * 1.05 + Math.exp(-((r / (bulgeRadius * 0.45)) ** 2)) * 0.4;
+  return {
+    oval,
+    armFade: smoothstep(bulgeRadius * 0.55, bulgeRadius * 1.6, r),
+    blend: 1 - smoothstep(bulgeRadius * 1.8, bulgeRadius * CORE_OUTER, r),
+  };
 }
 
 function clamp01(v: number): number {

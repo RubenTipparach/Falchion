@@ -6,7 +6,8 @@ import { fadeIn } from './ZoomModel';
 /**
  * The galaxy as one continuous shader: the same logarithmic-spiral density the
  * star generator uses, with turbulence, dark dust lanes trailing each arm,
- * pink star-forming knots along the arms and a warm bulge.
+ * pink star-forming knots along the arms, and arms that dissolve into a warm
+ * oval core (see coreShape in GalaxyModel) instead of winding into the centre.
  */
 export class GalaxyDiscLayer implements MapLayer {
   readonly object3d: THREE.Mesh;
@@ -21,12 +22,14 @@ export class GalaxyDiscLayer implements MapLayer {
         uOpacity: { value: 1 }, uTime: { value: 0 },
         uRadius: { value: p.radius }, uArms: { value: p.arms }, uPitch: { value: p.pitch }, uBulge: { value: p.bulgeRadius },
         uSeed: { value: (p.seed % 997) * 0.37 }, uOrigin: { value: new THREE.Vector2() },
+        // Long axis of the oval core: where the arms reach it (matches coreShape).
+        uAxis: { value: Math.log((p.bulgeRadius * 1.15) / 1500) / Math.tan(p.pitch) },
       },
       vertexShader: /* glsl */ `
         varying vec2 vWorld;
         void main() { vec4 w = modelMatrix * vec4(position, 1.0); vWorld = w.xz; gl_Position = projectionMatrix * viewMatrix * w; }`,
       fragmentShader: /* glsl */ `
-        uniform vec2 uOrigin; uniform float uOpacity; uniform float uTime; uniform float uRadius; uniform float uArms; uniform float uPitch; uniform float uBulge; uniform float uSeed;
+        uniform vec2 uOrigin; uniform float uOpacity; uniform float uTime; uniform float uRadius; uniform float uArms; uniform float uPitch; uniform float uBulge; uniform float uSeed; uniform float uAxis;
         varying vec2 vWorld;
         float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + uSeed) * 43758.5453); }
         float noise(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
@@ -42,13 +45,19 @@ export class GalaxyDiscLayer implements MapLayer {
           float warp = (fbm(p / 5200.0 + drift) - 0.5) * 0.9 + (fbm(p / 1400.0 - drift) - 0.5) * 0.25;
           float theta = atan(p.y, p.x) + warp;
           float phase = uArms * (theta - log(max(r, 1.0) / 1500.0) / tan(uPitch));
-          float arm = pow(0.5 + 0.5 * cos(phase), 2.6);
-          float armCore = pow(0.5 + 0.5 * cos(phase), 9.0);
-          // Dust lanes trail the inner (leading) edge of each arm.
-          float lane = pow(0.5 + 0.5 * cos(phase + 0.85), 10.0);
+          // Arms lose their contrast toward the core and merge into its glow.
+          float armFade = smoothstep(uBulge * 0.55, uBulge * 1.6, r);
+          float arm = mix(0.45, pow(0.5 + 0.5 * cos(phase), 2.6), armFade);
+          float armCore = pow(0.5 + 0.5 * cos(phase), 9.0) * armFade;
+          // Dust lanes trail the inner (leading) edge of each arm and thin out into the core.
+          float lane = pow(0.5 + 0.5 * cos(phase + 0.85), 10.0) * mix(0.35, 1.0, armFade);
 
           float disk = exp(-r / 13000.0);
-          float bulge = exp(-pow(r / uBulge, 2.0));
+          // Oval core: long axis on the arms' roots, a round nucleus inside, blending to the plain bulge outside.
+          vec2 ax = vec2(cos(uAxis), sin(uAxis));
+          float cu = dot(p, ax) / (uBulge * 1.15), cv = dot(p, vec2(-ax.y, ax.x)) / (uBulge * 0.72);
+          float oval = exp(-cu * cu - cv * cv) * 1.05 + exp(-pow(r / (uBulge * 0.45), 2.0)) * 0.4;
+          float bulge = mix(exp(-pow(r / uBulge, 2.0)), oval, 1.0 - smoothstep(uBulge * 1.8, uBulge * 2.5, r));
           float halo = exp(-r / 5200.0);
           float edge = 1.0 - smoothstep(uRadius * 0.72, uRadius * 1.1, r);
 
@@ -67,7 +76,7 @@ export class GalaxyDiscLayer implements MapLayer {
           col += interArm * disk * 0.18 * (0.5 + wisps);
           col += hii * knots * disk * 3.2;
           col += teal * smoothstep(0.66, 0.9, wisps) * arm * disk * 0.6;
-          col *= 1.0 - lane * (0.75 * smoothstep(0.35, 0.65, detail) + 0.15) * (1.0 - bulge);
+          col *= 1.0 - lane * (0.75 * smoothstep(0.35, 0.65, detail) + 0.15) * (1.0 - 0.6 * min(bulge, 1.0));
           col *= edge;
           col = 1.0 - exp(-col * 1.6); // filmic-ish tone map keeps the core golden
           float lum = max(col.r, max(col.g, col.b));

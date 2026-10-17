@@ -85,6 +85,7 @@ export class MapView {
     };
     this.lastView = view;
     this.layers.update(view);
+    this.controller.refollow();
     this.opts.onFrame?.(view, dt);
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);

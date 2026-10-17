@@ -133,12 +133,13 @@ jobs:
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           # Same secret as High Frontier: comma-separated Discord ids for the /admin portal.
           ADMIN_DISCORD_ID: ${{ secrets.ADMIN_DISCORD_ID }}
-          # Channel notifications as the bot (optional).
+          # Channel notifications (optional): a channel webhook, or the bot + a channel id.
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
         run: |
           args=()
-          for name in DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET SESSION_SECRET ADMIN_DISCORD_ID DISCORD_BOT_TOKEN DISCORD_CHANNEL_ID; do
+          for name in DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET SESSION_SECRET ADMIN_DISCORD_ID DISCORD_WEBHOOK_URL DISCORD_BOT_TOKEN DISCORD_CHANNEL_ID; do
             [ -n "${!name}" ] && args+=("$name=${!name}")
           done
           if [ ${#args[@]} -eq 0 ]; then
@@ -168,6 +169,19 @@ jobs:
           region="${region:-$(sed -n 's/^primary_region = "\(.*\)"/\1/p' server/fly.toml)}"
           echo "Creating save volume falchion_data (1 GB) in ${region}"
           flyctl volumes create falchion_data -a "$APP" -r "$region" -s 1 --yes
+
+      # The app is unreachable without a public address (a fresh `fly apps create` has none).
+      - name: Ensure public IPs
+        if: steps.fly_gate.outputs.ready == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          ips="$(flyctl ips list -a "$APP" --json)"
+          echo "$ips" | jq -r '.[] | "\(.Type) \(.Address)"'
+          echo "$ips" | jq -e 'map(select(.Type == "v4" or .Type == "shared_v4")) | length > 0' > /dev/null \
+            || flyctl ips allocate-v4 --shared -a "$APP" || echo "::warning::Could not allocate a shared IPv4"
+          echo "$ips" | jq -e 'map(select(.Type == "v6")) | length > 0' > /dev/null \
+            || flyctl ips allocate-v6 -a "$APP" || echo "::warning::Could not allocate an IPv6"
 
       # Built from the repo root (see server/Dockerfile). Retries with
       # backoff because Fly's remote builder can drop connections transiently.
@@ -206,8 +220,14 @@ jobs:
             fi
             sleep 5
           done
-          echo "::error::$url is not answering. Machine state and recent logs follow."
+          echo "::error::$url is not answering. Machine state, addresses and recent logs follow."
           flyctl status -a "$APP" || true
           flyctl machines list -a "$APP" || true
+          flyctl ips list -a "$APP" || true
+          for id in $(flyctl machines list -a "$APP" --json | jq -r '.[] | select(.state != "started") | .id'); do
+            echo "Starting machine $id"; flyctl machine start "$id" -a "$APP" || true
+          done
+          sleep 10
+          curl -sS -m 20 -o /dev/null -w "after start: HTTP %{http_code}\n" "$url/healthz" || true
           flyctl logs -a "$APP" --no-tail 2>&1 | tail -n 150 || true
           exit 1

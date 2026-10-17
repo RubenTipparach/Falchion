@@ -98,7 +98,7 @@ export class GameController implements GameActions, GameQueries {
       if (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts) view.fleets.setFleets(this.fleetViews());
     });
     for (const [id, panel] of Object.entries(view.panels)) panel.onChange(() => view.topBar.setActivePanel(this.openPanelId() ?? (panel.opened ? (id as PanelId) : null)));
-    view.fleets.setTime(this.state.turn + this.deps.clock.fraction());
+    view.fleets.setTime(this.fleetTime());
     view.fleets.setFleets(this.fleetViews());
     // Zooming in close pulls the view onto the nearest star, so you land in its system.
     view.map.controller.attractor = (ground, width) => {
@@ -1041,10 +1041,20 @@ export class GameController implements GameActions, GameQueries {
     this.view.hud.setHover(`${formatAddress(addressOf(h))}${star ? `  ·  ${star.name}` : ''}  ·  ${dist.toLocaleString('en-US')} ly from home`);
   };
 
+  /**
+   * Fractional year the ships are drawn at: continuous wall-clock time, held within the
+   * year the empire is in. At a year boundary the clock rolls over a moment before the
+   * tick arrives; holding at the year's end keeps ships from stepping back and forth.
+   */
+  private fleetTime(): number {
+    const now = this.deps.clock.tick() + this.deps.clock.fraction();
+    return Math.min(this.state.turn + 1, Math.max(this.state.turn, now));
+  }
+
   onFrame = (view: ViewState): void => {
     this.view.topBar.setGalaxyMode(view.galaxyMode);
     // Ships glide through the current year toward next year's position.
-    this.view.fleets.setTime(this.state.turn + this.deps.clock.fraction());
+    this.view.fleets.setTime(this.fleetTime());
     const mode = this.state.selectedPlanet ? 'Planet view' : view.visibleWidth < SYSTEM_VIEW_WIDTH ? 'System view' : view.visibleWidth < 420 ? 'Hex view' : view.visibleWidth < 7_000 ? 'Sector view' : 'Galaxy view';
     const pxPerLy = this.view.map.viewportWidth() / view.visibleWidth;
     this.view.hud.setScale(view.visibleWidth, pxPerLy, mode, view.altitude);

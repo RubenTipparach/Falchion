@@ -25,6 +25,18 @@ npm test         # core unit tests
 Sign in with Discord at https://falchion.fly.dev to found your empire in a shared galaxy.
 Setup (once): [docs/discord.md](docs/discord.md).
 
+## Admin portal
+
+**https://falchion.fly.dev/admin** (also the **Admin** link in the top bar once you are signed in as an admin).
+
+- Who can open it: Discord ids in the `ADMIN_DISCORD_ID` GitHub secret, comma-separated
+  (same secret as High Frontier). Anyone else sees "Not an admin" along with their own id,
+  ready to copy into that list.
+- What it does: server status, the player list (year, colonies, fleets, last save), reset a
+  player's empire, set the in-game announcement banner (also posted to Discord), and send a
+  test message to the notification channel.
+- Setup and troubleshooting: [docs/discord.md](docs/discord.md#admin-portal).
+
 ## Deployment
 
 Every push to any branch builds, tests and deploys (latest push wins):

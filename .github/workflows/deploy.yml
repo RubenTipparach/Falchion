@@ -191,3 +191,23 @@ jobs:
             fi
           done
           echo "::error::flyctl deploy failed after 4 attempts"; exit 1
+
+      # Proves the live site answers (this also wakes an auto-stopped machine) and,
+      # when it does not, prints the machine state and recent logs right here.
+      - name: Check the live site
+        if: steps.fly_gate.outputs.ready == 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          url="https://${APP}.fly.dev"
+          for i in $(seq 1 12); do
+            if curl -fsS -m 20 "$url/healthz" > /dev/null && curl -fsS -m 20 "$url/" | grep -q '<div id="app">'; then
+              echo "Live: $url"; curl -fsS -m 20 "$url/api/info"; echo; exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::$url is not answering. Machine state and recent logs follow."
+          flyctl status -a "$APP" || true
+          flyctl machines list -a "$APP" || true
+          flyctl logs -a "$APP" --no-tail 2>&1 | tail -n 150 || true
+          exit 1

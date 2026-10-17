@@ -365,6 +365,10 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
    * year the empire is in. At a year boundary the clock rolls over a moment before the
    * tick arrives; holding at the year's end keeps ships from stepping back and forth.
    */
+  protected override now(): number {
+    return this.fleetTime();
+  }
+
   private fleetTime(): number {
     const now = this.deps.clock.tick() + this.deps.clock.fraction();
     return Math.min(this.state.turn + 1, Math.max(this.state.turn, now));

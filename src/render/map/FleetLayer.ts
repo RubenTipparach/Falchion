@@ -84,6 +84,12 @@ interface FleetVisual {
   /** Station-keeping offset from the star (park orbit or the planet being surveyed), eased. */
   readonly station: THREE.Vector3;
   stationSet: boolean;
+  /**
+   * Where the ship was drawn when new orders replaced its old route, relative to where the
+   * new route puts it (e.g. its parking orbit). Fades out, so the ship eases onto its new
+   * course instead of jumping.
+   */
+  readonly carry: THREE.Vector3;
 }
 
 /**
@@ -230,8 +236,11 @@ export class FleetLayer implements MapLayer {
     for (const f of fleets) {
       const existing = this.visuals.get(f.id);
       if (existing && existing.fleet.movement === f.movement && existing.fleet.design === f.design && existing.fleet.color === f.color) { existing.fleet = f; continue; }
+      const was = existing?.root.position.clone();
       if (existing) this.removeVisual(f.id, existing);
-      this.visuals.set(f.id, this.createVisual(f));
+      const v = this.createVisual(f);
+      if (was) v.carry.subVectors(was, v.root.position);
+      this.visuals.set(f.id, v);
       if (f.id === this.selectedId) this.applyOutline();
     }
   }
@@ -281,6 +290,11 @@ export class FleetLayer implements MapLayer {
         v.stationSet = false;
         v.model.group.rotation.y = v.heading;
       }
+      if (v.carry.lengthSq() > 0) {
+        v.carry.multiplyScalar(Math.exp(-2.5 * dt));
+        if (v.carry.lengthSq() < 1e-12) v.carry.set(0, 0, 0);
+        v.root.position.add(v.carry);
+      }
       v.model.group.scale.setScalar(length / v.modelLength);
       v.model.animate(view.time);
       const remaining = arrivalTurn(v.fleet.movement) - this.time;
@@ -301,7 +315,8 @@ export class FleetLayer implements MapLayer {
   private createVisual(fleet: FleetView): FleetVisual {
     const { route } = fleet.movement;
     // Routes run between the actual stars (which sit off-centre in their hexes), on the plane.
-    const a = this.pointAt(route[0]);
+    // A fleet redirected mid-journey sets off from exactly where it was.
+    const a = fleet.movement.from ?? this.pointAt(route[0]);
     const b = this.pointAt(route[route.length - 1]);
     const start = new THREE.Vector3(a.x, LIFT, a.z);
     const end = new THREE.Vector3(b.x, LIFT, b.z);
@@ -339,7 +354,7 @@ export class FleetLayer implements MapLayer {
     // Spread fleets parked at the same star around the orbit (stable per fleet).
     let h = 0;
     for (const ch of fleet.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return { root, model, line, label, fleet, start, end, heading, modelLength, parkPhase: (h % 360) * (Math.PI / 180), shown: progressAtTime(fleet.movement, this.time), station: new THREE.Vector3(), stationSet: false };
+    return { root, model, line, label, fleet, start, end, heading, modelLength, parkPhase: (h % 360) * (Math.PI / 180), shown: progressAtTime(fleet.movement, this.time), station: new THREE.Vector3(), stationSet: false, carry: new THREE.Vector3() };
   }
 
   private removeVisual(id: string, v: FleetVisual): void {

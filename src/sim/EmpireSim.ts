@@ -9,7 +9,7 @@ import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpie
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
 import { addHaul, Collected, crateMaterials, Haul, planetCache } from '../core/encounters/PlanetCache';
 import type { Card } from '../core/encounters/types';
-import { arrivalTurn, hexAt, planMovement, retime, travelTurns } from '../core/fleet/Fleet';
+import { arrivalTurn, hexAt, planMovement, positionAt, retime, travelTurns } from '../core/fleet/Fleet';
 import { catchUpTicks, formatDuration } from '../core/time/WorldTime';
 import { capacity, clampStores, exploreCost, firepower, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
 import { adjustShips, countOf, dockedShips, FleetOrders, hasShips, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
@@ -18,7 +18,7 @@ import { due, enqueue, Job } from '../core/construction/Construction';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
 import { planetsOf, Planet } from '../core/galaxy/Planets';
-import { Hex, hexDistance, hexEquals } from '../core/hex/Hex';
+import { Hex, hexDistance, hexEquals, hexToWorld, Point2, worldToHex } from '../core/hex/Hex';
 import { hashSeed } from '../core/rng/Rng';
 import type { TechTree } from '../core/research/TechTree';
 import { normalizeDesign, ShipDesign } from '../core/ships/ShipDesign';
@@ -304,6 +304,17 @@ export class EmpireSim {
     this.dispatch(`${label} departs for ${to.name} (${formatDuration(travelTurns(hexDistance(s.home.hex, to.hex), speed), CLOCK)})`);
   }
 
+  /**
+   * The current time in turns. Whole turns here; a live client adds the fraction of the
+   * year that has passed, so orders given between ticks take effect from that moment.
+   */
+  protected now(): number {
+    return this.state.turn;
+  }
+
+  /** Where a hex is on the galaxy plane: its star, or the hex centre in empty space. */
+  pointOf = (h: Hex): Point2 => this.deps.galaxy.starAt(h)?.position ?? hexToWorld(h);
+
   moveFleet(fleetId: string, to: StarSystem, quiet = false): void {
     this.moveFleetToHex(fleetId, to.hex, to.name, quiet);
   }
@@ -314,10 +325,13 @@ export class EmpireSim {
     const f = s.fleets.find((x) => x.id === fleetId);
     const l = s.loadouts[fleetId];
     if (!f || !l) return;
-    const from = hexAt(f.movement, s.turn);
-    if (hexEquals(from, to)) return;
+    // Set off from exactly where the fleet is now, mid-hex and mid-year, so it never jumps.
+    const time = Math.max(s.turn, this.now());
+    const at = positionAt(f.movement, time, this.pointOf);
+    const from = worldToHex(at.x, at.z);
+    if (hexEquals(from, to) && hexEquals(hexAt(f.movement, s.turn), to)) return;
     const speed = this.fleetSpeed();
-    const moved = { ...f, movement: planMovement(from, to, s.turn, speed) };
+    const moved = { ...f, movement: planMovement(from, to, time, speed, at) };
     this.deps.store.update({ fleets: s.fleets.map((x) => (x.id === fleetId ? moved : x)) });
     if (!quiet) this.dispatch(`${f.name} sets course for ${label} (${formatDuration(travelTurns(hexDistance(from, to), speed), CLOCK)})`);
   }

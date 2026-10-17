@@ -12,7 +12,7 @@ describe('fleet presence', () => {
 
   it('docks whatever is not deployed', () => {
     const roster = { cutter: 4, frigate: 6 };
-    expect(dockedShips(roster, [{ ships: [{ classId: 'cutter', count: 2 }], supply: 0, ammo: 0 }])).toEqual([
+    expect(dockedShips(roster, [{ ships: [{ classId: 'cutter', count: 2 }], supply: 0 }])).toEqual([
       { classId: 'cutter', count: 2 }, { classId: 'frigate', count: 6 },
     ]);
   });

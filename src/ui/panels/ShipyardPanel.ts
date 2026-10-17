@@ -172,7 +172,7 @@ export class ShipyardPanel extends Drawer {
         stat('Hull', c.hull), stat('Attack', c.attack),
         c.troops ? stat('Troops', c.troops) : null,
         c.mines ? stat('Mines', `+${3} ${RESOURCES.find((r) => r.id === c.mines)!.short}/yr`) : null,
-        stat('Supply', logisticsOf(c).supply), logisticsOf(c).ammo ? stat('Ammo', `${logisticsOf(c).ammo} (${logisticsOf(c).ammoUse}/battle)`) : null),
+        stat('Supply', logisticsOf(c).supply)),
       c.doctrine !== 'civilian' && c.doctrine !== 'support' ? h('p', { class: 'small matchup' }, h('b', {}, 'Strong vs '), doc.strong, h('b', {}, '  ·  Weak vs '), doc.weak) : '',
       h('div', { class: 'build-row' },
         h('div', { class: 'costs' }, ...costRow, discount ? h('span', { class: 'muted small' }, `−${discount}% from research`) : null),

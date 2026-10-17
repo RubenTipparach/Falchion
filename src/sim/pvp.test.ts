@@ -32,7 +32,7 @@ function empireWith(id: string, ships: Squadron[], hex: Hex, opts: { stance?: 'a
   delete save.tab;
   const fleetId = `strike-${id.slice(-2)}`;
   save.fleets.push({ ...save.fleets[0], id: fleetId, name: `Strike ${id.slice(-2)}`, movement: planMovement(hex, hex, opts.departs ?? 0, 1) });
-  save.loadouts[fleetId] = { ships, supply: 50, ammo: 50, ...(opts.stance ? { orders: { stance: opts.stance } } : {}) };
+  save.loadouts[fleetId] = { ships, supply: 50, ...(opts.stance ? { orders: { stance: opts.stance } } : {}) };
   for (const x of ships) save.economy.roster[x.classId] = (save.economy.roster[x.classId] ?? 0) + x.count;
   return save;
 }
@@ -343,5 +343,54 @@ describe('finding contacts in the stored public views', () => {
     expect(findContacts([{ id: A, public: { fleets: [fleet('x', HERE, true)] } }, { id: B, public: { fleets: [fleet('y', HERE, true)] } }], T, WAR)).toEqual([]);
     expect(findContacts([{ id: A, public: { fleets: [fleet('x', HERE, true, 'aggressive'), fleet('w', HERE, true)] } }], T, WAR)).toEqual([]);
     expect(findContacts([{ id: A, public: { fleets: [fleet('x', HERE, true, 'aggressive')] } }, { id: B, public: { fleets: [fleet('y', HERE, true, undefined, T + 2)] } }], T, WAR)).toEqual([]);
+  });
+});
+
+describe('damage carries over, Menders and friendly systems repair it', () => {
+  const lancers: Squadron[] = [{ classId: 'lancer', count: 6 }];
+  const hullOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)!.hull;
+
+  it('a round leaves damage on the survivors, and the next round starts from it', () => {
+    const a = empireWith(A, lancers, HERE, { stance: 'aggressive' });
+    const b = empireWith(B, interceptors(8), HERE);
+    const r = meet(a, b)!;
+    const carried = [loadoutOf(r.saveA, A)?.damage, loadoutOf(r.saveB, B)?.damage].filter(Boolean);
+    expect(carried.length).toBeGreaterThan(0);
+    for (const d of carried) for (const [id, v] of Object.entries(d as Record<string, number>)) expect(v).toBeLessThan(hullOf(id));
+  });
+
+  it('Menders patch their fleet between rounds', () => {
+    const plain = resolveRound({ name: 'A', ships: lancers, damage: { lancer: 30 } }, { name: 'B', ships: [{ classId: 'flak-picket', count: 1 }] }, SHIP_CLASSES, 3, 1);
+    const mended = resolveRound({ name: 'A', ships: [...lancers, { classId: 'repair-tender', count: 2 }], damage: { lancer: 30 } }, { name: 'B', ships: [{ classId: 'flak-picket', count: 1 }] }, SHIP_CLASSES, 3, 1);
+    expect(mended.damage[0].lancer ?? 0).toBeLessThan(plain.damage[0].lancer ?? 0);
+  });
+
+  it('repairs fully at a shipyard world, not at all in deep space', () => {
+    const at = (hex: Hex) => {
+      const s = empireWith(A, lancers, hex);
+      s.loadouts[fid(A)] = { ...s.loadouts[fid(A)], damage: { lancer: 40 } };
+      return advanceSave(s, player(A), T + 1)!.save as Record<string, any>;
+    };
+    const home = empireWith(A, [], HERE).home.hex;
+    expect(at(home).loadouts[fid(A)].damage).toBeUndefined();
+    expect(at(HERE).loadouts[fid(A)].damage).toEqual({ lancer: 40 });
+  });
+
+  it('repairs slowly at an outpost (a supply depot): 15 hull points a year', () => {
+    const star = galaxy.nearestStar({ q: 40, r: -20 })!;
+    const s = empireWith(A, lancers, star.hex);
+    s.depots = [star.id];
+    s.loadouts[fid(A)] = { ...s.loadouts[fid(A)], damage: { lancer: 40 } };
+    const next = advanceSave(s, player(A), T + 1)!.save as Record<string, any>;
+    expect(next.loadouts[fid(A)].damage).toEqual({ lancer: 25 });
+  });
+
+  it('old saves lose their ammunition', () => {
+    const s = empireWith(A, lancers, HERE);
+    s.loadouts[fid(A)] = { ...s.loadouts[fid(A)], ammo: 12 };
+    s.dockSpent = { supply: 0, ammo: 3 };
+    const next = advanceSave(s, player(A), T + 1)!.save as Record<string, any>;
+    expect('ammo' in next.loadouts[fid(A)]).toBe(false);
+    expect('ammo' in next.dockSpent).toBe(false);
   });
 });

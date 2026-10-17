@@ -1,4 +1,5 @@
-import type { AssaultResult, BattleResult, PlanetTarget, Squadron } from '../core/combat/Combat';
+import type { AssaultResult, BattleResult, Damage, PlanetTarget, Squadron } from '../core/combat/Combat';
+import type { RepairSite } from '../content/logistics';
 import type { Planet } from '../core/galaxy/Planets';
 import type { Collected, Haul } from '../core/encounters/PlanetCache';
 import type { StarSystem } from '../core/galaxy/GalaxyModel';
@@ -24,6 +25,11 @@ export interface FleetGroup {
   readonly ships: readonly Squadron[];
   readonly stores: Stores;
   readonly capacity: Capacity;
+  /** Damage its ships carry (hull points per class), and its hull integrity 0..1. */
+  readonly damage?: Damage;
+  readonly hull?: number;
+  /** Where it is, it repairs: 'shipyard' fully, 'colony' fast, 'depot' or 'ally' slowly. */
+  readonly repair?: RepairSite | null;
   /** Star the group is at or heading to. */
   readonly star: StarSystem | null;
   /** On station (arrived), so it can act there. */
@@ -42,7 +48,7 @@ export interface FleetGroup {
 /** What the fleet card shows about any fleet, yours or not. */
 export interface FleetInfo {
   readonly fleet: FleetView;
-  /** Your group (ships, supply, ammunition, orders); null for other empires' fleets. */
+  /** Your group (ships, supply, damage, orders); null for other empires' fleets. */
   readonly group: FleetGroup | null;
   /** Star it is on station at, if any. */
   readonly at: StarSystem | null;

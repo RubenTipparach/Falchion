@@ -78,7 +78,7 @@ export class StarInfoPanel {
         })() : [])),
       this.fieldsView(star),
       here.length ? h('div', { class: 'here' }, h('span', { class: 'eyebrow' }, 'On station'), ...here.map((g) => h('div', { class: 'here-group' }, h('b', {}, g.name), h('div', { class: 'small muted' }, shipsText(g.ships)), storesView(g)))) : '',
-      friendly && !isHome ? h('p', { class: 'small green' }, 'Friendly system: fleets here resupply and rearm.') : '',
+      friendly && !isHome ? h('p', { class: 'small green' }, 'Friendly system: fleets here resupply and repair.') : '',
       h('div', { class: 'planet-row' }, ...d.planets.map((p) => {
         const biome = BIOMES.find((b) => b.id === p.biome);
         const done = s.explored[p.id];

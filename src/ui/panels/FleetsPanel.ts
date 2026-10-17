@@ -16,12 +16,12 @@ import { locateButton, shipsText, storesView } from '../widgets';
 
 const classOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)!;
 
-/** Every group of ships: where it is, its supply and ammunition, and orders. */
+/** Every group of ships: where it is, its supply and hull, and orders. */
 export class FleetsPanel extends Drawer {
   private picked: Record<string, number> = {};
 
   constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries) {
-    super('fleets', 'Fleets', 'Ships act only where they are. Supply is spent exploring, ammunition in battle; both refill in friendly systems, and ammunition slowly regenerates away from home.');
+    super('fleets', 'Fleets', 'Ships act only where they are. Supply is spent exploring and refills in friendly systems. Damage stays with your ships until they repair: fully at a shipyard world, faster at a colony than at an outpost, and Menders patch it anywhere.', true);
     store.subscribe((s, prev) => {
       if (this.opened && (s.fleets !== prev.fleets || s.loadouts !== prev.loadouts || s.turn !== prev.turn || s.selected !== prev.selected || s.economy.roster !== prev.economy.roster || s.dockSpent !== prev.dockSpent || s.construction !== prev.construction)) this.render();
     });
@@ -53,7 +53,7 @@ export class FleetsPanel extends Drawer {
     const atHome = g.stationed && g.star?.id === s.home.id;
     return h('section', { class: 'group-card' },
       h('header', {}, icon('fleet'), h('h4', {}, g.name),
-        g.friendly ? h('span', { class: 'tag good', title: 'Refills supply and ammunition every year' }, 'RESUPPLYING') : null,
+        g.friendly ? h('span', { class: 'tag good', title: (g.hull ?? 1) < 1 ? 'Refills supply and repairs every year' : 'Refills supply every year' }, (g.hull ?? 1) < 1 ? 'REPAIRING' : 'RESUPPLYING') : null,
         locateButton(`Locate ${g.name}`, (closeUp) => this.actions.focusFleet(g.id, closeUp))),
       h('div', { class: 'where' }, this.where(g)),
       h('div', { class: 'small' }, shipsText(g.ships)),
@@ -81,7 +81,7 @@ export class FleetsPanel extends Drawer {
     const updatePreview = () => {
       clear(preview);
       const c = capacity(chosen(), specOf);
-      preview.append(h('div', { class: 'small muted' }, chosen().length ? `New fleet carries ${c.supply} supply${c.ammo ? ` and ${c.ammo} ammunition` : ''}.` : 'Pick ships to launch.'));
+      preview.append(h('div', { class: 'small muted' }, chosen().length ? `New fleet carries ${c.supply} supply.` : 'Pick ships to launch.'));
     };
     const preset = (label: string, pick: (id: string) => boolean) => h('button', { class: 'chip', onclick: () => { this.picked = Object.fromEntries(ships.filter((x) => pick(x.classId)).map((x) => [x.classId, x.count])); this.render(); } }, label);
     const sliders = ships.map((x) => {

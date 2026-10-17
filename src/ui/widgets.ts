@@ -24,12 +24,17 @@ export function locateButton(title: string, go: (closeUp: boolean) => void): HTM
     ondblclick: (e: Event) => { e.stopPropagation(); go(true); } }, icon('locate'));
 }
 
-/** Supply and ammunition gauges for a group. */
-export function storesView(g: Pick<FleetGroup, 'stores' | 'capacity'>): HTMLElement {
-  const bar = (kind: 'supply' | 'ammo', have: number, max: number) =>
-    h('div', { class: `gauge ${kind} ${max && have / max < 0.25 ? 'low' : ''}`, title: `${kind === 'supply' ? 'Supply (spent exploring)' : 'Ammunition (spent in battle)'}: ${have} of ${max}` },
-      icon(kind), h('span', { class: 'track' }, h('i', { style: `width:${max ? (have / max) * 100 : 0}%` })), h('span', { class: 'mono' }, `${have}/${max}`));
-  return h('div', { class: 'gauges' }, bar('supply', g.stores.supply, g.capacity.supply), g.capacity.ammo ? bar('ammo', g.stores.ammo, g.capacity.ammo) : null);
+const REPAIR_TEXT = { shipyard: 'repairs fully each year at the shipyard', colony: 'repairing at the colony', depot: 'repairing slowly at the outpost', ally: "repairing slowly at an ally's world" } as const;
+
+/** Supply and hull gauges for a group: supply is spent exploring, hull is lost in battle and repaired in friendly systems. */
+export function storesView(g: Pick<FleetGroup, 'stores' | 'capacity' | 'hull' | 'repair'>): HTMLElement {
+  const supply = g.stores.supply, max = g.capacity.supply;
+  const hull = Math.round((g.hull ?? 1) * 100);
+  return h('div', { class: 'gauges' },
+    h('div', { class: `gauge supply ${max && supply / max < 0.25 ? 'low' : ''}`, title: `Supply (spent exploring): ${supply} of ${max}` },
+      icon('supply'), h('span', { class: 'track' }, h('i', { style: `width:${max ? (supply / max) * 100 : 0}%` })), h('span', { class: 'mono' }, `${supply}/${max}`)),
+    h('div', { class: `gauge hull ${hull < 30 ? 'low' : hull < 60 ? 'mid' : ''}`, title: `Hull integrity: ${hull}%${hull < 100 && g.repair ? `, ${REPAIR_TEXT[g.repair]}` : hull < 100 ? '. Repairs in a friendly system (Menders patch it anywhere)' : ''}` },
+      icon('hull'), h('span', { class: 'track' }, h('i', { style: `width:${hull}%` })), h('span', { class: 'mono' }, `${hull}%`)));
 }
 
 export function shipsText(ships: readonly Squadron[]): string {

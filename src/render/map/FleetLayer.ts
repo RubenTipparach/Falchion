@@ -64,7 +64,7 @@ export interface FleetView {
   readonly color: string;
   readonly movement: FleetMovement;
   readonly design: ShipDesign;
-  /** Extra label line, e.g. supply and ammunition. */
+  /** Extra label line, e.g. supply and hull. */
   readonly status?: string;
 }
 

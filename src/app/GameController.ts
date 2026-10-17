@@ -154,7 +154,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     this.view.fleets.setFleets(this.fleetViews());
   }
 
-  /** Map fleets with a supply/ammunition line for the player's own. */
+  /** Map fleets with a supply and hull line for the player's own. */
   private fleetViews(): FleetView[] {
     const s = this.state;
     return [...this.others, ...this.npcFleets, ...s.fleets.map((f): FleetView => {
@@ -162,7 +162,8 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
       if (!l) return f;
       const cap = capacity(l.ships, specOf);
       const parts = [`Supply ${l.supply}/${cap.supply}`];
-      if (cap.ammo) parts.push(`Ammo ${l.ammo}/${cap.ammo}`);
+      const hull = this.hullOf(l.ships, l.damage);
+      if (hull < 1) parts.push(`Hull ${Math.round(hull * 100)}%`);
       return { ...f, status: parts.join(' · ') };
     })];
   }
@@ -329,7 +330,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
       at: isStationed(m, s.turn) ? this.deps.galaxy.starAt(hexAt(m, s.turn)) : null,
       dest: this.deps.galaxy.starAt(m.route[m.route.length - 1]),
       eta: Math.max(0, arrivalTurn(m) - s.turn),
-      // Your own deployed fleets are the ones with a loadout (ships, supply, ammunition).
+      // Your own deployed fleets are the ones with a loadout (ships, supply, damage).
       mine: !!s.loadouts[fleetId] && s.fleets.some((f) => f.id === fleetId),
       plan: this.surveyPlan(fleetId),
       surveying: this.surveyTarget(fleetId),

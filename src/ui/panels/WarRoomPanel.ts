@@ -7,8 +7,6 @@ import { tierOf } from '../../core/npc/Reputation';
 import { Drawer } from '../Drawer';
 import type { CombatOutcome, FleetGroup, GameActions, GameQueries, WarTarget } from '../GameActions';
 import { locateButton, storesView } from '../widgets';
-import { firepower } from '../../core/fleet/Logistics';
-import { specOf } from '../../content/logistics';
 import { clear, h } from '../dom';
 
 const nameOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)?.name ?? id;
@@ -24,7 +22,7 @@ export class WarRoomPanel extends Drawer {
   private readonly right = h('div', { class: 'war-right' });
 
   constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries) {
-    super('war', 'War Room', 'Combat is automated and deterministic, and only ships on station at the target can fight. Ammunition sets firepower: rearm in a friendly system.', true);
+    super('war', 'War Room', 'Combat is automated and deterministic, and only ships on station at the target can fight. Damage stays with your ships: repair in a friendly system.', true);
     this.body.append(h('div', { class: 'war' }, this.left, this.right));
     store.subscribe((s, prev) => {
       if (!this.opened) return;
@@ -84,13 +82,12 @@ export class WarRoomPanel extends Drawer {
     const here = this.groupsHere();
     const roster: Record<string, number> = Object.fromEntries((group?.ships ?? []).map((x) => [x.classId, x.count]));
     const warships = SHIP_CLASSES.filter((c) => (c.role === 'combat' || c.role === 'capital') && roster[c.id]);
-    const commit = () => Object.entries(this.committed).filter(([, n]) => n > 0).map(([classId, count]) => ({ classId, count }));
     const fireNote = h('p', { class: 'small muted' });
     const updateFire = () => {
       if (!group) return;
-      const f = firepower(group.stores.ammo, commit(), specOf);
-      fireNote.textContent = `Firepower ${Math.round(f.factor * 100)}% · this battle uses ${f.spent} ammunition`;
-      fireNote.className = `small ${f.factor < 1 ? 'red' : 'muted'}`;
+      const hull = Math.round((group.hull ?? 1) * 100);
+      fireNote.textContent = hull < 100 ? `Hull ${hull}%: damaged ships go in damaged. Repair in a friendly system first.` : 'Hull 100%: the strike group goes in undamaged.';
+      fireNote.className = `small ${hull < 60 ? 'red' : 'muted'}`;
     };
     this.left.append(
       h('h4', {}, 'Target'),

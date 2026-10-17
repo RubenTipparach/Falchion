@@ -35,9 +35,9 @@ export interface GameState {
   /** Planet ids whose one-time resource cache has been collected. */
   readonly collectedCaches: readonly string[];
   readonly fleets: readonly FleetView[];
-  /** Ships, supply and ammunition of each of the player's deployed fleets (by fleet id). */
+  /** Ships, supply and damage of each of the player's deployed fleets (by fleet id). */
   readonly loadouts: Readonly<Record<string, Loadout>>;
-  /** Supply and ammunition the home dock has used this turn (it refills every turn). */
+  /** Supply the home dock has used this turn (it refills every turn). */
   readonly dockSpent: Stores;
   /** Ships and buildings under construction. */
   readonly construction: readonly Job[];

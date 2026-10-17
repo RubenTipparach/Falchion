@@ -30,7 +30,7 @@ export const ICONS = {
   empire: svg('<path d="M3 20h18"/><path d="M5 20V10M9.7 20V10M14.3 20V10M19 20V10"/><path d="M3 10l9-6 9 6z"/>'),
   locate: svg('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>'),
   supply: svg('<rect x="4" y="7" width="16" height="12" rx="1.5"/><path d="M9 7V5h6v2M4 12h16"/>'),
-  ammo: svg('<path d="M7 20V9l2-4 2 4v11zM13 20V9l2-4 2 4v11z"/>'),
+  hull: svg('<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/>'),
   home: svg('<path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/>'),
   land: svg('<path d="M12 3v10"/><path d="M8 9.5l4 4 4-4"/><path d="M3 20c3-2.6 6-3.4 9-3.4s6 .8 9 3.4"/>'),
   build: svg('<path d="M4 20h16"/><path d="M6 20V9l6-5 6 5v11"/><path d="M10 20v-6h4v6"/>'),

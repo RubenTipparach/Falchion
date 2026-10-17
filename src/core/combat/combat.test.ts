@@ -20,11 +20,15 @@ describe('combat', () => {
     if (late) expect(late.damage[1]).toBeGreaterThan(late.damage[0] * 0.8);
   });
 
-  it('fights weaker without ammunition', () => {
+  it('damage carries in and out of a battle: a battered fleet does worse', () => {
     const me = { name: 'Me', ships: [{ classId: 'lancer', count: 6 }] };
-    const full = resolveBattle(me, raiders, SHIP_CLASSES, 7);
-    const dry = resolveBattle({ ...me, firepower: 0.15 }, raiders, SHIP_CLASSES, 7);
-    expect(dry.rounds[0].damage[0]).toBeLessThan(full.rounds[0].damage[0] * 0.3);
+    const fresh = resolveBattle(me, raiders, SHIP_CLASSES, 7);
+    const lancerHull = SHIP_CLASSES.find((c) => c.id === 'lancer')!.hull;
+    const battered = resolveBattle({ ...me, damage: { lancer: lancerHull - 2 } }, raiders, SHIP_CLASSES, 7);
+    const left = (r: typeof fresh) => r.survivors[0].reduce((n, x) => n + x.count, 0);
+    expect(left(battered)).toBeLessThanOrEqual(left(fresh));
+    // What the survivors carry out never kills a ship by itself.
+    for (const [id, d] of Object.entries(fresh.damage[0])) expect(d).toBeLessThan(SHIP_CLASSES.find((c) => c.id === id)!.hull);
   });
 
   it('suppression blunts barrage', () => {

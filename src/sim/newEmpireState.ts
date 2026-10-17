@@ -62,9 +62,9 @@ export function newEmpireState({ galaxy, tree, world, playerName, t0 }: NewEmpir
     },
     designs: { prospector: { ...houseDesign, name: 'Prospector Skiff', style: 'utilitarian', seed: 4, length: 0.8, bulk: 0.8, engines: 2, weapons: 0 } },
     shipyardClass: 'prospector', hiddenTraits: [], home: world.home,
-    selected: null, selectedFleet: null, selectedPlanet: null, explored: {}, openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0, ammo: 0 }, depots: [], construction: [], playerName: playerName,
+    selected: null, selectedFleet: null, selectedPlanet: null, explored: {}, openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0 }, depots: [], construction: [], playerName: playerName,
     lastReport: null, engaged: [], identity: null,
-    dispatches: [{ turn: t0, text: 'Welcome, Commander. One year passes every minute. Survey Group Alpha is on station nearby: explore its planets and collect what you find. Ships need supply to explore and ammunition to fight; both refill in friendly systems.' }],
+    dispatches: [{ turn: t0, text: 'Welcome, Commander. One year passes every minute. Survey Group Alpha is on station nearby: explore its planets and collect what you find. Ships need supply to explore, which refills in friendly systems, where damaged ships also repair.' }],
   };
 }
 

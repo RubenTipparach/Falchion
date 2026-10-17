@@ -1,4 +1,4 @@
-import type { Squadron } from '../combat/Combat';
+import type { Squadron, Damage } from '../combat/Combat';
 import { arrivalTurn, type FleetMovement } from './Fleet';
 import type { Stores } from './Logistics';
 
@@ -28,9 +28,11 @@ export interface ForeignFleet {
   readonly movement: FleetMovement;
 }
 
-/** A deployed group of ships with its own supply and ammunition. */
+/** A deployed group of ships with its own supply, and the damage its ships carry. */
 export interface Loadout extends Stores {
   readonly ships: readonly Squadron[];
+  /** Damage its ships carry from earlier fights (hull points per class); repaired in friendly systems. */
+  readonly damage?: Damage;
   readonly orders?: FleetOrders;
   /** Trade goods aboard, and the system they were loaded at (their price grows with distance from it). */
   readonly cargo?: number;

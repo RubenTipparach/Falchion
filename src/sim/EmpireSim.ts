@@ -1,8 +1,8 @@
 import { RESOURCES, Resource } from '../content/resources';
 import { BUILDINGS, slotsOf } from '../content/buildings';
-import { buildYears, hasWarships, isSurveyClass, isWarship, specOf, warshipsOf } from '../content/logistics';
+import { buildYears, hasWarships, isSurveyClass, isWarship, REPAIR, specOf, warshipsOf, type RepairSite } from '../content/logistics';
 import { SHIP_CLASSES, ShipClassDef } from '../content/shipClasses';
-import { BattleResult, CombatBonuses, resolveAssault, resolveBattle, Side, Squadron } from '../core/combat/Combat';
+import { BattleResult, CombatBonuses, Damage, menderRepair, repairDamage, resolveAssault, resolveBattle, Side, Squadron } from '../core/combat/Combat';
 import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf } from '../core/economy/Economy';
 import { cargoCapacity, FREIGHTER, saleValue, type Market } from '../core/economy/Trade';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
@@ -11,7 +11,7 @@ import type { Card } from '../core/encounters/types';
 import type { ActivityPlace, ReportKind } from '../core/social/Activity';
 import { arrivalTurn, hexAt, planMovement, positionAt, retime, travelTurns } from '../core/fleet/Fleet';
 import { catchUpTicks, formatDuration } from '../core/time/WorldTime';
-import { capacity, clampStores, exploreCost, firepower, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
+import { capacity, clampStores, exploreCost, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
 import { adjustShips, countOf, dockedShips, Encounter, FleetBattle, FleetOrders, ForeignFleet, inBattle, hasShips, isAggressive, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
 import { planSurvey } from '../core/fleet/Survey';
 import { minedBy, nearestMine, stockFor } from '../core/fleet/AutoMine';
@@ -106,8 +106,6 @@ export interface ContactForce extends Encounter {
   readonly star: StarSystem | null;
   /** The ships that fight: the warships, or the whole fleet when it has none. */
   readonly ships: readonly Squadron[];
-  /** Ammunition the fleet fires in this round. */
-  readonly spent: number;
   /** The battle it is already in, if any (its round count). */
   readonly battle?: FleetBattle;
   /** Light years a year it travels: a faster enemy can run it down when it breaks off. */
@@ -297,7 +295,7 @@ export class EmpireSim {
   protected dockStores(ships = this.docked()): Stores {
     const full = fullStores(ships, specOf);
     const spent = this.state.dockSpent;
-    return { supply: Math.max(0, full.supply - spent.supply), ammo: Math.max(0, full.ammo - spent.ammo) };
+    return { supply: Math.max(0, full.supply - spent.supply) };
   }
 
   groups = (): FleetGroup[] => {
@@ -310,7 +308,8 @@ export class EmpireSim {
       const dest = f.movement.route[f.movement.route.length - 1];
       const stationed = isStationed(f.movement, s.turn);
       out.push({
-        id: f.id, name: f.name, ships: l.ships, stores: { supply: l.supply, ammo: l.ammo }, capacity: capacity(l.ships, specOf),
+        id: f.id, name: f.name, ships: l.ships, stores: { supply: l.supply }, capacity: capacity(l.ships, specOf),
+        damage: l.damage, hull: this.hullOf(l.ships, l.damage), repair: stationed ? this.repairSite(dest) : null,
         star: this.deps.galaxy.starAt(dest), stationed, eta: Math.max(0, arrivalTurn(f.movement) - s.turn), friendly: stationed && this.isFriendlyHex(dest), orders: l.orders,
         cargo: l.cargo, cargoFrom: l.cargoFrom, battle: inBattle(l.battle, s.turn) ? l.battle : undefined,
       });
@@ -542,8 +541,11 @@ export class EmpireSim {
     this.dispatch(`${f.name} docks at ${s.home.name}`);
   }
 
-  /** Change a group's ships (and the empire roster); empty fleets disband. */
-  protected adjustGroup(groupId: string, delta: Squadron[], stores?: Partial<Stores>): void {
+  /**
+   * Change a group's ships (and the empire roster); empty fleets disband. `damage` replaces the
+   * damage its ships carry (after a fight); otherwise classes it no longer has drop theirs.
+   */
+  protected adjustGroup(groupId: string, delta: Squadron[], stores?: Partial<Stores>, damage?: Damage): void {
     const s = this.state;
     const roster = { ...s.economy.roster };
     for (const d of delta) roster[d.classId] = Math.max(0, (roster[d.classId] ?? 0) + d.count);
@@ -552,7 +554,6 @@ export class EmpireSim {
       if (stores) {
         const full = fullStores(dockedShips(roster, Object.values(s.loadouts)), specOf);
         if (stores.supply !== undefined) spent.supply = Math.max(0, full.supply - stores.supply);
-        if (stores.ammo !== undefined) spent.ammo = Math.max(0, full.ammo - stores.ammo);
       }
       this.deps.store.update({ economy: { ...s.economy, roster }, dockSpent: spent, empire: { ...s.empire, fleetPower: this.fleetPower(roster) } });
       return;
@@ -565,8 +566,39 @@ export class EmpireSim {
       this.deps.store.update({ economy: { ...s.economy, roster }, loadouts, fleets: s.fleets.filter((f) => f.id !== groupId), empire: { ...s.empire, fleetPower: this.fleetPower(roster) } });
       return;
     }
-    const next = clampStores(rescaleStores({ supply: stores?.supply ?? l.supply, ammo: stores?.ammo ?? l.ammo }, l.ships, ships, specOf), ships, specOf);
-    this.deps.store.update({ economy: { ...s.economy, roster }, loadouts: { ...s.loadouts, [groupId]: { ...l, ships, ...next } }, empire: { ...s.empire, fleetPower: this.fleetPower(roster) } });
+    const next = clampStores(rescaleStores({ supply: stores?.supply ?? l.supply }, l.ships, ships, specOf), ships, specOf);
+    const carried = Object.fromEntries(Object.entries(damage ?? l.damage ?? {}).filter(([id, d]) => d > 0 && countOf(ships, id) > 0));
+    const { damage: _old, ...rest } = l;
+    this.deps.store.update({ economy: { ...s.economy, roster }, loadouts: { ...s.loadouts, [groupId]: { ...rest, ships, ...next, ...(Object.keys(carried).length ? { damage: carried } : {}) } }, empire: { ...s.empire, fleetPower: this.fleetPower(roster) } });
+  }
+
+  /** Hull integrity of a group, 0..1: how much of its ships' hull its damage has not taken. */
+  hullOf(ships: readonly Squadron[], damage: Damage | undefined): number {
+    if (!damage) return 1;
+    let total = 0, lost = 0;
+    for (const x of ships) {
+      const hull = this.classById.get(x.classId)?.hull ?? 0;
+      total += hull * x.count;
+      lost += Math.min(hull * x.count, damage[x.classId] ?? 0);
+    }
+    return total > 0 ? 1 - lost / total : 1;
+  }
+
+  /**
+   * What repairs a fleet on station at `h`: a colony with an Orbital Shipyard (and home) fully,
+   * another colony quickly, a supply depot, an ally's world or the edge of our territory slowly.
+   */
+  repairSite(h: Hex): RepairSite | null {
+    if (!this.isFriendlyHex(h)) return null;
+    const star = this.deps.galaxy.starAt(h);
+    if (star) {
+      if (hexEquals(star.hex, this.state.home.hex)) return 'shipyard';
+      const here = this.state.economy.colonies.filter((c) => c.starId === star.id);
+      if (here.some((c) => c.capital || (c.buildings ?? []).includes('shipyard'))) return 'shipyard';
+      if (here.length) return 'colony';
+      if (this.state.depots.includes(star.id)) return 'depot';
+    }
+    return this.allies().some((e) => [e.home, ...e.colonies].some((c) => !!c && hexEquals(c, h))) ? 'ally' : 'depot';
   }
 
   // ── Commands: exploration ──────────────────────────────────────────
@@ -801,7 +833,7 @@ export class EmpireSim {
     if (!canAfford(s.empire.materials, cost)) return this.dispatch('A supply depot costs 60 credits and 40 metals', 'bad');
     this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, cost) }, depots: [...s.depots, star.id] });
     this.adjustGroup(g.id, [{ classId: 'construction-tender', count: -1 }]);
-    this.dispatch(`Supply depot built at ${star.name}: fleets there resupply and rearm`, 'good');
+    this.dispatch(`Supply depot built at ${star.name}: fleets there resupply and repair, slowly`, 'good');
     this.deps.report?.('depot', `built a supply depot at ${star.name}`, placeOf(star));
   }
 
@@ -1184,9 +1216,7 @@ export class EmpireSim {
     const at = target.star;
     const group = this.groupsAt(at).find((g) => g.id === groupId);
     if (!group || !hasShips(group.ships, committed)) return null;
-    // Ammunition decides how hard the strike group can hit.
-    const fire = firepower(group.stores.ammo, committed, specOf);
-    const me = { name: s.playerName, ships: committed, bonuses: this.combatBonuses(), firepower: fire.factor };
+    const me = { name: s.playerName, ships: committed, bonuses: this.combatBonuses(), damage: group.damage };
     const seed = hashSeed(this.deps.galaxy.params.seed, s.turn, targetId);
     const delta: Squadron[] = [];
     let research = s.empire.research;
@@ -1218,14 +1248,13 @@ export class EmpireSim {
       const pool = target.tech.filter((id) => !research.researched.includes(id));
       for (const id of pool.slice(0, 2)) research = this.deps.tree.grantShards(research, id, 'reverse-engineering', 40);
     }
-    let summary = result.captured ? `${target.name} captured from the ${target.owner}: a new colony and alien tech fragments`
+    const summary = result.captured ? `${target.name} captured from the ${target.owner}: a new colony and alien tech fragments`
       : result.phaseReached === 'space' ? `Assault on ${target.name} failed in orbit`
       : result.phaseReached === 'bombardment' ? `Bombardment of ${target.name} could not break its defences: bring siege ships`
       : `Landing on ${target.name} repelled: ${result.troopsLanded} troops vs ${result.troopsNeeded} needed`;
-    if (fire.factor < 1) summary = `${summary} (fought at ${Math.round(fire.factor * 100)}% firepower: low ammunition)`;
     const outcome: CombatOutcome = { kind: 'planet', result, summary };
     this.deps.store.update({ empire: { ...s.empire, research }, engaged: [...s.engaged, targetId], economy: { ...s.economy, colonies } });
-    this.adjustGroup(groupId, delta, { ammo: group.stores.ammo - fire.spent });
+    this.adjustGroup(groupId, delta, undefined, result.damage);
     this.emit(effects);
     this.dispatch(outcome.summary, result.captured ? 'good' : 'bad');
     this.deps.report?.('battle', `${outcome.summary} at ${at.name}`, placeOf(at));
@@ -1236,7 +1265,7 @@ export class EmpireSim {
 
   /**
    * This fleet as it meets another at sea on `turn`: its warships (the whole fleet when it has
-   * none), its research bonuses and its ammunition. Null when it is not on station.
+   * none), its research bonuses and the damage it carries. Null when it is not on station.
    */
   contactForce(fleetId: string, turn: number, underway = false): ContactForce | null {
     const s = this.state;
@@ -1246,26 +1275,25 @@ export class EmpireSim {
     if (!f || !l || (!underway && !isStationed(f.movement, turn))) return null;
     const warships = warshipsOf(l.ships);
     const ships = warships.length ? warships : l.ships.filter((x) => x.count > 0);
-    const fire = firepower(l.ammo, ships, specOf);
     const at = hexAt(f.movement, turn);
     const empire = s.identity?.name ?? s.playerName;
     return {
-      fleetId, fleetName: f.name, empire, at, star: this.deps.galaxy.starAt(at), ships, spent: fire.spent, battle: l.battle, speed: f.movement.speed,
+      fleetId, fleetName: f.name, empire, at, star: this.deps.galaxy.starAt(at), ships, battle: l.battle, speed: f.movement.speed,
       aggressive: isAggressive(l.orders), armed: warships.length > 0,
-      side: { name: empire, ships, bonuses: this.combatBonuses(), firepower: fire.factor },
+      side: { name: empire, ships, bonuses: this.combatBonuses(), damage: l.damage },
     };
   }
 
   /**
    * Record one round of a battle at sea in this empire's own save: the ships its fleet lost (and
-   * any it took), the ammunition it fired, the battle it is now in, and the news. `index` is its
+   * any it took), the damage it carries out, the battle it is now in, and the news. `index` is its
    * side in the round; `foe` is the other fleet as it went in.
    */
   applyContact(force: ContactForce, foe: ContactFoe, result: BattleResult, index: 0 | 1, round: number, tick: number, overtaken = false): void {
     const other = index === 0 ? 1 : 0;
     const delta: Squadron[] = force.ships.map((x) => ({ classId: x.classId, count: -(x.count - countOf(result.survivors[index], x.classId)) }));
     for (const c of result.captured[index]) delta.push({ classId: c.classId, count: c.count });
-    this.adjustGroup(force.fleetId, delta, { ammo: (this.state.loadouts[force.fleetId]?.ammo ?? 0) - force.spent });
+    this.adjustGroup(force.fleetId, delta, undefined, result.damage[index]);
     const mine = shipTotal(force.ships) - shipTotal(result.survivors[index]);
     const theirs = shipTotal(foe.ships) - shipTotal(result.survivors[other]);
     // The other fleet's and empire's names come from another player: bounded like their public view.
@@ -1565,14 +1593,13 @@ export class EmpireSim {
     if (defender) {
       const fighting = defender.id === 'dock' || armed(defender).length ? armed(defender) : defender.ships;
       if (fighting.length) {
-        const fire = firepower(defender.stores.ammo, fighting, specOf);
         const result = resolveBattle(
           { name: raiders, ships: raid.ships, bonuses: def.archetype.bonuses },
-          { name: s.playerName, ships: fighting, bonuses: this.combatBonuses(), firepower: fire.factor },
+          { name: s.playerName, ships: fighting, bonuses: this.combatBonuses(), damage: defender.damage },
           SHIP_CLASSES, hashSeed(this.deps.galaxy.params.seed, raid.year, raid.fleet));
         const delta: Squadron[] = fighting.map((x) => ({ classId: x.classId, count: -(x.count - countOf(result.survivors[1], x.classId)) }));
         for (const c of result.captured[1]) delta.push({ classId: c.classId, count: c.count });
-        this.adjustGroup(defender.id, delta, { ammo: defender.stores.ammo - fire.spent });
+        this.adjustGroup(defender.id, delta, undefined, result.damage[1]);
         this.emit([{ kind: 'npcFleet', npc: def.id, fleet: raid.fleet, ships: result.survivors[0] }]);
         this.changeStanding(def.id, STANDING.repel);
         const mine = -delta.filter((d) => d.count < 0).reduce((n, d) => n + d.count, 0);
@@ -1617,7 +1644,7 @@ export class EmpireSim {
     this.deps.store.batch(() => {
       // Years beyond the cap are the oldest ones: they pass unsimulated (fleets still move, their
       // position is a function of time) so the most recent week is resolved in full.
-      if (skipped) this.deps.store.update((st) => ({ turn: st.turn + skipped, dockSpent: { supply: 0, ammo: 0 } }));
+      if (skipped) this.deps.store.update((st) => ({ turn: st.turn + skipped, dockSpent: { supply: 0 } }));
       for (let i = 0; i < run; i++) {
         const r = this.step(true);
         for (const [k, n] of Object.entries(r.income)) income[k as Resource] = (income[k as Resource] ?? 0) + n!;
@@ -1644,7 +1671,8 @@ export class EmpireSim {
     const { economy, research, report, mined } = resolveTurn({ ...s.economy, stock: s.empire.materials }, s.empire.research, s.turn, this.deps.economy, this.presence());
     this.drawFields(mined);
     const next = s.turn + 1;
-    // Logistics: fleets in friendly systems refill; elsewhere ammunition trickles back.
+    // Logistics: fleets in friendly systems refill their supply and repair (fully at a shipyard world,
+    // slowly at an outpost); Menders patch their fleet wherever it is, between battle rounds too.
     const loadouts: Record<string, Loadout> = {};
     const arrivals: string[] = [];
     for (const f of s.fleets) {
@@ -1652,10 +1680,14 @@ export class EmpireSim {
       if (!l) continue;
       const here = hexAt(f.movement, next);
       const friendly = isStationed(f.movement, next) && this.isFriendlyHex(here);
-      loadouts[f.id] = { ...l, ...resupply(l, l.ships, specOf, friendly) };
+      const site = isStationed(f.movement, next) ? this.repairSite(here) : null;
+      const heal = (site ? REPAIR[site] : 0) + (inBattle(l.battle, next) ? 0 : menderRepair(l.ships, this.combatBonuses()));
+      const { damage: hurt, ...rest } = l;
+      const damage = heal > 0 ? repairDamage(hurt, heal) : hurt;
+      loadouts[f.id] = { ...rest, ...resupply(l, l.ships, specOf, friendly), ...(damage ? { damage } : {}) };
       if (arrivalTurn(f.movement) === next && f.movement.route.length > 1) {
         const star = this.deps.galaxy.starAt(here);
-        arrivals.push(`${f.name} arrived at ${star?.name ?? 'deep space'}${friendly ? ' and resupplied' : ''}`);
+        arrivals.push(`${f.name} arrived at ${star?.name ?? 'deep space'}${friendly ? (hurt ? ' to resupply and repair' : ' and resupplied') : ''}`);
       }
     }
     const { stock, ...settings } = economy;
@@ -1668,7 +1700,7 @@ export class EmpireSim {
     this.deps.store.update({
       turn: next,
       loadouts,
-      dockSpent: { supply: 0, ammo: 0 },
+      dockSpent: { supply: 0 },
       empire: { ...s.empire, materials: stock, research },
       economy: settings,
       lastReport: report,

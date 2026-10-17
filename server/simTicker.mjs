@@ -3,11 +3,11 @@
 // into ./sim/), saved, shown to the other players, and sent to its owner if they are online:
 // their browser shows what the server decides. Orders arrive separately (commands.mjs); a
 // per-empire lock keeps the two from interleaving. A catch-up of several years at once (after the
-// server was down) is logged, so a replay of the empire's event log plays it the same way. Other
+// server was down), first contacts and battles go in the event log. Other
 // players' worlds are markets for trade goods: every empire is read once a year and each plays
 // against that list of the others.
 
-import { appendSafely } from './eventLog.mjs';
+import { appendSafely, recordSafely } from './eventLog.mjs';
 
 /**
  * @param {{
@@ -22,7 +22,7 @@ import { appendSafely } from './eventLog.mjs';
  *   publish?: (player: object) => void,
  *   notifyOwner?: (id: string, save: object) => void,
  *   publicView?: (p: unknown) => object,
- *   events?: { append(id: string, entry: object): Promise<void> | void },
+ *   events?: { append(id: string, entry: object): Promise<void> | void, record?(event: object): unknown },
  *   now?: () => number,
  *   log?: (msg: string) => void,
  * }} deps
@@ -34,6 +34,7 @@ export function createSimTicker({ store, loadSim, world = null, withLock = (_key
 
   // Not waited on: a log failure never stops the year.
   const logEvent = appendSafely(events, log);
+  const recordEvent = recordSafely(events, log);
 
   /** Play every empire forward to `worldTick`. Returns how many were advanced. */
   async function tick(worldTick) {
@@ -77,7 +78,7 @@ export function createSimTicker({ store, loadSim, world = null, withLock = (_key
             if (world && result.effects?.length) await world.apply(result.effects);
             const pub = publicView(result.public);
             await store.save(id, { ...record, save: result.save, public: pub, simulatedAt: now() });
-            // One year is what a replay plays by default; more at once is not, so it is logged.
+            // Catching up several years at once (the server was down) is worth a line in the log.
             if (result.years > 1) logEvent(id, { at: now(), worldTime: worldTick, turn: record.save.turn, command: 'advance', ok: true });
             publish({ ...pub, id, name: player.name, avatar: record.player?.avatar ?? null, updatedAt: now() });
             notifyOwner(id, result.save);
@@ -120,6 +121,12 @@ export function createSimTicker({ store, loadSim, world = null, withLock = (_key
         // Unreadable record: its fleets take no part in contacts.
       }
     }
+    // Empires whose fleets or worlds came near each other for the first time have met: from now
+    // on they can deal (diplomacy needs first contact).
+    if (world && typeof sim.findFirstContacts === 'function') {
+      const met = sim.findFirstContacts(players, worldTick, await world.get());
+      if (met.length) await world.apply(met.map((m) => m.effect));
+    }
     // Fleets side by side on station fight; then faster fleets run down the ones that broke off.
     // Only empires at war fight: relations live in the shared world.
     const shared = world ? await world.get() : null;
@@ -147,6 +154,7 @@ export function createSimTicker({ store, loadSim, world = null, withLock = (_key
             for (const [id, record] of kept) await store.save(id, record).catch(() => {});
             throw err;
           }
+          recordEvent({ actor: c.a.player, subject: c.b.player, kind: c.pursuit ? 'pursuit' : 'battle', worldTime: worldTick, data: { fleets: [c.a.fleet, c.b.fleet], at: c.hex ?? null, text: `${c.pursuit ? 'Pursuit' : 'Battle'}: ${c.a.fleet} against ${c.b.fleet}` } });
           for (const [id, record, save, pub] of sides) {
             publish({ ...publicView(pub), id, name: playerOf(id, record).name, avatar: record.player?.avatar ?? null, updatedAt: now() });
             notifyOwner(id, save);

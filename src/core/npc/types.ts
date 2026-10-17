@@ -44,6 +44,21 @@ export interface NpcState {
   readonly built: number;
 }
 
+/** What an NPC decided in a year, for the server's event log. */
+export type NpcDecisionKind = 'build' | 'reinforce' | 'raid' | 'strike' | 'return';
+
+export interface NpcDecision {
+  readonly npc: string;
+  readonly kind: NpcDecisionKind;
+  readonly year: number;
+  /** One line for people: what it did and why. */
+  readonly text: string;
+  /** The player it is aimed at, if any. */
+  readonly player?: string;
+  readonly fleet?: string;
+  readonly at?: Hex;
+}
+
 /** Something an NPC did to a player this year, for the player's empire to resolve. */
 export interface NpcRaid {
   readonly kind: 'raid';

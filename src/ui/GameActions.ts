@@ -72,8 +72,10 @@ export interface GameQueries {
   targetStar(targetId: string): StarSystem;
   /** NPC worlds of the empires you know, to attack from the War Room. */
   warTargets(): WarTarget[];
-  /** Every other player with your relation, any proposal and what you can do. */
+  /** Every player you have met with your relation, any proposal and what you can do. */
   diplomacyView(): DiplomacyView[];
+  /** How many other players you have not met yet (no dealings before first contact). */
+  unmetEmpires(): number;
   /** The NPC factions you know and where you stand with each (the Relations tab). */
   factions(): FactionView[];
   /** Empires you know: for missionaries and spies. */

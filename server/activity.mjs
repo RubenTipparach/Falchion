@@ -2,10 +2,9 @@
 // colonies, depots, battles, systems surveyed, comings and goings). Players report their own
 // news through POST /api/events; the server adds what it already knows (a first save, chat
 // presence). Signed-in players read it at GET /api/activity and hear it live as `activity`
-// events on the chat stream. One machine: kept in memory, persisted (debounced, atomic) to
-// activity.json like chat.json. Zero dependencies: node: built-ins only.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+// events on the chat stream. One machine: kept in memory, persisted (debounced) to the
+// database like chat. Zero dependencies: node: built-ins only.
+import { fileDoc } from './db.mjs';
 import { cleanText } from './chat.mjs';
 
 /** Every kind of event, and whether a player may report it themselves. */
@@ -47,7 +46,8 @@ function limiter(max, windowMs, now) {
 /**
  * @param {{
  *   auth: { userFrom: (req: any) => ({ id: string, name: string, avatar?: string | null } | null) },
- *   file: string,
+ *   doc?: { read(): Promise<string | null>, write(text: string): Promise<void> },
+ *   file?: string,
  *   empireOf: (playerId: string) => Promise<{ name: string, color: string } | null>,
  *   broadcast?: (event: string, data: object) => void,
  *   forward?: (user: { id: string, name: string }, kind: string, text: string, place?: { name: string, q: number, r: number }) => Promise<unknown>,
@@ -62,7 +62,7 @@ function limiter(max, windowMs, now) {
  */
 export function createActivity(deps) {
   const {
-    auth, file, empireOf, broadcast = () => {}, forward, now = () => Date.now(), keep = 300,
+    auth, doc, file, empireOf, broadcast = () => {}, forward, now = () => Date.now(), keep = 300,
     rate = { max: 20, windowMs: 600_000 }, presenceRate = { max: 6, windowMs: 3_600_000 },
     presenceGraceMs = 30_000, foundWindowMs = 600_000, saveDelayMs = 1_000,
   } = deps;
@@ -72,10 +72,11 @@ export function createActivity(deps) {
   const reports = limiter(rate.max, rate.windowMs, now);
   const presenceLimit = limiter(presenceRate.max, presenceRate.windowMs, now);
 
-  // ── Persistence (same pattern as chat.json) ──
+  // ── Persistence (same pattern as chat) ──
+  const store = doc ?? fileDoc(file);
   const loaded = (async () => {
     try {
-      const data = JSON.parse(await readFile(file, 'utf8'));
+      const data = JSON.parse((await store.read()) ?? 'null');
       if (Array.isArray(data.events)) events = data.events.slice(-keep);
       seq = Number(data.seq) || 0;
     } catch {
@@ -92,10 +93,7 @@ export function createActivity(deps) {
     const body = JSON.stringify({ seq, events });
     writing = writing.then(async () => {
       try {
-        await mkdir(dirname(file), { recursive: true });
-        const tmp = `${file}.${process.pid}.tmp`;
-        await writeFile(tmp, body);
-        await rename(tmp, file);
+        await store.write(body);
       } catch (err) {
         console.error('activity save failed:', err.message);
       }

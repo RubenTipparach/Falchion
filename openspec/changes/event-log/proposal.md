@@ -1,48 +1,52 @@
 # Proposal
 
 ## Why
-
-The server is the authority for every empire, so it must be able to show what it did. An
-append-only record of the commands it applied lets an admin see what happened to an empire,
-and proves the server's work can be checked: the founding save plus the logged commands
-replay into exactly the stored empire.
+The server is the authority for every empire and runs the NPC empires, so it must be able to show what happened and why. A queryable event log of player actions and NPC decisions lets an admin see what happened to an empire and what the NPCs are up to.
 
 ## What Changes
-
-- `server/eventLog.mjs`: one JSON line per event in `<DATA_DIR>/events/<playerId>.jsonl`, with
-  `at` (server time), `worldTime` (the world time the rules ran at), `turn` (the empire's year
-  before the event), `command`, `clientTime`, `ok` and `error`. A file over 2 MB is rotated to
-  `<name>.1`, so the log stays bounded. Zero dependencies.
-- `server/commands.mjs`: every command the rules applied or refused is logged, with the exact
-  world and client times passed to `applyCommand`. The log is an optional dependency and is not
-  waited on: a log failure never fails an order. Orders the rules never saw (rate-limited, no
-  empire, no simulation) are not logged.
-- `server/simTicker.mjs`: when the yearly tick catches an empire up several years at once (after
-  the server was down, e.g. during a deploy) it logs an `advance` line, since a replay otherwise
-  plays one year at a time.
-- A founding (`PUT /api/save` for a player without an empire) appends a `found` line and keeps the
-  founding save whole in `<playerId>.founding.json`. A log failure never fails the founding.
-- `replay(sim, { founding, events, player, toTurn })` in `server/eventLog.mjs` rebuilds an empire
-  from its latest founding and the logged events with the headless `applyCommand` and `advanceSave`.
-- The admin portal gets a read-only view of a player's last 50 events
-  (`GET /api/admin/players/<id>/events`, and an "Event log" panel on `/admin`).
+- **`server/eventLog.mjs`** keeps the log in the database's `events` table (`server/db.mjs`).
+  - Each row has:
+    - `at`: server time;
+    - `worldTime`;
+    - `actor`: a player id, or `npc:<id>`;
+    - `subject`: the player it happened to, if any;
+    - `kind`;
+    - its data.
+  - The table is bounded: the oldest rows are trimmed past 500,000.
+- **Player actions recorded:**
+  - every command the rules applied or refused (`server/commands.mjs`);
+  - foundings;
+  - multi-year catch-ups of the yearly tick (`advance`);
+  - battles and pursuits between players;
+  - first contacts;
+  - diplomacy that took effect;
+  - NPC empires discovered;
+  - NPC worlds captured.
+- **NPC decisions recorded:** `stepNpcs` returns what each NPC decided, with a line of text and the player it is aimed at:
+  - raider fleets built;
+  - garrisons reinforced;
+  - raids launched (with the standing behind them);
+  - raids striking;
+  - fleets home.
+- Logging never fails an order or the tick.
+- **Admin portal** (read only):
+  - an empire's last 50 events, by or about it, including NPC raids on it;
+  - the last 100 NPC decisions.
+- **Replay is removed:**
+  - founding saves are no longer kept;
+  - `replay()` and its test are deleted.
 
 ## Capabilities
 
 ### New Capabilities
-- `event-log`: append-only, bounded per-empire log of applied events, founding saves kept for
-  replay, replay of the log into the stored empire, and a read-only admin view.
+- `event-log`: a bounded database log of player actions and NPC decisions, with a read-only admin view.
 
 ## Impact
-
-- `server/eventLog.mjs`, `server/eventLog.test.mjs`, `server/replay.test.mjs` (new).
-- `server/commands.mjs`, `server/simTicker.mjs`: optional `events` dependency.
-- `server/index.mjs`: one log instance in the data directory; `found` on a new empire.
-- `server/admin.mjs`: `events` dependency, events route, panel.
-
-## Limits
-
-- The log does not record the shared world (asteroid fields, NPC empires) or NPC raids, so a
-  replay is exact only for an empire whose years did not depend on them.
-- Rotation drops the oldest lines: once the `found` line has rotated out, the empire can no
-  longer be replayed (replay returns null).
+- **Server:**
+  - `server/eventLog.mjs` is rewritten on SQLite;
+  - `server/eventLog.test.mjs`;
+  - `server/replay.test.mjs` is removed;
+  - `server/world.mjs` gains a `record` dependency;
+  - `server/simTicker.mjs` records battles;
+  - `server/admin.mjs` adds the NPC decisions route and panel.
+- **Core:** `src/core/npc/NpcSim.ts` returns `decisions`, and `src/sim/headless.ts` `stepWorld` passes them on.

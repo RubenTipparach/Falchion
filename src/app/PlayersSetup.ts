@@ -106,7 +106,7 @@ export function setupPlayers({ identity, canSignIn, galaxy, controller, store, t
         ruler: id?.ruler ?? '', title: id?.title ?? '', colonies: new Set((p.colonies ?? []).map((c) => `${c.q},${c.r}`)).size,
         fleets: (p.fleets ?? []).filter((f) => isFleetMovement(f.movement)).map((f) => ({ id: `${p.id}:${f.id}`, name: f.name, where: where(f.movement) })),
         distance: home ? hexDistance(myHome, home) : null, homeName: placeOf(home)?.name ?? null,
-        relation: relations.get(p.id) || undefined,
+        relation: relations.has(p.id) ? relations.get(p.id) || undefined : 'Not met',
       });
     }
     return sortRoster(out);

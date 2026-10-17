@@ -1,10 +1,9 @@
 // In-game chat: a global channel plus direct messages between two players, live over
 // Server-Sent Events. Who is online = who has a chat stream open (any number of tabs).
 // Players @mentioned while not in the game hear about it on Discord (notifier.mention).
-// One machine, so state lives in memory and is persisted (debounced, atomic) to chat.json.
+// One machine, so state lives in memory and is persisted (debounced) to the database.
 // Zero dependencies: node: built-ins only.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { fileDoc } from './db.mjs';
 
 const ID = /^\d{5,25}$/;
 const MAX_TEXT = 500;
@@ -45,7 +44,8 @@ const visibleTo = (m, uid) => m.to === 'global' || m.to === uid || m.from.id ===
 /**
  * @param {{
  *   auth: { userFrom: (req: any) => ({ id: string, name: string, avatar: string | null } | null) },
- *   file: string,
+ *   doc?: { read(): Promise<string | null>, write(text: string): Promise<void> },
+ *   file?: string,
  *   players: () => Promise<Array<{ id: string, name: string, avatar?: string | null }>>,
  *   notifier?: { mention: (m: object) => Promise<unknown> },
  *   onPresence?: (user: { id: string, name: string, avatar: string | null }, online: boolean) => void,
@@ -58,7 +58,7 @@ const visibleTo = (m, uid) => m.to === 'global' || m.to === uid || m.from.id ===
  */
 export function createChat(deps) {
   const {
-    auth, file, players, notifier, onPresence = () => {}, now = () => Date.now(),
+    auth, doc, file, players, notifier, onPresence = () => {}, now = () => Date.now(),
     rate = { max: 5, windowMs: 10_000 }, keep = { global: 300, dm: 200 }, saveDelayMs = 1_000, keepAliveMs = 20_000,
   } = deps;
 
@@ -69,10 +69,11 @@ export function createChat(deps) {
   const clients = new Map(); // user id -> { user, conns: Set<res> }
   let pending = Promise.resolve(); // Discord notifications of the latest message (tests await it)
 
-  // ── Persistence ──
+  // ── Persistence: a database document (or a file) ──
+  const store = doc ?? fileDoc(file);
   const loaded = (async () => {
     try {
-      const data = JSON.parse(await readFile(file, 'utf8'));
+      const data = JSON.parse((await store.read()) ?? 'null');
       if (Array.isArray(data.global)) global = data.global.slice(-keep.global);
       for (const [k, list] of Object.entries(data.dms ?? {})) if (Array.isArray(list)) dms.set(k, list.slice(-keep.dm));
       seq = Number(data.seq) || 0;
@@ -91,10 +92,7 @@ export function createChat(deps) {
     const body = JSON.stringify({ seq, global, dms: Object.fromEntries(dms) });
     writing = writing.then(async () => {
       try {
-        await mkdir(dirname(file), { recursive: true });
-        const tmp = `${file}.${process.pid}.tmp`;
-        await writeFile(tmp, body);
-        await rename(tmp, file);
+        await store.write(body);
       } catch (err) {
         console.error('chat save failed:', err.message);
       }

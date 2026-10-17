@@ -152,7 +152,7 @@ Notifications need the bot token (`DISCORD_BOT_TOKEN`, see *Channel notification
   message".
 - Each sender triggers at most 10 notifications an hour, and each player receives at most 6.
 
-Chat keeps the last 300 global messages and 200 per conversation in `/data/chat.json`.
+Chat keeps the last 300 global messages and 200 per conversation in the server database (`/data/falchion.db`).
 Each player may send 5 messages every 10 seconds.
 
 ## Other players and the galaxy feed
@@ -200,7 +200,7 @@ Saves go to `./data/` (ignored by git).
 One file per player at `/data/<discord id>.json`: their Discord id, name and avatar, the
 saved empire, and a public view (home, colony stars, fleets) that other players receive
 from `/api/players`. Stockpiles, research and orders are never sent to other players.
-Chat history is in `/data/chat.json`; direct messages are only ever sent to the two
+Chat history is in the server database (`/data/falchion.db`); direct messages are only ever sent to the two
 players in them. The galaxy feed (the last 300 events) is in `/data/activity.json`.
 
 ## Not built yet

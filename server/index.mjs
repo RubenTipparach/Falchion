@@ -12,7 +12,8 @@ import { createActivity } from './activity.mjs';
 import { adminIds, createAdmin } from './admin.mjs';
 import { createAuth } from './auth.mjs';
 import { createChat } from './chat.mjs';
-import { createEventLog } from './eventLog.mjs';
+import { dbDoc, fileDoc, importDoc } from './db.mjs';
+import { createEventLog, recordSafely } from './eventLog.mjs';
 import { createPlayerFeed } from './live.mjs';
 import { createNotifier } from './notifier.mjs';
 import { linkPreview, withPreview } from './links.mjs';
@@ -20,7 +21,7 @@ import { createSimTicker } from './simTicker.mjs';
 import { createCommandService } from './commands.mjs';
 import { createLocks } from './locks.mjs';
 import { oncePerTick } from './markets.mjs';
-import { createStore } from './store.mjs';
+import { createStore, importLegacySaves } from './store.mjs';
 import { createSharedWorld } from './world.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -39,10 +40,18 @@ export const auth = createAuth({
   ...(process.env.DISCORD_API_BASE ? { discordApi: process.env.DISCORD_API_BASE } : {}),
   ...(process.env.DISCORD_AUTHORIZE_URL ? { discordAuthorize: process.env.DISCORD_AUTHORIZE_URL } : {}),
 });
+// One SQLite database on the volume holds everything (<DATA_DIR>/falchion.db, server/db.mjs).
 export const store = createStore(resolve(process.env.DATA_DIR ?? join(here, '..', 'data')));
-// Append-only record of what the server applied to each empire, and each founding save, for
-// admins and replay (<DATA_DIR>/events, server/eventLog.mjs).
-export const events = createEventLog({ dir: store.dir });
+const db = store.db;
+// The JSON files of earlier versions are imported once.
+const importedSaves = await importLegacySaves(store);
+for (const name of ['world', 'chat', 'activity']) {
+  if (await importDoc(dbDoc(db, name), fileDoc(join(store.dir, `${name}.json`)))) console.log(`database: imported ${name}.json`);
+}
+if (importedSaves) console.log(`database: imported ${importedSaves} empires from their save files`);
+// What players did and what the NPC empires decided, for admins (server/eventLog.mjs).
+export const events = createEventLog({ db });
+const recordEvent = recordSafely(events, (m) => console.error(m));
 const MAX_SAVE_BYTES = 3 * 1024 * 1024;
 const STARTED_AT = Date.now();
 // Same secret as High Frontier: ADMIN_DISCORD_ID (or ADMIN_DISCORD_IDS), comma-separated.
@@ -60,12 +69,12 @@ export const notifier = createNotifier({
 // Its stream is each signed-in player's one live connection: galaxy activity and other players'
 // public views travel on it too.
 export const chat = createChat({
-  auth, file: join(store.dir, 'chat.json'), players: () => store.players(), notifier,
+  auth, doc: dbDoc(db, 'chat'), players: () => store.players(), notifier,
   onPresence: (user, online) => activity.presence(user, online),
 });
 // Galaxy activity feed: everyone's notable news, live (server/activity.mjs).
 export const activity = createActivity({
-  auth, file: join(store.dir, 'activity.json'),
+  auth, doc: dbDoc(db, 'activity'),
   empireOf: async (id) => {
     const pub = (await store.load(id))?.public;
     return pub ? { name: pub.empire?.name ?? '', color: pub.color } : null;
@@ -152,8 +161,8 @@ async function api(req, res, pathname) {
         const updatedAt = Date.now();
         await store.save(user.id, { player: user, save: body.save, public: pub, updatedAt });
         playerFeed.publish({ ...pub, id: user.id, name: user.name, avatar: user.avatar ?? null, updatedAt });
-        // The founding save starts the empire's replay; a log failure never fails the founding.
-        events.found(user.id, { save: body.save, worldTime: worldTime(), at: updatedAt }).catch((err) => console.error(`event log: ${err?.message ?? err}`));
+        // A log failure never fails the founding.
+        events.found(user.id, { worldTime: worldTime(), turn: body.save.turn, at: updatedAt }).catch((err) => console.error(`event log: ${err?.message ?? err}`));
         void notifier.joined(user.name, body.public?.empire?.name);
         void activity.founded(user, pub);
         return json(res, 200, { ok: true });
@@ -227,7 +236,7 @@ const withLock = createLocks();
 /** World time in years, fractional (one year per tick). */
 const worldTime = () => (Date.now() - CLOCK.epochMs) / CLOCK.msPerTick;
 // The galaxy everyone shares: mined asteroid fields and discovered NPC empires (server/world.mjs).
-export const sharedWorld = createSharedWorld({ file: join(store.dir, 'world.json'), loadSim, withLock, broadcast: (event, data) => chat.broadcast(event, data) });
+export const sharedWorld = createSharedWorld({ doc: dbDoc(db, 'world'), loadSim, withLock, broadcast: (event, data) => chat.broadcast(event, data), record: recordEvent });
 export const simTicker = createSimTicker({
   store, loadSim, withLock, world: sharedWorld, events,
   publish: (p) => playerFeed.publish(p),

@@ -59,7 +59,7 @@ function renameFleet(save: Record<string, any>, from: string, to: string): Recor
 
 /** Resolve a contact between the two empires' fleets at `HERE` in year `tick`. */
 /** A and B have been at war for a long time (fleets fight only at war). */
-const WAR = applyEffects(EMPTY_WORLD, [{ kind: 'diplomacy', by: A, other: B, action: 'declare-war', at: 0 }]);
+const WAR = applyEffects(EMPTY_WORLD, [{ kind: 'contact', a: A, b: B, at: 0 }, { kind: 'diplomacy', by: A, other: B, action: 'declare-war', at: 0 }]);
 
 function meet(a: Record<string, any>, b: Record<string, any>, tick = T) {
   return resolveContact(a, player(A), fid(A), b, player(B), fid(B), tick, WAR);

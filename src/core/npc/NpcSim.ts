@@ -3,7 +3,7 @@ import { Hex, hexDistance } from '../hex/Hex';
 import { Rng, hashSeed } from '../rng/Rng';
 import type { SharedWorld } from '../world/SharedWorld';
 import { buildEvery, garrisonHulls, npcById, RAID_RANGE, raiderHulls, shipsFor, type NpcDef } from './NpcCatalog';
-import type { NpcFleet, NpcRaid, NpcState } from './types';
+import type { NpcDecision, NpcFleet, NpcRaid, NpcState } from './types';
 import { FRIENDLY, HOSTILE, STANDING, standingOf } from './Reputation';
 
 /**
@@ -28,23 +28,28 @@ const totalShips = (f: { ships: readonly { count: number }[] }) => f.ships.reduc
 export const npcTravel = (f: Pick<NpcFleet, 'from' | 'to'>): number => hexDistance(f.from, f.to);
 export const npcArrival = (f: NpcFleet): number => f.depart + npcTravel(f);
 
-/** Step every discovered NPC to year `to`. Returns the new world and the raids that struck. */
-export function stepNpcs(world: SharedWorld, to: number, galaxy: GalaxyModel, players: readonly RaidTargets[]): { world: SharedWorld; raids: NpcRaid[] } {
-  if (to <= world.tick) return { world, raids: [] };
+/**
+ * Step every discovered NPC to year `to`. Returns the new world, the raids that struck, and what
+ * each NPC decided along the way (for the server's event log).
+ */
+export function stepNpcs(world: SharedWorld, to: number, galaxy: GalaxyModel, players: readonly RaidTargets[]): { world: SharedWorld; raids: NpcRaid[]; decisions: NpcDecision[] } {
+  if (to <= world.tick) return { world, raids: [], decisions: [] };
   const raids: NpcRaid[] = [];
+  const decisions: NpcDecision[] = [];
   const npcs: Record<string, NpcState> = { ...world.npcs };
   for (let year = Math.max(world.tick + 1, to - MAX_CATCH_UP + 1); year <= to; year++) {
     for (const id of Object.keys(npcs).sort()) {
       const def = npcById(galaxy, id);
       if (!def) continue;
-      npcs[id] = stepOne(npcs[id], def, year, players, raids);
+      npcs[id] = stepOne(npcs[id], def, year, players, raids, decisions);
     }
   }
-  return { world: { ...world, tick: to, npcs }, raids };
+  return { world: { ...world, tick: to, npcs }, raids, decisions };
 }
 
-function stepOne(state: NpcState, def: NpcDef, year: number, players: readonly RaidTargets[], raids: NpcRaid[]): NpcState {
+function stepOne(state: NpcState, def: NpcDef, year: number, players: readonly RaidTargets[], raids: NpcRaid[], decisions: NpcDecision[]): NpcState {
   const rng = new Rng(hashSeed(def.id, 'year', year));
+  const decide = (d: Omit<NpcDecision, 'npc' | 'year'>) => decisions.push({ npc: def.id, year, ...d });
   let s = state;
   const holdsHome = s.colonies.some((c) => c.starId === def.home.id && !c.capturedBy);
   // Build and reinforce, while it still holds its home.
@@ -53,13 +58,18 @@ function stepOne(state: NpcState, def: NpcDef, year: number, players: readonly R
     let built = s.built;
     if (fleets.length < def.tier + 1) {
       built++;
-      fleets.push({ id: `${def.id}/${built}`, name: `${def.name} Raiders ${roman(built)}`, ships: shipsFor(def, raiderHulls(def), rng), mission: 'home', from: def.home.hex, to: def.home.hex, depart: year });
+      const fleet: NpcFleet = { id: `${def.id}/${built}`, name: `${def.name} Raiders ${roman(built)}`, ships: shipsFor(def, raiderHulls(def), rng), mission: 'home', from: def.home.hex, to: def.home.hex, depart: year };
+      fleets.push(fleet);
+      decide({ kind: 'build', fleet: fleet.id, at: def.home.hex, text: `Built ${fleet.name} (${totalShips(fleet)} ships): ${fleets.length} of ${def.tier + 1} raider fleets` });
     }
     const colonies = s.colonies.map((c) => {
       if (c.capturedBy) return c;
       const want = garrisonHulls(def, c.starId);
       const have = totalShips({ ships: c.garrison });
-      return have >= want ? c : { ...c, garrison: merge(c.garrison, shipsFor(def, Math.min(2, want - have), rng)) };
+      if (have >= want) return c;
+      const more = shipsFor(def, Math.min(2, want - have), rng);
+      decide({ kind: 'reinforce', text: `Reinforced the garrison of ${c.starId} (${have} of ${want} ships, +${totalShips({ ships: more })})` });
+      return { ...c, garrison: merge(c.garrison, more) };
     });
     s = { ...s, fleets, colonies, built, lastBuilt: year };
   }
@@ -80,13 +90,18 @@ function stepOne(state: NpcState, def: NpcDef, year: number, players: readonly R
     if (f.mission === 'home') {
       if (!holdsHome || !enemies.length || !rng.chance(def.archetype.aggression * fury)) return f;
       const target = pickTarget(def, enemies, players, rng);
-      return target ? { ...f, mission: 'raid', from: def.home.hex, to: target.hex, depart: year, target: target.player } : f;
+      if (!target) return f;
+      const standing = Math.round(standingOf(s, target.player, disposition));
+      decide({ kind: 'raid', player: target.player, fleet: f.id, at: target.hex, text: `${f.name} sets out to raid (standing ${standing}${fury > 1 ? ', hostile' : ''}; arrives in ${hexDistance(def.home.hex, target.hex)} years)` });
+      return { ...f, mission: 'raid', from: def.home.hex, to: target.hex, depart: year, target: target.player };
     }
     if (npcArrival(f) > year) return f;
     if (f.mission === 'raid') {
       raids.push({ kind: 'raid', npc: def.id, fleet: f.id, player: f.target!, at: f.to, ships: f.ships, year });
+      decide({ kind: 'strike', player: f.target!, fleet: f.id, at: f.to, text: `${f.name} strikes with ${totalShips(f)} ships` });
       return { ...f, mission: 'return', from: f.to, to: def.home.hex, depart: year, target: undefined };
     }
+    decide({ kind: 'return', fleet: f.id, at: def.home.hex, text: `${f.name} is back home` });
     return { ...f, mission: 'home', from: def.home.hex, to: def.home.hex, depart: year };
   });
   return { ...s, fleets };

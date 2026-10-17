@@ -1,104 +1,124 @@
-// Player saves on disk: one JSON file per Discord user id. On Fly the directory
-// is a volume (/data) on a single machine, so writes have one owner.
-import { mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+// Player empires in the database (server/db.mjs): one row per Discord user id holding the record
+// { player, save, public, updatedAt }, plus small server-wide settings. On Fly the database file is
+// on a volume (/data) on a single machine, so writes have one owner. Saves from before the database
+// (one <id>.json file per player in the data directory) are imported on first start.
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { openDb } from './db.mjs';
 
-/** Discord ids are numeric snowflakes; anything else never reaches the filesystem. */
+/** Discord ids are numeric snowflakes; anything else is refused. */
 const validId = (id) => typeof id === 'string' && /^\d{5,25}$/.test(id);
 
-export function createStore(dir) {
-  // Created on first real use (never as a floating promise, so a store that is only asked
-  // about invalid ids never touches the disk).
-  let made = null;
-  const ready = () => (made ??= mkdir(dir, { recursive: true }));
-  const file = (id) => join(dir, `${id}.json`);
+/** The database file in a data directory. */
+export const DB_FILE = 'falchion.db';
+
+const parse = (text) => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * @param {string | { db: import('node:sqlite').DatabaseSync, dir: string }} where
+ *   the data directory (the database is <dir>/falchion.db), or an open database and its directory.
+ */
+export function createStore(where) {
+  const dir = typeof where === 'string' ? where : where.dir;
+  const db = typeof where === 'string' ? openDb(join(dir, DB_FILE)) : where.db;
+  const q = {
+    get: db.prepare('SELECT record FROM empires WHERE id = ?'),
+    put: db.prepare('INSERT INTO empires (id, record, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET record = excluded.record, updated_at = excluded.updated_at'),
+    del: db.prepare('DELETE FROM empires WHERE id = ?'),
+    ids: db.prepare('SELECT id FROM empires ORDER BY id'),
+    all: db.prepare('SELECT id, record FROM empires ORDER BY updated_at DESC'),
+    getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
+    putSetting: db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
+  };
 
   return {
     dir,
+    db,
     /** { player, save, public } for a player, or null. */
     async load(id) {
       if (!validId(id)) return null;
-      await ready();
-      try {
-        return JSON.parse(await readFile(file(id), 'utf8'));
-      } catch {
-        return null;
-      }
+      const row = q.get.get(id);
+      return row ? parse(row.record) : null;
     },
-    /** Write atomically (temp file + rename) so a crash never leaves half a save. */
+    /** One statement: a crash never leaves half a save. */
     async save(id, record) {
       if (!validId(id)) throw new Error('invalid player id');
-      await ready();
-      const tmp = `${file(id)}.${process.pid}.tmp`;
-      await writeFile(tmp, JSON.stringify(record));
-      await rename(tmp, file(id));
+      q.put.run(id, JSON.stringify(record), Number(record?.updatedAt) || 0);
     },
-    /** Delete a player's save (admin "reset empire"). */
+    /** Delete a player's empire (admin "reset empire"). */
     async remove(id) {
       if (!validId(id)) return false;
-      await ready();
-      try {
-        await unlink(file(id));
-        return true;
-      } catch {
-        return false;
-      }
+      return Number(q.del.run(id).changes) > 0;
     },
     /** Every stored player id. */
     async ids() {
-      await ready();
-      return (await readdir(dir)).filter((n) => /^\d{5,25}\.json$/.test(n)).map((n) => n.slice(0, -5));
+      return q.ids.all().map((r) => r.id);
     },
-    /** Admin view: every player with progress, last save time and save size. */
+    /** Admin view: every player with progress, last save time and save size, newest first. */
     async summaries() {
-      await ready();
-      const names = (await readdir(dir)).filter((n) => /^\d{5,25}\.json$/.test(n));
       const out = [];
-      for (const n of names) {
-        try {
-          const raw = await readFile(join(dir, n), 'utf8');
-          const r = JSON.parse(raw);
-          out.push({
-            id: r.player?.id ?? n.replace('.json', ''), name: r.player?.name ?? '?', avatar: r.player?.avatar ?? null,
-            year: r.save?.turn ?? null, updatedAt: r.updatedAt ?? 0, bytes: raw.length,
-            colonies: r.save?.economy?.colonies?.length ?? 0, fleets: r.public?.fleets?.length ?? 0, home: r.public?.home ?? null,
-          });
-        } catch {
-          // Being replaced or corrupt: skip.
-        }
+      for (const row of q.all.all()) {
+        const r = parse(row.record);
+        if (!r) continue;
+        out.push({
+          id: r.player?.id ?? row.id, name: r.player?.name ?? '?', avatar: r.player?.avatar ?? null,
+          year: r.save?.turn ?? null, updatedAt: r.updatedAt ?? 0, bytes: row.record.length,
+          colonies: r.save?.economy?.colonies?.length ?? 0, fleets: r.public?.fleets?.length ?? 0, home: r.public?.home ?? null,
+        });
       }
-      return out.sort((a, b) => b.updatedAt - a.updatedAt);
+      return out;
     },
-    /** Small server-wide settings (e.g. the announcement), kept beside the saves. */
+    /** Small server-wide settings (e.g. the announcement). */
     async getSetting(key) {
-      await ready();
-      try {
-        return JSON.parse(await readFile(join(dir, `_${key}.json`), 'utf8'));
-      } catch {
-        return null;
-      }
+      const row = q.getSetting.get(key);
+      return row ? parse(row.value) : null;
     },
     async setSetting(key, value) {
       if (!/^[a-z]+$/.test(key)) throw new Error('invalid setting');
-      await ready();
-      const tmp = join(dir, `_${key}.json.${process.pid}.tmp`);
-      await writeFile(tmp, JSON.stringify(value));
-      await rename(tmp, join(dir, `_${key}.json`));
+      q.putSetting.run(key, JSON.stringify(value));
     },
     /** Public view of every player: name, avatar, home, colonies and fleets. */
     async players() {
-      await ready();
-      const names = (await readdir(dir)).filter((n) => /^\d{5,25}\.json$/.test(n));
       const out = [];
-      for (const n of names) {
-        try {
-          const r = JSON.parse(await readFile(join(dir, n), 'utf8'));
-          if (r?.player?.id && r.public) out.push({ ...r.public, id: r.player.id, name: r.player.name, avatar: r.player.avatar ?? null, updatedAt: r.updatedAt ?? 0 });
-        } catch {
-          // A file being replaced or corrupt: skip it this time.
-        }
+      for (const row of q.all.all()) {
+        const r = parse(row.record);
+        if (r?.player?.id && r.public) out.push({ ...r.public, id: r.player.id, name: r.player.name, avatar: r.player.avatar ?? null, updatedAt: r.updatedAt ?? 0 });
       }
       return out;
     },
   };
+}
+
+/**
+ * Bring saves from before the database into it: every <id>.json in `dir` and the _<setting>.json
+ * files, once (an empire or setting already in the database is left alone). Returns how many
+ * empires were imported.
+ */
+export async function importLegacySaves(store, dir = store.dir) {
+  let names = [];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return 0;
+  }
+  let imported = 0;
+  for (const n of names) {
+    const empire = /^(\d{5,25})\.json$/.exec(n);
+    const setting = /^_([a-z]+)\.json$/.exec(n);
+    if (!empire && !setting) continue;
+    const value = parse(await readFile(join(dir, n), 'utf8').catch(() => 'null'));
+    if (value === null) continue;
+    if (empire && !(await store.load(empire[1]))) {
+      await store.save(empire[1], value);
+      imported++;
+    }
+    if (setting && (await store.getSetting(setting[1])) === null) await store.setSetting(setting[1], value);
+  }
+  return imported;
 }

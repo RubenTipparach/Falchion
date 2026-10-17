@@ -14,7 +14,7 @@ import type { Relations } from '../../app/GameState';
 import { Drawer } from '../Drawer';
 import type { FactionView, GameActions, GameQueries } from '../GameActions';
 import type { DiplomacyView } from '../../sim/EmpireSim';
-import type { DiplomaticAction } from '../../core/diplomacy/Diplomacy';
+import { CONTACT_RANGE, type DiplomaticAction } from '../../core/diplomacy/Diplomacy';
 import { icon, resourceIcon } from '../icons';
 import { BIOMES } from '../../content/biomes';
 import { slotsOf } from '../../content/buildings';
@@ -168,7 +168,9 @@ export class EmpirePanel extends Drawer {
   /** Diplomacy with other players: war, peace and alliances, with any proposal waiting. */
   private playerRelations(): HTMLElement[] {
     const rows = this.q.diplomacyView();
-    if (!rows.length) return [];
+    const unmet = this.q.unmetEmpires();
+    if (!rows.length && !unmet) return [];
+    const strangers = unmet ? h('p', { class: 'small muted unmet' }, `${unmet} other ${unmet === 1 ? 'empire' : 'empires'} not met yet. You can deal with an empire only after first contact: when one of your fleets or worlds comes within ${CONTACT_RANGE} hexes of one of theirs.`) : '';
     const label: Record<DiplomaticAction, string> = {
       'declare-war': 'Declare war', 'propose-peace': 'Propose peace', 'propose-alliance': 'Propose alliance',
       accept: 'Accept', decline: 'Decline', withdraw: 'Withdraw proposal', 'break-alliance': 'Break alliance',
@@ -176,6 +178,7 @@ export class EmpirePanel extends Drawer {
     const status = (v: DiplomacyView) => v.relation.status === 'war' ? (v.atWar ? 'At war' : 'War declared: fighting starts within a year') : v.relation.status === 'alliance' ? 'Allied' : 'Neutral';
     return [h('section', { class: 'card' }, h('h4', {}, 'Players'),
       h('p', { class: 'small muted' }, 'Fleets fight only empires at war with each other. War starts a year after it is declared; peace and alliances need both sides to agree. An ally\'s systems are friendly to your fleets.'),
+      strangers,
       ...rows.map((v) => {
         const p = v.relation.proposal;
         const pending = p ? (p.from === v.empire.id ? `They propose ${p.kind === 'peace' ? 'peace' : 'an alliance'}` : `You proposed ${p.kind === 'peace' ? 'peace' : 'an alliance'}`) : '';

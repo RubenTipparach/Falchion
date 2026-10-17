@@ -74,10 +74,15 @@ export function createAdmin({ auth, store, admins, notifier, info, events }) {
       json(res, 200, await store.summaries());
       return true;
     }
-    // Read only: the last 50 events the server logged for one empire, oldest first.
+    // Read only: the last 50 events by or about one empire, oldest first.
     const ev = /^\/api\/admin\/players\/(\d{5,25})\/events$/.exec(pathname);
     if (ev && req.method === 'GET') {
       json(res, 200, events ? await events.read(ev[1], { limit: ADMIN_EVENT_LIMIT }) : []);
+      return true;
+    }
+    // Read only: the last 100 decisions of the NPC empires, oldest first.
+    if (pathname === '/api/admin/npc-events' && req.method === 'GET') {
+      json(res, 200, events?.npcEvents ? await events.npcEvents({ limit: 2 * ADMIN_EVENT_LIMIT }) : []);
       return true;
     }
     const m = /^\/api\/admin\/players\/(\d{5,25})$/.exec(pathname);
@@ -153,8 +158,11 @@ const ADMIN_HTML = `<main>
 <h2>Players</h2>
 <div class="scroll"><table><thead><tr><th>Player</th><th>Discord id</th><th>Year</th><th>Colonies</th><th>Fleets</th><th>Home</th><th>Last save</th><th>Size</th><th></th></tr></thead><tbody id="players"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody></table></div>
 <h2 id="logTitle" hidden>Event log</h2>
-<p class="muted" id="logHint" hidden>The last 50 events the server logged for this empire (its founding, and every order applied or refused), newest first. Read only.</p>
-<div class="scroll" id="logBox" hidden><table><thead><tr><th>Time (UTC)</th><th>Year</th><th>Command</th><th>Result</th></tr></thead><tbody id="log"></tbody></table></div>
+<p class="muted" id="logHint" hidden>The last 50 events by or about this empire (its founding, every order applied or refused, first contacts, diplomacy, battles, NPC raids on it), newest first. Read only.</p>
+<div class="scroll" id="logBox" hidden><table><thead><tr><th>Time (UTC)</th><th>Year</th><th>Event</th><th>Result</th></tr></thead><tbody id="log"></tbody></table></div>
+<h2>NPC decisions</h2>
+<p class="muted">The last 100 things the NPC empires decided: fleets built, garrisons reinforced, raids launched and struck. Newest first. Read only.</p>
+<div class="scroll"><table><thead><tr><th>Time (UTC)</th><th>Year</th><th>NPC</th><th>Decision</th><th>Aimed at</th></tr></thead><tbody id="npcLog"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table></div>
 </main>
 <script>
 const H = { 'X-Falchion-Admin': '1', 'Content-Type': 'application/json' };
@@ -201,12 +209,30 @@ async function showLog(p) {
   if (!r.ok) { const tr = el('tr'); const td = el('td', 'Could not load the log: ' + r.status, 'err'); td.colSpan = 4; tr.append(td); body.append(tr); return; }
   if (!rows.length) { const tr = el('tr'); const td = el('td', 'No events logged yet.', 'muted'); td.colSpan = 4; tr.append(td); body.append(tr); }
   for (const e of rows.slice().reverse()) {
-    // A command is { name, args } as the player sent it: untrusted, so shown as text only.
-    const c = e.command;
-    const name = typeof c === 'string' ? c : c && typeof c.name === 'string' ? c.name + (Array.isArray(c.args) && c.args.length ? ' ' + JSON.stringify(c.args).slice(0, 120) : '') : JSON.stringify(c);
     const tr = el('tr');
-    tr.append(el('td', new Date(e.at).toISOString().slice(0, 19).replace('T', ' ')), el('td', typeof e.worldTime === 'number' ? String(Math.floor(e.worldTime)) : '—'),
-      el('td', name), el('td', e.ok ? 'applied' : 'refused: ' + (e.error || ''), e.ok ? 'ok' : 'err'));
+    tr.append(el('td', when(e.at)), el('td', year(e.worldTime)));
+    if (e.kind === 'command') {
+      // A command is { name, args } as the player sent it: untrusted, so shown as text only.
+      const c = e.command;
+      const name = typeof c === 'string' ? c : c && typeof c.name === 'string' ? c.name + (Array.isArray(c.args) && c.args.length ? ' ' + JSON.stringify(c.args).slice(0, 120) : '') : JSON.stringify(c);
+      tr.append(el('td', name), el('td', e.ok ? 'applied' : 'refused: ' + (e.error || ''), e.ok ? 'ok' : 'err'));
+    } else {
+      tr.append(el('td', e.kind + (e.actor && e.actor !== p.id ? ' (' + e.actor + ')' : '')), el('td', e.text || '', 'muted'));
+    }
+    body.append(tr);
+  }
+}
+const when = (at) => new Date(at).toISOString().slice(0, 19).replace('T', ' ');
+const year = (t) => (typeof t === 'number' ? String(Math.floor(t)) : '—');
+async function loadNpcLog() {
+  const body = document.getElementById('npcLog');
+  const r = await fetch('/api/admin/npc-events');
+  const rows = r.ok ? await r.json() : [];
+  body.replaceChildren();
+  if (!rows.length) { const tr = el('tr'); const td = el('td', r.ok ? 'No NPC empire has been discovered yet.' : 'Could not load: ' + r.status, r.ok ? 'muted' : 'err'); td.colSpan = 5; tr.append(td); body.append(tr); }
+  for (const e of rows.slice().reverse()) {
+    const tr = el('tr');
+    tr.append(el('td', when(e.at)), el('td', year(e.worldTime)), el('td', String(e.actor).replace(/^npc:/, '')), el('td', e.kind + ': ' + (e.text || '')), el('td', e.subject || '—'));
     body.append(tr);
   }
 }
@@ -226,4 +252,5 @@ document.getElementById('notifyTest').onclick = async () => {
 document.getElementById('annSave').onclick = () => announce(document.getElementById('ann').value);
 document.getElementById('annClear').onclick = () => announce('');
 load().catch((e) => { document.getElementById('players').textContent = 'Failed to load: ' + e.message; });
+loadNpcLog().catch(() => {});
 </script>`;

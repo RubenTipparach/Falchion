@@ -28,7 +28,7 @@ export interface PlayerRow extends RosterKey {
   /** Light years from your home to theirs (null when unknown). */
   readonly distance: number | null;
   readonly homeName: string | null;
-  /** Your relation with them when not plain neutral: 'At war', 'War declared', 'Ally', 'Proposal'. */
+  /** Your relation with them when not plain neutral: 'At war', 'War declared', 'Ally', 'Proposal', or 'Not met' before first contact. */
   readonly relation?: string;
 }
 
@@ -194,7 +194,7 @@ export class PlayersPanel extends Drawer {
         emblem(r.flag, r.color, 36),
         h('div', { class: 'player-id' },
           h('div', { class: 'player-name' }, h('b', {}, r.empireName), r.you ? h('small', { class: 'tag' }, 'YOU') : '',
-            r.relation ? h('small', { class: `tag relation ${r.relation === 'Ally' ? 'ally' : r.relation === 'Proposal' ? 'proposal' : 'war'}`, title: 'Diplomacy: Empire › Relations' }, r.relation.toUpperCase()) : ''),
+            r.relation ? h('small', { class: `tag relation ${r.relation === 'Ally' ? 'ally' : r.relation === 'Proposal' ? 'proposal' : r.relation === 'Not met' ? 'unmet' : 'war'}`, title: r.relation === 'Not met' ? 'No dealings before first contact: bring a fleet near their space' : 'Diplomacy: Empire › Relations' }, r.relation.toUpperCase()) : ''),
           h('div', { class: 'small muted' }, ruler ? `${ruler} · ` : '', h('span', { class: 'player-discord' }, r.discordName))),
         h('span', { class: `chat-dot ${r.online ? 'on' : ''}`, title: r.online ? 'In the game now' : 'Away' }),
         r.homeName ? locateButton(`Fly to ${r.you ? 'your' : `the ${r.empireName}'s`} home, ${r.homeName}`, (closeUp) => this.ctx.locateHome(r.id, closeUp)) : '',

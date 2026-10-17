@@ -17,7 +17,7 @@ import { planSurvey } from '../core/fleet/Survey';
 import { minedBy, nearestMine, stockFor } from '../core/fleet/AutoMine';
 import { fieldLeft, fieldsOf, homeBelt, yearsToFull, type AsteroidField } from '../core/galaxy/Asteroids';
 import { applyEffects, EMPTY_WORLD, type SharedEffect, type SharedWorld } from '../core/world/SharedWorld';
-import { actionsFor, allied, applyDiplomacy, atWar, newsOf, relationOf, type DiplomaticAction, type Relation } from '../core/diplomacy/Diplomacy';
+import { actionsFor, allied, applyDiplomacy, atWar, haveMet, newsOf, pairKey, relationOf, type DiplomaticAction, type Relation } from '../core/diplomacy/Diplomacy';
 import { DISCOVERY_RANGE, gridNpcsNear, HOME_TERRITORY, initialNpcState, nearNpc, npcById, spawnNpcs, territoryOf, worldDefense, type NpcDef } from '../core/npc/NpcCatalog';
 import { stepNpcs, type RaidTargets } from '../core/npc/NpcSim';
 import type { NpcRaid, NpcState } from '../core/npc/types';
@@ -1366,8 +1366,17 @@ export class EmpireSim {
     return this.otherEmpires().filter((e) => allied(rel, this.me, e.id));
   }
 
-  /** Every other player with the relation, any proposal and what you can do (the Relations tab). */
-  diplomacyView = (): DiplomacyView[] => this.otherEmpires().filter((e) => e.id !== this.me).map((empire) => {
+  /** Whether this empire has met another player (first contact): only then can they deal. */
+  hasMet = (other: string): boolean => {
+    const w = this.sharedWorld();
+    return haveMet(w.contacts, w.relations, this.me, other);
+  };
+
+  /** Other players this empire has not met yet (the Relations tab counts them). */
+  unmetEmpires = (): number => this.otherEmpires().filter((e) => e.id !== this.me && !this.hasMet(e.id)).length;
+
+  /** Every player this empire has met, with the relation, any proposal and what you can do (the Relations tab). */
+  diplomacyView = (): DiplomacyView[] => this.otherEmpires().filter((e) => e.id !== this.me && this.hasMet(e.id)).map((empire) => {
     const relation = this.relationWith(empire.id);
     return { empire, relation, atWar: this.atWarWith(empire.id), actions: actionsFor(relation, this.me) };
   });
@@ -1376,6 +1385,7 @@ export class EmpireSim {
   diplomacy(other: string, action: DiplomaticAction): void {
     const empire = this.otherEmpires().find((e) => e.id === other);
     const time = Math.max(this.state.turn, this.now());
+    if (empire && other !== this.me && !this.hasMet(other)) return this.dispatch(`We have not met ${empire.name.slice(0, 100)} yet: our fleets or worlds must come near theirs first`, 'bad');
     if (!empire || other === this.me || !applyDiplomacy(this.relationWith(other), this.me, action, time)) return this.dispatch('That is not possible with them now', 'bad');
     this.emit([{ kind: 'diplomacy', by: this.me, other, action, at: time }]);
     const them = empire.name.slice(0, 100);
@@ -1390,12 +1400,14 @@ export class EmpireSim {
     if (action !== 'decline' && action !== 'withdraw') this.deps.report?.('diplomacy', text);
   }
 
-  /** What other players did toward this empire during the year now ending. */
+  /** Empires met for the first time, and what other players did toward this one, during the year now ending. */
   protected diplomaticNews(): string[] {
     const s = this.state;
-    const rel = this.sharedWorld().relations;
+    const { relations: rel, contacts } = this.sharedWorld();
     const out: string[] = [];
     for (const e of this.otherEmpires()) {
+      const met = contacts?.[pairKey(this.me, e.id)];
+      if (e.id !== this.me && met !== undefined && Math.floor(met) === s.turn) out.push(`First contact with ${e.name.slice(0, 100)}: we can now deal with them in Empire › Relations`);
       const r = relationOf(rel, this.me, e.id);
       if (r.by === e.id && r.at !== undefined && Math.floor(r.at) === s.turn) {
         const line = newsOf(r, e.name.slice(0, 100));

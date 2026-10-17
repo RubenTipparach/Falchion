@@ -52,7 +52,7 @@ export function createCommandService({ store, loadSim, withLock, worldTime, worl
       const record = await store.load(user.id);
       if (!record?.save) return { status: 404, body: { ok: false, error: 'no empire yet' } };
       const player = { id: user.id, name: String(record.player?.name ?? user.name ?? 'Commander') };
-      // Read once: the log must hold exactly the times the rules ran with, for a replay.
+      // Read once: the log records the time the rules ran with.
       const time = worldTime();
       const clientTime = typeof body?.time === 'number' ? body.time : undefined;
       const result = sim.applyCommand(record.save, player, time, body?.command, clientTime, world ? await world.get() : undefined, traders);

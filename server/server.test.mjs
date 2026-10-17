@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createAuth, parseCookies } from './auth.mjs';
-import { createStore } from './store.mjs';
+import { createStore, importLegacySaves } from './store.mjs';
+import { dbDoc, fileDoc, importDoc, openDb } from './db.mjs';
 
 function fakeRes() {
   return {
@@ -80,6 +81,32 @@ describe('player store', () => {
     expect(players).toHaveLength(1);
     expect(players[0]).toMatchObject({ id: '123456789012345678', name: 'Ruben', home: { q: 1, r: 2 } });
     expect('save' in players[0]).toBe(false);
+  });
+
+  it('imports the save files of earlier versions once, never over what the database holds', async () => {
+    const legacy = mkdtempSync(join(tmpdir(), 'falchion-legacy-'));
+    const { writeFileSync } = await import('node:fs');
+    const A = '111111111111111111', B = '222222222222222222';
+    writeFileSync(join(legacy, `${A}.json`), JSON.stringify({ player: { id: A, name: 'Old A' }, save: { turn: 9 }, public: { colonies: [], fleets: [] }, updatedAt: 1 }));
+    writeFileSync(join(legacy, `${B}.json`), JSON.stringify({ player: { id: B, name: 'Old B' }, save: { turn: 2 }, updatedAt: 1 }));
+    writeFileSync(join(legacy, '_announcement.json'), JSON.stringify({ text: 'hello' }));
+    writeFileSync(join(legacy, 'world.json'), JSON.stringify({ tick: 4, npcs: {}, asteroids: {} }));
+    writeFileSync(join(legacy, 'notes.txt'), 'not a save');
+    const store = createStore({ db: openDb(':memory:'), dir: legacy });
+    await store.save(B, { player: { id: B, name: 'New B' }, save: { turn: 30 }, updatedAt: 5 });
+    expect(await importLegacySaves(store)).toBe(1);
+    expect((await store.load(A)).save.turn).toBe(9);
+    expect((await store.load(B)).save.turn).toBe(30);
+    expect(await store.getSetting('announcement')).toEqual({ text: 'hello' });
+    expect(await importLegacySaves(store)).toBe(0);
+    const doc = dbDoc(store.db, 'world');
+    expect(await importDoc(doc, fileDoc(join(legacy, 'world.json')))).toBe(true);
+    expect(JSON.parse(await doc.read()).tick).toBe(4);
+    expect(await importDoc(doc, fileDoc(join(legacy, 'world.json')))).toBe(false);
+    expect((await store.summaries()).map((p) => p.name)).toEqual(['New B', 'Old A']);
+    expect(await store.remove(A)).toBe(true);
+    expect(await store.ids()).toEqual([B]);
+    rmSync(legacy, { recursive: true, force: true });
   });
 
   it('never touches the filesystem for non-snowflake ids', async () => {

@@ -3,6 +3,8 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSharedWorld } from './world.mjs';
+import { dbDoc, openDb } from './db.mjs';
+import { createEventLog } from './eventLog.mjs';
 import { createSimTicker } from './simTicker.mjs';
 import { createLocks } from './locks.mjs';
 import * as sim from '../src/sim/headless.ts';
@@ -64,7 +66,8 @@ describe('the shared world on the server', () => {
     const start = { tick: 602, asteroids: {}, npcs: { [def.id]: { ...npc, knownBy: [A], fleets: [raiding] } } };
     const { writeFile } = await import('node:fs/promises');
     await writeFile(join(dir, 'world.json'), JSON.stringify(start));
-    const world = createSharedWorld({ file: join(dir, 'world.json'), loadSim: async () => sim, withLock });
+    const log = createEventLog({ db: openDb(':memory:') });
+    const world = createSharedWorld({ file: join(dir, 'world.json'), loadSim: async () => sim, withLock, record: log.record });
     const map = new Map([[A, { ...rec, public: { home: rec.home.hex, colonies: [], fleets: [] } }]]);
     const store = { ids: async () => [...map.keys()], load: async (id) => structuredClone(map.get(id)), save: async (id, r) => { map.set(id, structuredClone(r)); } };
     await createSimTicker({ store, loadSim: async () => sim, withLock, world }).tick(tick);
@@ -73,6 +76,31 @@ describe('the shared world on the server', () => {
     const after = await world.get();
     expect(after.tick).toBe(tick);
     expect(after.npcs[def.id].fleets.find((f) => f.id === raiding.id)?.mission ?? 'destroyed').not.toBe('raid');
+    // The NPC's decision is in the event log, aimed at the empire it struck.
+    const logged = await log.read(A);
+    expect(logged).toEqual(expect.arrayContaining([expect.objectContaining({ actor: `npc:${def.id}`, kind: 'strike', subject: A, worldTime: tick })]));
+  });
+
+  it('keeps the world in the database; empires that come near each other meet, and it is logged', async () => {
+    const db = openDb(':memory:');
+    const log = createEventLog({ db });
+    const withLock = createLocks();
+    const world = createSharedWorld({ doc: dbDoc(db, 'world'), loadSim: async () => sim, withLock, record: log.record });
+    const A = '111111111111111111', B = '222222222222222222';
+    const a = record(A, 700), b = record(B, 700);
+    // A's scout sits beside B's home.
+    const near = { q: b.home.hex.q + 1, r: b.home.hex.r };
+    a.save.fleets = a.save.fleets.map((f) => (f.id === 'scout-1' ? { ...f, movement: { route: [near], departTurn: 0, speed: 1 } } : f));
+    const map = new Map([[A, a], [B, b]]);
+    const store = { ids: async () => [...map.keys()], load: async (id) => structuredClone(map.get(id)), save: async (id, r) => { map.set(id, structuredClone(r)); } };
+    await createSimTicker({ store, loadSim: async () => sim, withLock, world }).tick(701);
+    const met = await world.get();
+    expect(Object.keys(met.contacts ?? {})).toEqual([`${A}|${B}`]);
+    expect(JSON.parse(db.prepare("SELECT value FROM docs WHERE key = 'world'").get().value).contacts).toEqual(met.contacts);
+    expect(await log.read(B)).toEqual(expect.arrayContaining([expect.objectContaining({ actor: A, subject: B, kind: 'contact', worldTime: 701 })]));
+    // B hears of it in its next year.
+    await createSimTicker({ store, loadSim: async () => sim, withLock, world }).tick(702);
+    expect(map.get(B).save.dispatches.map((d) => d.text).join('\n')).toContain('First contact with');
   });
 
   it('starts empty when there is no world yet, or it is unreadable', async () => {

@@ -167,7 +167,7 @@ describe('the other empires are read once a world year for orders', () => {
 describe('fleets of two players that meet at sea fight in the year', () => {
   /** The shared world with A and B long at war (only empires at war fight). */
   const atWar = () => {
-    const war = sim.applyEffects(sim.EMPTY_WORLD, [{ kind: 'diplomacy', by: A, other: B, action: 'declare-war', at: 0 }]);
+    const war = sim.applyEffects(sim.EMPTY_WORLD, [{ kind: 'contact', a: A, b: B, at: 0 }, { kind: 'diplomacy', by: A, other: B, action: 'declare-war', at: 0 }]);
     return { get: async () => war, apply: async () => war };
   };
 

@@ -17,7 +17,7 @@ import { colorFor, isFleetMovement, publicEmpire, type PublicEmpire } from '../a
 import { Store } from '../app/Store';
 import { createWorld } from '../app/World';
 import { EmpireSim, snapshotLink, type ContactForce, type OtherEmpire, type SimDeps } from './EmpireSim';
-import { atWar } from '../core/diplomacy/Diplomacy';
+import { atWar, firstContacts, type Presence } from '../core/diplomacy/Diplomacy';
 import { applyEffects, EMPTY_WORLD, validWorld, type SharedEffect, type SharedWorld } from '../core/world/SharedWorld';
 
 /** The server applies empires' changes to the shared world with the same rules. */
@@ -26,7 +26,7 @@ import { CommandError, decodeArgs, type Command } from './commands';
 import { allPlayerMarkets, marketsFor, type TradingEmpire } from '../core/economy/PlayerMarkets';
 import type { Market } from '../core/economy/Trade';
 import { stepNpcs, type RaidTargets } from '../core/npc/NpcSim';
-import type { NpcRaid } from '../core/npc/types';
+import type { NpcDecision, NpcRaid } from '../core/npc/types';
 import { hexAt, type FleetMovement } from '../core/fleet/Fleet';
 import { attacks, isStationed, nextRound, startsFight, type Encounter, type ForeignFleet } from '../core/fleet/Presence';
 import { hexEquals, type Hex } from '../core/hex/Hex';
@@ -152,7 +152,7 @@ export interface ContactResult {
  * colonies and fleets on station as what their raiders can strike. Returns the new world and the
  * raids, which each struck empire resolves when it plays its year (advanceSave).
  */
-export function stepWorld(world: unknown, tick: number, players: ReadonlyArray<{ readonly id: string; readonly public?: PublicRecord | null }>): { world: SharedWorld; raids: NpcRaid[] } {
+export function stepWorld(world: unknown, tick: number, players: ReadonlyArray<{ readonly id: string; readonly public?: PublicRecord | null }>): { world: SharedWorld; raids: NpcRaid[]; decisions: NpcDecision[] } {
   const w = validWorld(world) ? world : EMPTY_WORLD;
   const isHex = (h: unknown): h is Hex => !!h && Number.isInteger((h as Hex).q) && Number.isInteger((h as Hex).r);
   const targets: RaidTargets[] = players.map((p) => {
@@ -162,6 +162,23 @@ export function stepWorld(world: unknown, tick: number, players: ReadonlyArray<{
     return { player: p.id, targets: [...colonies.map((hex) => ({ hex, what: 'colony' as const })), ...fleets.map((hex) => ({ hex, what: 'fleet' as const }))] };
   });
   return stepNpcs(w, tick, tables().galaxy, targets);
+}
+
+/**
+ * First contacts in `tick`, from the stored public views: two players who had not met, with a
+ * world or fleet (on station or under way) of one near one of the other's. The `contact` effects
+ * to apply to the shared world, and where each pair met.
+ */
+export function findFirstContacts(players: ReadonlyArray<{ readonly id: string; readonly public?: PublicRecord | null }>, tick: number, world?: SharedWorld | null): Array<{ effect: SharedEffect; at: Hex }> {
+  const w = validWorld(world) ? world : EMPTY_WORLD;
+  const isHex = (h: unknown): h is Hex => !!h && Number.isInteger((h as Hex).q) && Number.isInteger((h as Hex).r);
+  const presence: Presence[] = players.map((p) => {
+    const pub = p.public ?? {};
+    const worlds = [pub.home, ...(pub.colonies ?? [])].filter(isHex);
+    const fleets = (pub.fleets ?? []).map((f) => f.movement).filter((m): m is FleetMovement => isFleetMovement(m) && m.route.length > 0).map((m) => hexAt(m, tick));
+    return { player: p.id, hexes: [...worlds, ...fleets] };
+  });
+  return firstContacts(presence, w.contacts, w.relations).map((c) => ({ effect: { kind: 'contact', a: c.a, b: c.b, at: tick }, at: c.at }));
 }
 
 /**

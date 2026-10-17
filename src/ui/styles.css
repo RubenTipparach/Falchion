@@ -774,3 +774,5 @@ button.chat-mention:hover { filter: brightness(1.25); }
 .tag.relation.war { color: var(--bad, #ff5d5d); border-color: var(--bad, #ff5d5d); }
 .tag.relation.ally { color: var(--good, #7cff9b); border-color: var(--good, #7cff9b); }
 .tag.relation.proposal { color: var(--brass, #e6b450); border-color: var(--brass, #e6b450); }
+.tag.relation.unmet { color: var(--muted); border-color: var(--line-strong); }
+.unmet { border-left: 2px solid var(--line-strong); padding-left: 8px; }

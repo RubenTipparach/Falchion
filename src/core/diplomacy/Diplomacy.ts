@@ -3,6 +3,8 @@
  * War is declared by one side and starts a year later; peace and alliances are proposed by one
  * side and agreed by the other; either ally may break an alliance. Pure: relations are plain data
  * in the shared world (src/core/world/SharedWorld.ts), changed only through `applyDiplomacy`.
+ * As in Civilization, two empires can deal with each other only once they have met: a fleet or
+ * world of one came within CONTACT_RANGE of a fleet or world of the other (first contact).
  */
 export type RelationStatus = 'neutral' | 'war' | 'alliance';
 
@@ -35,6 +37,22 @@ export const NEUTRAL: Relation = { status: 'neutral', since: 0 };
 
 /** The key of a pair of players, the same whichever is named first. */
 export const pairKey = (a: string, b: string): string => (a < b ? `${a}|${b}` : `${b}|${a}`);
+
+/** Hexes within which a fleet or world of one empire meets one of another's: first contact. */
+export const CONTACT_RANGE = 2;
+
+/** First contacts: pairKey → the world time the two empires met. */
+export type Contacts = Readonly<Record<string, number>>;
+
+/**
+ * Whether two players have met. A pair that already had dealings (a relation on record from
+ * before first contact existed) counts as met.
+ */
+export function haveMet(contacts: Contacts | undefined, relations: Readonly<Record<string, Relation>> | undefined, a: string, b: string): boolean {
+  if (a === b) return false;
+  const key = pairKey(a, b);
+  return contacts?.[key] !== undefined || relations?.[key] !== undefined;
+}
 
 export function relationOf(relations: Readonly<Record<string, Relation>> | undefined, a: string, b: string): Relation {
   return relations?.[pairKey(a, b)] ?? NEUTRAL;
@@ -98,4 +116,44 @@ export function newsOf(r: Relation, them: string): string | null {
     case 'break-alliance': return `${them} has broken your alliance`;
     default: return null;
   }
+}
+
+/** Where an empire is: its worlds and its fleets (on station or under way) this year. */
+export interface Presence {
+  readonly player: string;
+  readonly hexes: ReadonlyArray<{ readonly q: number; readonly r: number }>;
+}
+
+/**
+ * The pairs of players meeting for the first time: a hex of one within CONTACT_RANGE of a hex of
+ * the other, and not met before. Each pair once, in a stable order, with where they met.
+ */
+export function firstContacts(presence: readonly Presence[], contacts: Contacts | undefined, relations: Readonly<Record<string, Relation>> | undefined): Array<{ a: string; b: string; at: { q: number; r: number } }> {
+  const byHex = new Map<string, Set<string>>();
+  for (const p of presence) {
+    for (const h of p.hexes) {
+      const k = `${h.q},${h.r}`;
+      let s = byHex.get(k);
+      if (!s) byHex.set(k, (s = new Set()));
+      s.add(p.player);
+    }
+  }
+  const found = new Map<string, { a: string; b: string; at: { q: number; r: number } }>();
+  const players = [...presence].sort((x, y) => (x.player < y.player ? -1 : x.player > y.player ? 1 : 0));
+  for (const p of players) {
+    for (const h of p.hexes) {
+      for (let dq = -CONTACT_RANGE; dq <= CONTACT_RANGE; dq++) {
+        for (let dr = Math.max(-CONTACT_RANGE, -dq - CONTACT_RANGE); dr <= Math.min(CONTACT_RANGE, -dq + CONTACT_RANGE); dr++) {
+          for (const other of byHex.get(`${h.q + dq},${h.r + dr}`) ?? []) {
+            if (other === p.player) continue;
+            const key = pairKey(p.player, other);
+            if (found.has(key) || haveMet(contacts, relations, p.player, other)) continue;
+            const [a, b] = p.player < other ? [p.player, other] : [other, p.player];
+            found.set(key, { a, b, at: { q: h.q, r: h.r } });
+          }
+        }
+      }
+    }
+  }
+  return [...found.values()];
 }

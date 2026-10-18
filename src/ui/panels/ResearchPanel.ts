@@ -55,6 +55,15 @@ export class ResearchPanel extends Drawer {
     this.render();
   }
 
+  /** Where science aimed at a focus goes this year: the focus, the next step on its path, or nowhere yet. */
+  private flowNote(focusId: string): HTMLElement {
+    const state = this.store.state.empire.research;
+    const target = this.tree.scienceTarget(state, focusId);
+    if (target === focusId) return h('small', { class: 'flow-note' }, 'Science goes here each year');
+    if (target) return h('small', { class: 'flow-note' }, 'Science goes to ', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.focusNode(target); } }, this.tree.node(target).name), ' first, on the way');
+    return h('small', { class: 'flow-note red' }, this.tree.canResearch(state, focusId) ? 'Ready: press Research' : 'Nothing on the way can take shards yet');
+  }
+
   /** Open on one technology: its area, selected, scrolled into view (e.g. what a locked item needs). */
   focusNode(nodeId: string): void {
     const node = this.tree.nodes.find((n) => n.id === nodeId);
@@ -102,7 +111,7 @@ export class ResearchPanel extends Drawer {
     this.summary.replaceChildren(
       h('div', { class: 'kv' }, h('span', {}, 'Researched'), h('b', {}, `${state.researched.length} / ${this.tree.nodes.length}`)),
       h('div', { class: 'kv' }, h('span', {}, 'Science'), h('b', {}, `+${science} shards / yr`)),
-      h('div', { class: 'kv grow' }, h('span', {}, 'Focus'), h('b', {}, focus ? focus.name : 'None — pick a node and press Set focus')),
+      h('div', { class: 'kv grow' }, h('span', {}, 'Focus'), h('b', {}, focus ? focus.name : 'None — pick a node and press Set focus'), focus ? this.flowNote(focus.id) : ''),
     );
     this.tabs.replaceChildren(
       this.tabButton('overview', 'Overview'),
@@ -229,6 +238,7 @@ export class ResearchPanel extends Drawer {
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', disabled: status !== 'researchable', onclick: () => this.actions.research(node.id) }, status === 'researched' ? 'Researched' : 'Research'),
         h('button', { class: `btn ${isFocus ? 'on' : ''}`, disabled: status === 'researched' || status === 'locked', onclick: () => this.actions.setFocus(isFocus ? null : node.id) }, isFocus ? 'Focused — science flows here each year' : 'Set focus')),
+      isFocus ? this.flowNote(node.id) : '',
     );
   }
 }

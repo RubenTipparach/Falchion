@@ -53,6 +53,34 @@ export class TechTree {
     return this.shardsOf(state, id) >= this.node(id).shards ? 'researchable' : 'available';
   }
 
+  /**
+   * Where science aimed at `focus` goes: the focus itself if it can take shards, otherwise the first
+   * unfinished prerequisite on the way to it (depth first, in the order listed), so science is never
+   * wasted on a node that cannot take it yet. Null when nothing on the way can take shards.
+   */
+  scienceTarget(state: ResearchState, focus: string): string | null {
+    const seen = new Set<string>();
+    const has = (r: string) => state.researched.includes(r);
+    const visit = (id: string): string | null => {
+      if (seen.has(id) || has(id) || this.isLocked(state, id)) return null;
+      seen.add(id);
+      if (this.prerequisitesMet(state, id)) return this.shardsOf(state, id) < this.node(id).shards ? id : null;
+      const n = this.node(id);
+      for (const r of n.requires) { const t = visit(r); if (t) return t; }
+      if (n.requiresAny?.length && !n.requiresAny.some(has)) for (const r of n.requiresAny) { const t = visit(r); if (t) return t; }
+      return null;
+    };
+    return visit(focus);
+  }
+
+  /**
+   * Nodes that research themselves once full: any researchable node that is not a choice (an
+   * exclusive group member or an analog locks something else, so the player researches those).
+   */
+  autoResearchable(state: ResearchState): string[] {
+    return this.nodes.filter((n) => !n.exclusiveGroup && !n.analogOf && this.canResearch(state, n.id)).map((n) => n.id);
+  }
+
   canResearch(state: ResearchState, id: string): boolean {
     return this.availability(state, id) === 'researchable';
   }

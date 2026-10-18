@@ -355,14 +355,36 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   }
   if (full.length) lines.push(`Storage full: ${full.join(', ')}. Spend it, or build Warehouses`);
 
-  // Research: science into focus, espionage into alien tech
+  // Research: science into focus (or the next step on the way to it), espionage into alien tech
   let res = research;
   const science = sciencePerTurn(e, t, research);
-  if (e.focus && t.tree.canReceive(res, e.focus, 'science')) {
-    res = t.tree.grantShards(res, e.focus, 'science', science);
-    lines.push(`Science: +${science} shards to ${t.tree.node(e.focus).name}`);
-  } else if (e.focus) {
-    lines.push(`Science idle: ${t.tree.node(e.focus).name} is not reachable yet`);
+  let focus = e.focus;
+  if (focus) {
+    // Shards go where they can land: the focus, or the next unfinished prerequisite on its path; what
+    // one node cannot hold flows on to the next, and full nodes research themselves (choices aside).
+    let left = science;
+    const fed = new Map<string, number>();
+    for (let guard = 0; left > 0 && guard < 12; guard++) {
+      res = autoResearch(res, t, lines);
+      const target = t.tree.scienceTarget(res, focus);
+      if (!target) break;
+      const before = t.tree.shardsOf(res, target);
+      res = t.tree.grantShards(res, target, 'science', left);
+      const given = t.tree.shardsOf(res, target) - before;
+      if (!given) break;
+      fed.set(target, (fed.get(target) ?? 0) + given);
+      left -= given;
+    }
+    res = autoResearch(res, t, lines);
+    const goal = t.tree.node(focus).name;
+    for (const [id, n] of fed) lines.push(id === focus ? `Science: +${n} shards to ${goal}` : `Science: +${n} shards to ${t.tree.node(id).name}, on the way to ${goal}`);
+    if (res.researched.includes(focus)) {
+      lines.push(`${goal} researched: pick a new research focus`);
+      focus = null;
+    } else if (!fed.size) {
+      const ready = t.tree.canResearch(res, focus) ? goal : null;
+      lines.push(ready ? `Science idle: ${ready} is ready. Research it to choose it` : `Science idle: nothing on the way to ${goal} can take shards yet`);
+    }
   } else {
     lines.push('Science idle: pick a research focus');
   }
@@ -381,7 +403,8 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   // and only what the stores cannot cover makes it shrink.
   const colonies = populationYear(e, t, income.food ?? 0, lines);
 
-  return { economy: { ...e, stock, faith, colonies }, research: res, report: { income, lines, science, ledger }, mined };
+  res = autoResearch(res, t, lines);
+  return { economy: { ...e, stock, faith, colonies, focus }, research: res, report: { income, lines, science, ledger }, mined };
 }
 
 /**
@@ -414,6 +437,17 @@ export function pay(stock: Stockpile, cost: Partial<Record<Resource, number>>, d
   const out = { ...stock };
   for (const [r, n] of Object.entries(cost)) out[r as Resource] -= Math.ceil(n! * (1 - discountPct / 100));
   return out;
+}
+
+/** Research every full node that is not a choice; report each. */
+function autoResearch(res: ResearchState, t: EconomyTables, lines: string[]): ResearchState {
+  for (let ids = t.tree.autoResearchable(res); ids.length; ids = t.tree.autoResearchable(res)) {
+    for (const id of ids) {
+      res = t.tree.research(res, id);
+      lines.push(`Researched ${t.tree.node(id).name}`);
+    }
+  }
+  return res;
 }
 
 /** A one-off change to the stores outside the yearly economy: a purchase, a sale, loot, plunder. */

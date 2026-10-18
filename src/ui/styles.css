@@ -922,6 +922,8 @@ img.thumb:not(.ready) { animation: thumb-wait 1.2s ease-in-out infinite alternat
 @keyframes thumb-wait { from { opacity: 0.35; } to { opacity: 0.7; } }
 .stock .thumb { grid-row: 1 / span 2; align-self: center; width: 36px; height: 36px; }
 .tnode .thumb { position: absolute; right: 2px; bottom: 2px; opacity: 0.55; background: none; pointer-events: none; }
+/* The bar and shard count stop short of the thumbnail (owner: "please dont extend research bar all the way"). */
+.tnode .tbar, .tnode .tshards { margin-right: 40px; }
 .tnode .tname, .tnode .tbar, .tnode .tshards { position: relative; }
 .tnode.researched .thumb, .tnode.researchable .thumb, .tnode.selected .thumb { opacity: 0.85; }
 .class-btn .thumb { background: none; width: 64px; height: 32px; object-fit: cover; }
@@ -987,3 +989,6 @@ img.thumb:not(.ready) { animation: thumb-wait 1.2s ease-in-out infinite alternat
 @media (max-width: 720px) {
   .ledger { left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; max-height: 72vh; background: #080c16; border-radius: 12px 12px 0 0; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
 }
+
+.flow-note { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+.flow-note a { color: var(--chart); }

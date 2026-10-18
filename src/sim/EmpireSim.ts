@@ -764,7 +764,9 @@ export class EmpireSim {
     const research = this.deps.tree.research(s.empire.research, nodeId);
     const node = this.deps.tree.node(nodeId);
     const focus = s.economy.focus === nodeId ? null : s.economy.focus;
+    const speed = this.fleetSpeed();
     this.deps.store.update({ empire: { ...s.empire, research }, economy: { ...s.economy, focus } });
+    if (this.fleetSpeed() !== speed) this.retimeFleets();
     const unlocked = node.grants.filter((g) => g.kind === 'chassis').map((g) => this.classById.get(g.id)?.name).filter(Boolean);
     this.dispatch(`Researched ${node.name}${unlocked.length ? ` — unlocks ${unlocked.join(', ')}` : ''}`, 'good');
   }
@@ -1754,6 +1756,7 @@ export class EmpireSim {
     // players did toward this empire since last year.
     const met = [...this.discover(), ...this.diplomaticNews()];
     const s = this.state;
+    const speed = this.fleetSpeed();
     const { economy, research, report, mined } = resolveTurn({ ...s.economy, stock: s.empire.materials }, s.empire.research, s.turn, this.deps.economy, this.presence());
     this.drawFields(mined);
     const next = s.turn + 1;
@@ -1793,6 +1796,8 @@ export class EmpireSim {
       engaged: [],
       dispatches: news.length ? [...news, ...s.dispatches].slice(0, 40) : s.dispatches,
     });
+    // Research that finished this year (full nodes research themselves) may speed fleets up.
+    if (this.fleetSpeed() !== speed) this.retimeFleets();
     this.sampleRelations(next);
     // A guest's browser runs the NPCs itself (the server does for everyone else).
     if (this.deps.npcs === 'local') {

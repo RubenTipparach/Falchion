@@ -12,7 +12,7 @@ import { ThumbStudio } from './ThumbStudio';
 import { preloadHullTextures } from '../ships/hullTextures';
 import { LIVERIES, SHIP_PALETTES } from '../../content/liveries';
 
-const STYLES = ['technological', 'utilitarian', 'organic', 'geometric', 'classic'];
+const STYLES = ['technological', 'utilitarian', 'organic', 'geometric', 'classic', 'industrial'];
 
 /**
  * Every thumbnail in one page (tools/thumbs/sheet.html), for `npm run thumbs` to capture and a

@@ -6,11 +6,11 @@ import type { ShipStyleGenerator } from './ShipStyleGenerator';
 describe('ship generators', () => {
   const { factory, styles, traits } = createDefaultShipFactory();
 
-  it('provides the five styles', () => {
-    expect(styles.list().map((s) => s.id).sort()).toEqual(['classic', 'geometric', 'organic', 'technological', 'utilitarian']);
+  it('provides the six styles', () => {
+    expect(styles.list().map((s) => s.id).sort()).toEqual(['classic', 'geometric', 'industrial', 'organic', 'technological', 'utilitarian']);
   });
 
-  it.each(['organic', 'technological', 'classic', 'geometric', 'utilitarian'])('%s is deterministic per design', (style) => {
+  it.each(['organic', 'technological', 'classic', 'geometric', 'utilitarian', 'industrial'])('%s is deterministic per design', (style) => {
     for (const seed of [1, 2, 99]) {
       const d = { ...DEFAULT_DESIGN, style, seed, engines: 3, weapons: 3 };
       const a = factory.create(d), b = factory.create(d);

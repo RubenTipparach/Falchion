@@ -3,6 +3,7 @@ import type { PlanetLook } from '../../content/planetLooks';
 import { Rng } from '../../core/rng/Rng';
 import { LIGHT_MAP_GLSL, NO_LIGHTS } from './NightLightMap';
 import { NOISE_GLSL } from './noise.glsl';
+import { ATMOSPHERE_GLSL, atmosphereDefines } from './atmosphere.glsl';
 import { surfaceLookOf, type SurfaceLook } from '../../core/surface/Terrain';
 
 const KIND: Record<PlanetLook['kind'], number> = { rocky: 0, gas: 1, lava: 2 };
@@ -26,24 +27,13 @@ void main() {
 
 /**
  * Optional features (change worlds-and-stars), each compiled in only for a look that asks for it
- * (#define), so every older look compiles to exactly the shader it had.
+ * (#define), so every older look compiles to exactly the shader it had. The weather (haze,
+ * lightning, aurora) is in ATMOSPHERE_GLSL, shared with the close-up; hash13 and cubeUV too.
  */
 const FEATURES_GLSL = /* glsl */ `
-#if defined(LIGHTNING) || defined(PATTERN)
-float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+#ifdef PATTERN
 /** Antialiased line: 1 within halfW of an integer of g (at least about a pixel wide). */
 float gridLine(float g, float halfW) { float fw = fwidth(g); float w = max(halfW, fw * 0.6); float d = abs(g - floor(g + 0.5)); return 1.0 - smoothstep(w - fw * 0.5, w + fw * 0.5, d); }
-#endif
-#if defined(LIGHTNING) || defined(PATTERN)
-/** Cube-map coordinates of a direction: xy in -1..1 on its face, z the face (0..5). */
-vec3 cubeUV(vec3 d) {
-  vec3 a = abs(d);
-  if (a.x >= a.y && a.x >= a.z) return vec3(d.zy / a.x, d.x > 0.0 ? 0.0 : 1.0);
-  if (a.y >= a.z) return vec3(d.xz / a.y, d.y > 0.0 ? 2.0 : 3.0);
-  return vec3(d.xy / a.z, d.z > 0.0 ? 4.0 : 5.0);
-}
-#endif
-#ifdef PATTERN
 #if PATTERN == 4
 /**
  * Giant skeletons, one round each of six directions (an octahedron turned by the seed, so every
@@ -116,6 +106,7 @@ uniform float uHaze;
 varying vec3 vObj; varying vec3 vNormalW; varying vec3 vPosW;
 ${NOISE_GLSL}
 ${LIGHT_MAP_GLSL}
+${ATMOSPHERE_GLSL}
 ${FEATURES_GLSL}
 void main() {
   vec3 n = normalize(vNormalW);
@@ -255,9 +246,8 @@ void main() {
   col = mix(col, vec3(0.98, 0.95, 0.87), bo.x);
   #endif
 #endif
-  // Clouds drift slowly
-  float c = fbm(vObj * (uDetail * 1.4) + uSeed.zxy + vec3(uTime * 0.015, 0.0, uTime * 0.008));
-  float cloud = smoothstep(0.05, 0.55, c) * uClouds;
+  // Clouds drift slowly (the close-up's cloud shell draws the same ones).
+  float cloud = cloudCover(vObj, uSeed, uDetail, uTime, uClouds);
   col = mix(col, uCloud, cloud);
   spec *= 1.0 - cloud;
   emissive += uCityGlow * lights * (1.0 - smoothstep(-0.18, 0.08, ndl)) * (1.0 - cloud * 0.5) * 1.1;
@@ -268,66 +258,21 @@ void main() {
   emissive += patE * (1.0 - cloud * 0.6);
 #endif
 #ifdef HAZE
-  // A thick deck in banded swirls: the surface hidden.
-  float hz = fbm(vec3(vObj.x * 1.6, vObj.y * 5.0, vObj.z * 1.6) + uSeed.yzx + vec3(uTime * 0.006, 0.0, 0.0));
-  float bands = 0.5 + 0.5 * sin(vObj.y * 8.0 + hz * 3.5);
-  vec3 deck = mix(uCloud, uC3, bands * 0.65) * (0.88 + 0.24 * hz);
-  float cover = uHaze * (0.85 + 0.15 * smoothstep(-0.3, 0.3, hz));
-  #ifdef LIGHTNING
-  // Storm world: the deck wound into cyclones.
-  float swirl = 0.0;
-  for (int i = 0; i < 6; i++) {
-    float fi = float(i);
-    vec3 sc = normalize(vec3(sin(uSeed.x + fi * 2.3), sin(uSeed.y + fi * 1.4) * 0.7, cos(uSeed.x + fi * 2.3)));
-    float k = dot(vObj, sc);
-    if (k < 0.7) continue;
-    vec3 up = abs(sc.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
-    vec3 a1 = normalize(cross(up, sc)), a2 = cross(sc, a1);
-    vec3 q = vObj / k - sc;
-    float r = length(q);
-    float ang = atan(dot(q, a2), dot(q, a1));
-    float arm = 0.5 + 0.5 * sin(ang * 2.0 + log(r + 0.02) * 7.0 - uTime * 0.2 + hz * 2.0);
-    float reach = 1.0 - smoothstep(0.15, 0.6, r);
-    swirl = max(swirl, arm * reach);
-    cover *= 1.0 - (1.0 - smoothstep(0.02, 0.05, r)) * 0.8;
-  }
-  deck = mix(deck * 0.6, uCloud * 1.3, swirl * 0.8);
-  cover = min(1.0, cover + swirl * 0.35);
-  #endif
-  col = mix(col, deck, cover);
-  spec *= 1.0 - cover;
-  emissive *= 1.0 - cover * 0.85;
+  // A thick deck in banded swirls (cyclones on a storm world): the surface hidden.
+  vec4 deck = hazeDeck(vObj, uSeed, uTime, uHaze, uCloud, uC3);
+  col = mix(col, deck.rgb, deck.a);
+  spec *= 1.0 - deck.a;
+  emissive *= 1.0 - deck.a * 0.85;
 #endif
 #ifdef LIGHTNING
-  // Brief flashes in the clouds, a few cells at a time; they light the night side.
-  vec3 lcu = cubeUV(vObj);
-  vec2 lq = lcu.xy * 6.0;
-  vec3 lid = vec3(floor(lq), lcu.z) + floor(uSeed);
-  float l1 = hash13(lid), l2 = hash13(lid + 17.3);
-  vec2 lc = vec2(0.25) + 0.5 * vec2(l1, hash13(lid + 41.7));
-  float ld = length(fract(lq) - lc);
-  float lphase = fract(uTime * uLightning * (0.25 + l1 * 0.5) + l2 * 13.0);
-  float lon = step(lphase, 0.08) * step(0.3, l2);
-  float flick = 0.55 + 0.45 * sin(lphase * 260.0);
-  float bolt = lon * flick * ((1.0 - smoothstep(0.0, 0.45, ld)) * 0.75 + (1.0 - smoothstep(0.0, 0.08, ld)) * 1.4);
+  // Flashes in the clouds; they light the night side.
   float darkL = 1.0 - smoothstep(-0.3, 0.3, ndl);
-  emissive += vec3(0.7, 0.8, 1.0) * bolt * (1.0 + 0.6 * darkL);
+  emissive += LIGHTNING_COLOR * lightningAt(vObj, uSeed, uTime, uLightning) * (1.0 + 0.6 * darkL);
 #endif
 #ifdef AURORA
-  // Curtains of light round both magnetic poles: a sharp lower edge fading up into violet,
-  // rayed along the oval, drifting; brightest on the night side and towards the limb.
-  vec3 axis = normalize(vec3(sin(uSeed.x) * 0.12, 1.0, cos(uSeed.z) * 0.12));
-  float my = dot(vObj, axis);
-  float alat = abs(my);
-  vec3 side = normalize(vObj - axis * my + vec3(1e-4));
-  float wav = snoise(vec3(side.xz * 2.2, uTime * 0.05 + sign(my) * 7.0)) * 0.05;
-  float ring = alat - (0.72 + wav);
-  float band = smoothstep(-0.03, 0.0, ring) * (1.0 - smoothstep(0.0, 0.16, ring));
-  float rays = 0.45 + 0.55 * smoothstep(-0.4, 0.6, snoise(vec3(side.xz * 14.0, uTime * 0.25 + sign(my) * 3.0)));
-  vec3 aurC = mix(uAurora, vec3(0.62, 0.32, 1.0), smoothstep(0.03, 0.12, ring));
-  float darkA = 1.0 - smoothstep(-0.3, 0.3, ndl);
-  float limb = pow(1.0 - max(dot(n, V), 0.0), 1.5);
-  emissive += aurC * band * rays * (1.0 + 1.5 * darkA) * (1.0 + limb * 1.5);
+  // Curtains round the poles, with a darker band beneath them.
+  float band;
+  emissive += auroraAt(vObj, uSeed, uTime, uAurora, ndl, pow(1.0 - max(dot(n, V), 0.0), 1.5), band);
   col = mix(col, col * 0.45, band);
 #endif
 #endif
@@ -344,13 +289,10 @@ const PATTERN: Record<NonNullable<PlanetLook['pattern']>, number> = { city: 1, m
 
 /** The #defines for a look's optional features (none for a look without them: the original shader). */
 function featureDefines(s: SurfaceLook): Record<string, number> {
-  const d: Record<string, number> = {};
+  const d: Record<string, number> = atmosphereDefines(s);
   if (s.locked !== undefined) d.LOCKED = 1;
-  if (s.aurora) d.AURORA = 1;
-  if (s.lightning) d.LIGHTNING = 1;
   if (s.seaGlow) d.SEA_GLOW = 1;
   if (s.pattern) d.PATTERN = PATTERN[s.pattern];
-  if (s.haze) d.HAZE = 1;
   return d;
 }
 

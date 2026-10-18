@@ -3,7 +3,8 @@ import type { Settlement } from '../../../core/surface/SurfaceLayout';
 import { BASE_OCTAVES, SurfaceLook, frameAt, rawHeight } from '../../../core/surface/Terrain';
 import { smoothstep } from '../../../core/surface/Noise';
 import { NO_LIGHTS } from '../NightLightMap';
-import { AMP, ATMO_FRAG, ATMO_VERT, BASE_OCT, BASE_VERT, CLOUD_FRAG, CLOUD_VERT, MAX_SITES, PATCH_VERT, TERRAIN_FRAG } from './shaders';
+import { atmosphereDefines } from '../atmosphere.glsl';
+import { AMP, ATMO_FRAG, ATMO_VERT, AURORA_FRAG, BASE_OCT, BASE_VERT, CLOUD_FRAG, MAX_SITES, PATCH_VERT, SHELL_VERT, TERRAIN_FRAG } from './shaders';
 
 /** Quality knobs: desktop full, touch-first devices lighter. */
 export interface SurfaceQuality {
@@ -21,6 +22,9 @@ export interface SurfaceQuality {
 export const FULL_QUALITY: SurfaceQuality = { baseCells: 96, patchCells: 192, maxOctaves: 13.5, atmosphere: true, lite: false };
 export const LITE_QUALITY: SurfaceQuality = { baseCells: 64, patchCells: 96, maxOctaves: 10.5, atmosphere: false, lite: true };
 
+/** Radius of the cloud shell, above the highest ground (about 1.023), and of the aurora's, above it. */
+const CLOUD_R = 1.034, AURORA_R = 1.04;
+
 /** The cube's faces: normal, then the two axes across it. */
 const FACES: ReadonlyArray<readonly [readonly number[], readonly number[], readonly number[]]> = [
   [[1, 0, 0], [0, 0, -1], [0, 1, 0]], [[-1, 0, 0], [0, 0, 1], [0, 1, 0]],
@@ -30,7 +34,8 @@ const FACES: ReadonlyArray<readonly [readonly number[], readonly number[], reado
 
 /**
  * A planet's terrain at surface scale (radius 1): a globe baked on the CPU from the same noise as
- * the planet-view shader, a high-detail patch displaced on the GPU near the camera, clouds and an
+ * the planet-view shader, a high-detail patch displaced on the GPU near the camera, the planet-view
+ * shader's weather (clouds, haze, storms and auroras, ATMOSPHERE_GLSL) on shells above it, and an
  * atmosphere shell. The globe bakes one cube face per `bakeStep` so no frame stalls.
  */
 export class SurfaceTerrain {
@@ -41,6 +46,8 @@ export class SurfaceTerrain {
   private readonly patch: THREE.Mesh;
   private readonly clouds: THREE.Mesh | null;
   private readonly cloudMat: THREE.ShaderMaterial;
+  private readonly aurora: THREE.Mesh | null;
+  private readonly auroraMat: THREE.ShaderMaterial;
   private readonly atmo: THREE.Mesh | null;
   private readonly atmoMat: THREE.ShaderMaterial;
   private base: THREE.Mesh | null = null;
@@ -85,13 +92,30 @@ export class SurfaceTerrain {
     this.patch.visible = false;
     this.group.add(this.patch);
 
+    // The weather, as the system view draws it: the same functions, look, seed and clock (uTime).
+    const weather = atmosphereDefines(look);
+    const U = this.uniforms;
     this.cloudMat = new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false,
-      uniforms: { uSeed: this.uniforms.uSeed, uDetail: this.uniforms.uDetail, uSun: this.uniforms.uSun, uTime: this.uniforms.uTime, uCloud: { value: c(look.cloudColor) }, uAmount: { value: look.clouds }, uFade: { value: 1 } },
-      vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
+      transparent: true, depthWrite: false, premultipliedAlpha: true, defines: weather,
+      uniforms: {
+        uSeed: U.uSeed, uDetail: U.uDetail, uSun: U.uSun, uCam: U.uCam, uTime: U.uTime, uC3: U.uC3, uAtmo: U.uAtmo, uAtmoStrength: U.uAtmoStrength,
+        uCloud: { value: c(look.cloudColor) },
+        uAmount: { value: look.clouds }, uHaze: { value: look.haze ?? 0 }, uLightning: { value: look.lightning ?? 0 }, uFade: { value: 1 },
+      },
+      vertexShader: SHELL_VERT, fragmentShader: CLOUD_FRAG,
     });
-    this.clouds = look.clouds > 0.01 ? new THREE.Mesh(new THREE.SphereGeometry(1.034, quality.lite ? 72 : 128, quality.lite ? 36 : 64), this.cloudMat) : null;
+    const cloudy = look.clouds > 0.01 || !!look.haze || !!look.lightning;
+    this.clouds = cloudy ? new THREE.Mesh(new THREE.SphereGeometry(CLOUD_R, quality.lite ? 72 : 128, quality.lite ? 36 : 64), this.cloudMat) : null;
     if (this.clouds) { this.clouds.renderOrder = 3; this.group.add(this.clouds); }
+
+    // Seen from inside too (the ground), so both sides.
+    this.auroraMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, premultipliedAlpha: true, side: THREE.DoubleSide, defines: weather,
+      uniforms: { uSeed: U.uSeed, uSun: U.uSun, uCam: U.uCam, uTime: U.uTime, uAurora: { value: c(look.aurora ?? '#000000') }, uFade: { value: 1 }, uDim: { value: 1 } },
+      vertexShader: SHELL_VERT, fragmentShader: AURORA_FRAG,
+    });
+    this.aurora = look.aurora ? new THREE.Mesh(new THREE.SphereGeometry(AURORA_R, quality.lite ? 72 : 128, quality.lite ? 36 : 64), this.auroraMat) : null;
+    if (this.aurora) { this.aurora.renderOrder = 4; this.group.add(this.aurora); }
 
     this.atmoMat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, side: THREE.BackSide, blending: THREE.AdditiveBlending,
@@ -244,10 +268,16 @@ export class SurfaceTerrain {
     U.uFine.value = Math.min(Math.max(36 / o.d, 30), 9000);
     U.uFar.value = smoothstep(0.06, 0.6, o.d);
     U.uClose.value = 1 - smoothstep(0.02, 0.35, o.alt);
+    // The clouds thin out below low orbit, so the ground shows; the aurora stays to the ground.
+    const above = smoothstep(0.06, 0.4, o.alt);
     if (this.clouds) {
-      const f = smoothstep(0.06, 0.4, o.alt) * o.fade;
+      const f = above * o.fade;
       this.cloudMat.uniforms.uFade.value = f;
       this.clouds.visible = f > 0.01;
+    }
+    if (this.aurora) {
+      this.auroraMat.uniforms.uFade.value = o.fade;
+      this.auroraMat.uniforms.uDim.value = above;
     }
   }
 
@@ -257,6 +287,7 @@ export class SurfaceTerrain {
     this.baseMat.dispose();
     this.patchMat.dispose();
     this.cloudMat.dispose();
+    this.auroraMat.dispose();
     this.atmoMat.dispose();
   }
 }

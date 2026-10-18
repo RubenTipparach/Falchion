@@ -1,11 +1,14 @@
 /**
  * GLSL for the surface view. Units: one planet radius = 1, in the planet's own frame.
- * NOISE_GLSL hashes on exact integers, like src/core/surface/Noise.ts, so the GPU detail patch
- * and the CPU-baked globe agree where they meet.
+ * NOISE_GLSL (the planets' one copy) hashes on exact integers, like src/core/surface/Noise.ts, so
+ * the GPU detail patch and the CPU-baked globe agree where they meet. The clouds, haze, lightning
+ * and aurora are the system view's own (ATMOSPHERE_GLSL), so the planet looks the same up close.
  */
 
 import { MAX_SETTLEMENTS } from '../../../core/surface/SurfaceLayout';
+import { ATMOSPHERE_GLSL } from '../atmosphere.glsl';
 import { LIGHT_MAP_GLSL } from '../NightLightMap';
+import { NOISE_GLSL } from '../noise.glsl';
 
 /** Most settlements the terrain shader flattens and draws streets for (main city, cities and towns). */
 export const MAX_SITES = MAX_SETTLEMENTS;
@@ -16,64 +19,6 @@ export const BASE_OCT = 7;
 /** Narrowest a road is drawn, in screen pixels (thinner roads fade instead). */
 export const ROAD_MIN_PX = 1.4;
 
-export const NOISE_GLSL = /* glsl */ `
-float m289(float x) { return x - floor((x + 0.5) * (1.0 / 289.0)) * 289.0; }
-vec4 m289(vec4 x) { return x - floor((x + 0.5) * (1.0 / 289.0)) * 289.0; }
-vec3 m289(vec3 x) { return x - floor((x + 0.5) * (1.0 / 289.0)) * 289.0; }
-vec4 permute(vec4 x) { return m289(m289(x * 34.0 + 1.0) * x); }
-vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
-float snoise(vec3 v) {
-  const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
-  vec3 i = floor(v + dot(v, C.yyy));
-  vec3 x0 = v - i + dot(i, C.xxx);
-  vec3 g = step(x0.yzx, x0.xyz);
-  vec3 l = 1.0 - g;
-  vec3 i1 = min(g.xyz, l.zxy);
-  vec3 i2 = max(g.xyz, l.zxy);
-  vec3 x1 = x0 - i1 + C.xxx;
-  vec3 x2 = x0 - i2 + C.yyy;
-  vec3 x3 = x0 - 0.5;
-  i = m289(i);
-  vec4 p = permute(permute(permute(i.z + vec4(0.0, i1.z, i2.z, 1.0)) + i.y + vec4(0.0, i1.y, i2.y, 1.0)) + i.x + vec4(0.0, i1.x, i2.x, 1.0));
-  vec4 j = p - 49.0 * floor((p + 0.5) * (1.0 / 49.0));
-  vec4 x_ = floor((j + 0.5) * (1.0 / 7.0));
-  vec4 y_ = floor(j - 7.0 * x_);
-  vec4 x = x_ * (2.0 / 7.0) + (0.5 / 7.0 - 1.0);
-  vec4 y = y_ * (2.0 / 7.0) + (0.5 / 7.0 - 1.0);
-  vec4 h = 1.0 - abs(x) - abs(y);
-  vec4 b0 = vec4(x.xy, y.xy);
-  vec4 b1 = vec4(x.zw, y.zw);
-  vec4 s0 = floor(b0) * 2.0 + 1.0;
-  vec4 s1 = floor(b1) * 2.0 + 1.0;
-  // h is a multiple of 1/7 and often exactly 0: a margin makes every GPU (and the CPU copy,
-  // src/core/surface/Noise.ts) flip the same gradients, whatever its rounding.
-  vec4 sh = -step(h, vec4(0.05));
-  vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
-  vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
-  vec3 p0 = vec3(a0.xy, h.x);
-  vec3 p1 = vec3(a0.zw, h.y);
-  vec3 p2 = vec3(a1.xy, h.z);
-  vec3 p3 = vec3(a1.zw, h.w);
-  vec4 norm = taylorInvSqrt(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3)));
-  p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
-  vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0);
-  m = m * m;
-  return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
-}
-float fbmN(vec3 p, float oct) {
-  float v = 0.0, a = 0.5;
-  for (int i = 0; i < 14; i++) {
-    float w = clamp(oct - float(i), 0.0, 1.0);
-    if (w <= 0.0) break;
-    v += a * w * snoise(p);
-    p = p * 2.02 + vec3(1.7, 9.2, 3.1);
-    a *= i < 6 ? 0.5 : 0.62;
-  }
-  return v;
-}
-float ridged4(vec3 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { v += a * (1.0 - abs(snoise(p))); p *= 2.1; a *= 0.5; } return v; }
-`;
-
 /** Terrain height, flattened under settlements and dug out for the mine pit (mirrors SurfaceTerrain.shapedHeight). */
 const TERRAIN_GLSL = /* glsl */ `
 uniform vec3 uSeed; uniform float uDetail; uniform float uSea; uniform float uCraters; uniform float uDry;
@@ -82,9 +27,9 @@ uniform vec4 uPit; uniform float uPitDepth;
 float rawH(vec3 d, float oct) {
   vec3 p = d * uDetail + uSeed;
   float h = fbmN(p, oct);
-  if (uCraters > 0.5) h += (ridged4(p * 1.6) - 0.6) * 0.5;
+  if (uCraters > 0.5) h += (ridged(p * 1.6) - 0.6) * 0.5;
   float land = smoothstep(uSea + 0.03, uSea + 0.5, h);
-  h += land * (ridged4(p * 2.0 + vec3(5.1)) - 0.55) * 0.5;
+  h += land * (ridged(p * 2.0 + vec3(5.1)) - 0.55) * 0.5;
   return h;
 }
 float shapedH(vec3 d, float oct) {
@@ -238,7 +183,7 @@ void main() {
     vec3 rock = mix(uC3, vec3(0.36, 0.34, 0.33), 0.55) * (0.8 + 0.2 * fine);
     col = mix(col, rock, smoothstep(0.035, 0.11, slope + fine * 0.015) * 0.85);
     if (uSnow > 0.5) col = mix(col, vec3(0.93, 0.95, 1.0), smoothstep(uSea + 0.5, uSea + 0.62, h + fine * 0.04));
-    if (uLava > 0.5) cracks = smoothstep(0.8, 0.96, ridged4(p * 1.3 + vec3(0.0, uTime * 0.01, 0.0)) + fine * 0.03);
+    if (uLava > 0.5) cracks = smoothstep(0.8, 0.96, ridged(p * 1.3 + vec3(0.0, uTime * 0.01, 0.0)) + fine * 0.03);
   }
   float caps = smoothstep(uIce, uIce + 0.06, abs(dir.y) + h * 0.12 + fine * 0.02);
   col = mix(col, vec3(0.92, 0.95, 1.0) * (0.92 + 0.08 * fine), caps);
@@ -370,18 +315,63 @@ void main() {
   gl_Position = projectionMatrix * modelViewMatrix * vec4(P, 1.0);
 }`;
 
-export const CLOUD_VERT = /* glsl */ `varying vec3 vDir; void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+/** The weather shells (clouds, aurora): a direction in the planet frame and the point drawn. */
+export const SHELL_VERT = /* glsl */ `varying vec3 vDir; varying vec3 vW; void main() { vDir = normalize(position); vW = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+
+/**
+ * The cloud shell: the system view's clouds, haze deck, cyclones and lightning (ATMOSPHERE_GLSL),
+ * lit as it lights them. Premultiplied alpha: the deck covers the ground as the system view mixes
+ * it in, and lightning adds light on top.
+ */
 export const CLOUD_FRAG = /* glsl */ `
-uniform vec3 uSeed, uSun, uCloud; uniform float uDetail, uTime, uAmount, uFade; varying vec3 vDir;
+uniform vec3 uSeed, uSun, uCam, uCloud, uC3, uAtmo; uniform float uDetail, uTime, uAmount, uFade, uHaze, uLightning, uAtmoStrength;
+varying vec3 vDir; varying vec3 vW;
 ${NOISE_GLSL}
+${ATMOSPHERE_GLSL}
 void main() {
   vec3 d = normalize(vDir);
-  float c = fbmN(d * (uDetail * 1.4) + uSeed.zxy + vec3(uTime * 0.012, 0.0, uTime * 0.006), 5.0);
-  float cloud = smoothstep(0.05, 0.55, c) * uAmount;
   float ndl = dot(d, uSun);
-  float day = smoothstep(-0.15, 0.3, ndl);
-  vec3 tint = mix(vec3(1.0, 0.62, 0.42), vec3(1.0), smoothstep(0.0, 0.3, ndl));
-  gl_FragColor = vec4(uCloud * tint * (0.04 + 0.96 * day), cloud * uFade);
+  float day = smoothstep(-0.12, 0.35, ndl);
+  float a = cloudCover(d, uSeed, uDetail, uTime, uAmount);
+  vec3 col = uCloud * a;
+#ifdef HAZE
+  // The deck over the clouds: what mix(mix(ground, cloud, c), deck, h) leaves of the ground.
+  vec4 deck = hazeDeck(d, uSeed, uTime, uHaze, uCloud, uC3);
+  col = deck.rgb * deck.a + col * (1.0 - deck.a);
+  a = deck.a + a * (1.0 - deck.a);
+#endif
+  vec3 lit = col * (0.03 + 0.97 * day);
+  // The system view adds its atmosphere rim over the clouds: keep what they hide of the ground's.
+  float rim = pow(1.0 - max(dot(d, normalize(uCam - vW)), 0.0), 2.5);
+  lit += uAtmo * rim * uAtmoStrength * (0.15 + 0.85 * smoothstep(-0.3, 0.6, ndl)) * a;
+#ifdef LIGHTNING
+  lit += LIGHTNING_COLOR * lightningAt(d, uSeed, uTime, uLightning) * (1.0 + 0.6 * (1.0 - smoothstep(-0.3, 0.3, ndl)));
+#endif
+  gl_FragColor = vec4(lit, a) * uFade;
+}`;
+
+/**
+ * The aurora shell, just above the clouds: the system view's curtains (ATMOSPHERE_GLSL), seen from
+ * orbit and, from inside the shell, overhead and toward the poles from the ground. Premultiplied
+ * alpha: from outside it darkens the band beneath the curtains as the system view does (uDim).
+ */
+export const AURORA_FRAG = /* glsl */ `
+uniform vec3 uSeed, uSun, uCam, uAurora; uniform float uTime, uFade, uDim; varying vec3 vDir; varying vec3 vW;
+${NOISE_GLSL}
+${ATMOSPHERE_GLSL}
+void main() {
+  vec3 d = normalize(vDir);
+  vec3 V = normalize(uCam - vW);
+  float ndl = dot(d, uSun);
+  // From orbit (the shell's outside) as the system view draws them, brightest toward the limb.
+  // From the ground (inside) softer, faint by day, finely rayed.
+  bool inside = !gl_FrontFacing;
+  float band;
+  vec3 light = auroraAt(d, uSeed, uTime, uAurora, ndl, inside ? 0.0 : pow(1.0 - max(dot(d, V), 0.0), 1.5), band);
+  light *= auroraFineRays(d, uSeed, uTime);
+  if (inside) light *= 0.2 + 0.3 * (1.0 - smoothstep(-0.3, 0.3, ndl));
+  float dim = inside ? 0.0 : band * 0.55 * uDim;
+  gl_FragColor = vec4(light, dim) * uFade;
 }`;
 
 /** Atmosphere shell: a short raymarch through an exponential haze (skipped on phones). */

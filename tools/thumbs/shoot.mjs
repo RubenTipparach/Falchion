@@ -1,7 +1,7 @@
 // Contact sheet of every thumbnail (the `thumbnails` skill): starts Vite, opens
 // tools/thumbs/sheet.html in headless Chromium and writes docs/screenshots/thumbs/contact-sheet.png
 // (or one PNG per kind with --split). Look at the result before shipping a change to a model.
-//   npm run thumbs [-- --only resource,event] [--split]
+//   npm run thumbs [-- --only resource,event] [--split] [--domain hulls] [--only ship --ids a,b --tag civil] [--port 5201]
 // Needs Playwright: installed globally (NODE_PATH="$(npm root -g)") or `npm i --no-save playwright`.
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
@@ -19,7 +19,12 @@ try {
 const args = process.argv.slice(2);
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
 const split = args.includes('--split');
-const port = 5199;
+// --domain hulls: research nodes of that domain only, into research-hulls.png. --port: run several at once.
+const domain = args.includes('--domain') ? args[args.indexOf('--domain') + 1] : null;
+// --ids a,b --tag mine: only those subjects, into <kind>-<tag>.png (with --only <kind>).
+const ids = args.includes('--ids') ? args[args.indexOf('--ids') + 1] : null;
+const tag = args.includes('--tag') ? args[args.indexOf('--tag') + 1] : null;
+const port = args.includes('--port') ? Number(args[args.indexOf('--port') + 1]) : 5199;
 const out = 'docs/screenshots/thumbs';
 
 const vite = spawn('node', ['node_modules/vite/bin/vite.js', '--port', String(port), '--strictPort'], { stdio: ['ignore', 'pipe', 'inherit'] });
@@ -32,14 +37,14 @@ let failed = false;
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 try {
   await mkdir(out, { recursive: true });
-  const kinds = split ? (only ?? 'resource,event,building,ship,research').split(',') : [only];
+  const kinds = domain ? ['research'] : split ? (only ?? 'resource,event,building,ship,research').split(',') : [only];
   for (const kind of kinds) {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     page.on('console', (m) => m.type() === 'error' && (failed = true, console.error('page:', m.text())));
     page.on('pageerror', (e) => { failed = true; console.error('page:', e.message); });
-    await page.goto(`http://localhost:${port}/tools/thumbs/sheet.html${kind ? `?only=${kind}` : ''}`);
+    await page.goto(`http://localhost:${port}/tools/thumbs/sheet.html${kind ? `?only=${kind}` : ''}${domain ? `&domain=${domain}` : ''}${ids ? `&ids=${ids}` : ''}`);
     await page.waitForFunction(() => window.THUMBS_READY === true, null, { timeout: 180_000 });
-    const file = `${out}/${kind && split ? kind : 'contact-sheet'}.png`;
+    const file = `${out}/${domain ? `research-${domain.replace(/,/g, '-')}` : tag ? `${kind}-${tag}` : kind && split ? kind : 'contact-sheet'}.png`;
     await page.screenshot({ path: file, fullPage: true });
     console.log('wrote', file, 'missing:', await page.locator('figure.missing').count());
     await page.close();

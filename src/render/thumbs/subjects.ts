@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BRANCHES, TECH_NODES } from '../../content/techTree';
+import type { TechNode } from '../../core/research/types';
 import { PLANET_LOOKS } from '../../content/planetLooks';
 import type { Resource } from '../../content/resources';
 import { encodeDesign, normalizeDesign, type ShipDesign } from '../../core/ships/ShipDesign';
@@ -7,6 +8,9 @@ import { hashSeed } from '../../core/rng/Rng';
 import type { ShipFactory } from '../ships/ShipFactory';
 import { createPlanetMaterial } from '../planets/PlanetMaterial';
 import { BUILDING_MODELS, capitolModel, type BuildingModel } from '../planets/surface/BuildingModels';
+import { BUILDING_ART } from './buildings/art';
+import { NODE_PROPS } from './nodes';
+import { SHIP_ART } from './ships';
 import { DOMAIN_PROPS, EVENT_PROPS, PART_PROPS, RESOURCE_PROPS, STAT_PROPS } from './props';
 import { mat, prism, Prop } from './propKit';
 
@@ -28,8 +32,10 @@ type SubjectFn = (id: string, ctx: ThumbContext) => ThumbSubject | null;
 
 /** One builder per kind (Open/Closed: a new kind is a new entry). */
 export const THUMB_SUBJECTS: Readonly<Record<ThumbKind, SubjectFn>> = {
-  ship: (id, ctx) => shipSubject(`ship:${id}`, ctx.design(id), ctx),
+  ship: (id, ctx) => shipSubject(`ship:${id}`, ctx.design(id), ctx, undefined, id),
   building: (id) => {
+    const art = BUILDING_ART[id];
+    if (art) return { key: `building:${id}`, build: art };
     const builder = id === 'capitol' ? capitolModel : BUILDING_MODELS[id];
     return builder ? { key: `building:${id}`, build: () => onTile(buildingObject(builder())) } : null;
   },
@@ -49,7 +55,27 @@ export function thumbSubject(kind: ThumbKind, id: string, ctx: ThumbContext): Th
   return THUMB_SUBJECTS[kind](id, ctx);
 }
 
-function shipSubject(prefix: string, design: ShipDesign, ctx: ThumbContext, plinth?: string): ThumbSubject {
+/**
+ * A ship: the class's hand-modelled art in the design's colours when it has some, else the game's
+ * generated hull for the design.
+ */
+function shipSubject(prefix: string, design: ShipDesign, ctx: ThumbContext, plinth?: string, classId?: string): ThumbSubject {
+  const art = classId ? SHIP_ART[classId] : undefined;
+  if (art) {
+    const c = design.colors;
+    return {
+      key: `${prefix}:art:${c.primary}${c.secondary}${c.accent}`,
+      build: () => {
+        // The same pose as a generated hull: nose left across the line of sight, banked.
+        const g = new THREE.Group(), bank = new THREE.Group(), hull = art(c);
+        hull.rotation.z = -0.45;
+        bank.add(hull);
+        bank.rotation.y = -0.4;
+        g.add(bank);
+        return plinth ? onPlinth(g, plinth) : g;
+      },
+    };
+  }
   return {
     key: `${prefix}:${encodeDesign(design)}`,
     build: () => {
@@ -67,10 +93,14 @@ function shipSubject(prefix: string, design: ShipDesign, ctx: ThumbContext, plin
   };
 }
 
+/** Research nodes whose picture is what they unlock (a ship, a ship style, a planet), not a prop of their own. */
+export const showsUnlock = (n: TechNode): boolean => n.grants.some((g) => g.kind === 'chassis' || g.kind === 'style' || g.kind === 'biome');
+
 /**
- * A research node's picture comes from what it grants: a chassis is that ship, a style or trait a
- * ship in it, a part the part, a biome the planet, anything else its domain's emblem. It stands on
- * a plinth in its branch's colour.
+ * A research node's picture: a chassis is that ship, a style a ship in it, a biome the planet; every
+ * other node has its own prop (nodes/*.ts), falling back to what it grants (a trait on a ship, a
+ * part, a bonus's stat prop) and last its domain's emblem. It stands on a plinth in its branch's
+ * colour.
  */
 function researchSubject(id: string, ctx: ThumbContext): ThumbSubject | null {
   const node = TECH_NODES.find((n) => n.id === id);
@@ -79,7 +109,9 @@ function researchSubject(id: string, ctx: ThumbContext): ThumbSubject | null {
   const g = node.grants.find((x) => x.kind === 'chassis') ?? node.grants.find((x) => x.kind === 'style') ?? node.grants.find((x) => x.kind === 'trait')
     ?? node.grants.find((x) => x.kind === 'part' && partProp(x.id)) ?? node.grants.find((x) => x.kind === 'biome');
   const key = `research:${id}`;
-  if (g?.kind === 'chassis') return shipSubject(key, ctx.design(g.id), ctx, color);
+  const own = !showsUnlock(node) ? NODE_PROPS[id] : undefined;
+  if (own) return { key, build: () => onPlinth(own(), color) };
+  if (g?.kind === 'chassis') return shipSubject(key, ctx.design(g.id), ctx, color, g.id);
   if (g?.kind === 'style' || g?.kind === 'trait') {
     const base = ctx.design('lancer');
     const design = normalizeDesign(g.kind === 'style' ? { ...base, style: g.id, blend: [] } : { ...base, traits: [...base.traits, g.id] });

@@ -24,3 +24,10 @@ A contact sheet of every thumbnail SHALL be produced by one command, and SHALL b
 #### Scenario: Changing a prop
 - **WHEN** a prop model changes
 - **THEN** `npm run thumbs` writes the contact sheet and it is viewed before commit
+
+### Requirement: Hand-made art for ships, buildings and research
+Every ship class SHALL have a hand-modelled thumbnail painted in the empire's design colours, every building and the capitol a detailed thumbnail model, and every research node that does not show what it unlocks (a ship, a style, a planet) its own prop. A test SHALL fail when one is missing.
+
+#### Scenario: Recolouring a design
+- **WHEN** the player changes their design colours
+- **THEN** the ship thumbnails render again in the new colours

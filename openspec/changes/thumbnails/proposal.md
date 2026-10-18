@@ -22,6 +22,10 @@ Research nodes, resources, encounters, ship classes and buildings are text and f
     - a biome: the planet;
     - otherwise: its domain's emblem.
     - It stands on a plinth in its branch's colour.
+- **Hand-made art (Haiku swarm, 10 workers, one file each):**
+  - Every research node that does not show an unlock has its own prop (`nodes/*.ts`, 109 nodes).
+  - Every ship class has a hand-modelled hull painted in the empire's design colours (`ships/*.ts`, 31 classes); a class without art falls back to the generated ship.
+  - Every building and the capitol has a detailed showpiece (`buildings/art.ts`). The planet surface keeps its own small models.
 - **UI:** thumbnails appear in the research node detail and tree, the shipyard class list, the planet card's buildings, resource tooltips and loot cards, and encounter cards.
 - **Contact sheet:** `npm run thumbs` renders every subject into `docs/screenshots/thumbs/contact-sheet.png`, which is checked by eye before shipping.
 

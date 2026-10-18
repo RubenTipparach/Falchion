@@ -9,7 +9,7 @@ import { ball, crystal, cyl, hull, lathe, mat, obox, Prop, prism, ring, ROLES } 
  * frames by bounds). Keep silhouettes readable at 48 px: leave out anything smaller than a
  * twentieth of the prop.
  */
-type PropBuilder = () => THREE.Group;
+export type PropBuilder = () => THREE.Group;
 
 const colorOf = (r: Resource) => RESOURCES.find((x) => x.id === r)!.color;
 

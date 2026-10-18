@@ -19,6 +19,7 @@ rendering thumbnails for research, minerals, events, ships, and buildings." The 
 | `src/render/thumbs/props.ts` | The props: one per resource, encounter kind and research domain emblem and ship part. |
 | `src/ui/thumbs.ts` | What panels call: `thumb(kind, id, size)` returns an `<img>` that fills in when rendered. `src/app/main.ts` connects it to the studio; without one (tests) it is an empty placeholder. |
 | `src/render/thumbs/contactSheet.ts`, `tools/thumbs/sheet.html`, `tools/thumbs/shoot.mjs` | The contact sheet: every subject in a grid, captured by headless Chromium (SwiftShader) into `docs/screenshots/thumbs/contact-sheet.png`, or one PNG per kind with `--split` (`npm run thumbs -- --split [--only ship,research]`). Needs Playwright: `NODE_PATH="$(npm root -g)"` with a global install, or `npm i --no-save playwright`. |
+| `nodes/*.ts`, `ships/*.ts`, `buildings/art.ts` | Hand-made art: one prop per research node (by domain), one hull per ship class (`ShipArt = (colors) => Group`, nose +z, painted primary/secondary/accent), one showpiece per building. `props.test.ts` fails, naming the file, when an id has none. Use `--domain hulls` or `--only ship --ids a,b --tag x` to shoot just a slice. |
 | `STAT_PROPS` in `props.ts` | A research bonus's stat to the prop that shows it (speed shows a fusion torch, mining a drill, barrage a missile rack), so bonus nodes are not all their domain's emblem. |
 
 ## The studio (from threejs-mockups)

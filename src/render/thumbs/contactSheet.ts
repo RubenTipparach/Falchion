@@ -18,19 +18,24 @@ export function contactSheet(root: HTMLElement): void {
   const byId = new Map(SHIP_CLASSES.map((c) => [c.id, c]));
   const ctx: ThumbContext = { factory, design: (id) => classDesign(DEFAULT_DESIGN, byId.get(id) ?? SHIP_CLASSES[0]) };
   const studio = new ThumbStudio(160);
-  const only = new URLSearchParams(location.search).get('only')?.split(',');
+  const params = new URLSearchParams(location.search);
+  const only = params.get('only')?.split(',');
+  // ?domain=hulls,weapons: only those research domains (each swarm worker checks its own).
+  const domains = params.get('domain')?.split(',');
+  // ?ids=lancer,dreadnought: only those subjects.
+  const ids = params.get('ids')?.split(',');
   const rows: [ThumbKind, string, ReadonlyArray<{ id: string; name: string }>][] = [
     ['resource', 'Resources', RESOURCES],
     ['event', 'Events', ENCOUNTER_KINDS],
     ['building', 'Buildings', [...BUILDINGS, { id: 'capitol', name: 'Capitol' }]],
     ['ship', 'Ships', SHIP_CLASSES],
-    ['research', 'Research', TECH_NODES],
+    ['research', 'Research', TECH_NODES.filter((n) => !domains || domains.includes(n.domain))],
   ];
   for (const [kind, title, items] of rows) {
     if (only && !only.includes(kind)) continue;
     const grid = document.createElement('div');
     grid.className = 'grid';
-    for (const it of items) {
+    for (const it of items.filter((x) => !ids || ids.includes(x.id))) {
       const cell = document.createElement('figure');
       const s = thumbSubject(kind, it.id, ctx);
       const img = document.createElement('img');
@@ -38,6 +43,7 @@ export function contactSheet(root: HTMLElement): void {
       else cell.classList.add('missing');
       const cap = document.createElement('figcaption');
       cap.textContent = it.name;
+      cap.title = it.id;
       cell.append(img, cap);
       grid.append(cell);
     }

@@ -18,7 +18,7 @@ missing from a drawn style or a picture has the wrong size.
 | --- | --- | --- | --- |
 | Rendered | the thumbnail studio (`thumbnails` skill) | any | the surface models, lit |
 | Pixel | `tools/art/draw_pixel_buildings.py` + `pixelkit.py` | 64 | near-black outlines, flat colour with one darker and one lighter shade, checkerboard dither, a dithered ground shadow, PICO-8-ish palette |
-| Ink | `tools/art/blender_ink_buildings.py` (bpy) | 128 | modelled from primitives, cel-shaded in three flat tones from a fixed upper-left light, Freestyle ink outlines, soft ground shadow |
+| Ink (the default: "Comic ink looks best", 2026-10-18) | `tools/art/blender_ink_buildings.py` (bpy) | 128 | modelled from primitives, cel-shaded in three flat tones from a fixed upper-left light, Freestyle ink outlines, soft ground shadow |
 | Marker | `tools/art/draw_marker_buildings.py` + `crayon.py` | 128 | wobbly ink outline, streaky marker fill with darker and lighter strokes, glows and sparkles; drawn at 512 and shrunk |
 
 ## Run

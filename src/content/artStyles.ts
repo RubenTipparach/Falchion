@@ -20,4 +20,5 @@ export const BUILDING_ART_STYLES: readonly ArtStyle[] = [
   { id: 'marker', name: 'Marker', dir: 'art/buildings/marker', blurb: 'Felt-tip marker: wobbly ink, streaky fills and glows.' },
 ];
 
-export const DEFAULT_ART_STYLE = 'rendered';
+/** The owner's pick, 2026-10-18: "Comic ink looks best". */
+export const DEFAULT_ART_STYLE = 'ink';

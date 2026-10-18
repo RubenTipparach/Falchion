@@ -7,7 +7,7 @@ The owner asked for hand-drawn art in different styles, after godot-sandbox's ha
   - **Pixel:** 64 px, outlined, dithered (`pixelkit.py`, after godot-sandbox's Canvas).
   - **Ink:** modelled in Blender, cel-shaded, Freestyle outlines (`blender_ink_buildings.py`).
   - **Marker:** felt-tip, 128 px (godot-sandbox's `crayon.py`).
-- **An art style setting** (Empire › Overview › Building art): Rendered, Pixel, Ink or Marker.
+- **An art style setting** (Empire › Overview › Building art): Rendered, Pixel, Ink or Marker. Ink is the default (the owner's pick).
   - It is per viewer (this browser), not saved with the empire, and changes no rules.
   - Building pictures on screen switch at once. A missing picture falls back to the render.
 - **A `hand-drawn-art` skill** on drawing, checking and adding styles.

@@ -1,7 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: Building art styles
-Building pictures SHALL be shown in the viewer's chosen art style: Rendered (the 3D model), Pixel, Ink or Marker. The default SHALL be Rendered. The choice SHALL be kept in the viewer's browser only and SHALL NOT change any game state.
+Building pictures SHALL be shown in the viewer's chosen art style: Rendered (the 3D model), Pixel, Ink or Marker. The default SHALL be Ink. The choice SHALL be kept in the viewer's browser only and SHALL NOT change any game state.
+
+#### Scenario: A new viewer
+- **WHEN** a viewer has never picked a style
+- **THEN** buildings are shown in Ink
 
 #### Scenario: Switching style
 - **WHEN** the viewer picks Pixel on the Building art card

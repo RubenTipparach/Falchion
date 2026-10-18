@@ -18,8 +18,10 @@ const pngSize = (path: string): [number, number] => {
 };
 
 describe('building art styles', () => {
-  it('has the rendered default and unique ids', () => {
-    expect(BUILDING_ART_STYLES.some((s) => s.id === DEFAULT_ART_STYLE && !s.dir)).toBe(true);
+  it('defaults to ink, keeps the rendered style, and has unique ids', () => {
+    expect(DEFAULT_ART_STYLE).toBe('ink');
+    expect(BUILDING_ART_STYLES.some((s) => s.id === DEFAULT_ART_STYLE && s.dir)).toBe(true);
+    expect(BUILDING_ART_STYLES.some((s) => s.id === 'rendered' && !s.dir)).toBe(true);
     expect(new Set(BUILDING_ART_STYLES.map((s) => s.id)).size).toBe(BUILDING_ART_STYLES.length);
   });
 

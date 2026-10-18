@@ -27,7 +27,7 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 OUT = os.path.join(ROOT, "public", "textures", "ships")
 SHEET = os.path.join(ROOT, "docs", "screenshots", "materials", "ships.png")
 SIZE = 256
-NAMES = ["technological", "utilitarian", "organic", "geometric", "classic", "machinery"]
+NAMES = ["technological", "utilitarian", "organic", "geometric", "classic", "industrial", "machinery"]
 
 
 def wrapped_resize(im, size):

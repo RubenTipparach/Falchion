@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Author the Material Maker (.ptex) graphs Falchion's ship hulls are textured with.
 
-One graph per ship style (technological, utilitarian, organic, geometric, classic) and one
+One graph per ship style (technological, utilitarian, organic, geometric, classic, industrial) and one
 shared machinery graph for detail parts. Material Maker renders them (the material-maker-headless
 skill runs it with no GPU) and tools/materials/postprocess.py packs the maps into the small
 textures in public/textures/ships/ that ShipKit maps onto every hull (the ship-materials skill).
@@ -270,25 +270,77 @@ def hull_geometric():
 
 
 def hull_classic():
-    """Smooth enamel with long panel lines, gentle sheen, and rows of round portholes."""
+    """Gothic armour: tall bevelled blocks like cut stone, carved trim bands with a scalloped
+    relief, and rows of lit lancet windows (tall narrow slots) between the bands."""
     g = Graph("Hull Classic")
-    panels = g.node("bricks", pattern=0, repeat=1, rows=3, columns=1, row_offset=0.0, mortar=0.004, bevel=0.01, round=0.0, corner=0.0)
-    seams2 = g.node("bricks", pattern=0, repeat=1, rows=1, columns=3, row_offset=0.0, mortar=0.003, bevel=0.0, round=0.0, corner=0.0)
-    port_c = g.node("sdcircle", r=0.007, cx=0, cy=0)
-    ports_all = g.node("sdrepeat", port_c, rx=32, ry=8, r=0.0, variations=False)
-    ports_s = g.node("sdshow", ports_all, bevel=0.002, base=0.0)
-    band = g.node("pattern", mix=0, x_wave=4, x_scale=0, y_wave=2, y_scale=3)
-    band_t = g.tone(band, (0, 0), (0.93, 0), (0.95, 1), (1, 1))
-    ports = g.math(ports_s, band_t, op=MUL, clamp=True)
-    sheen = g.node("fbm2", noise=2, scale_x=3, scale_y=3, folds=0, iterations=5, persistence=0.45, offset=0.6)
-    lines = g.math(g.tone(panels, (0, 0.25), (0.08, 1), (1, 1)), g.tone(seams2, (0, 0.4), (0.08, 1), (1, 1)), op=MUL)
-    enamel = g.colorize(sheen, grad((0, 0.82), (1, 0.95)))
-    albedo_a = g.blend(lines, enamel, None, mode=MULTIPLY, amount=1.0)
-    albedo = g.blend(g.color("#1c2026"), albedo_a, ports, mode=NORMAL_B, amount=1.0)
-    height = g.math(g.math(lines, None, op=MUL, in2=0.5), g.math(ports, None, op=MUL, in2=0.25), op=SUB, clamp=True)
-    emission = g.blend(g.color("#ffffff"), g.color("#000000"), ports, mode=NORMAL_B, amount=1.0)
-    rough = g.colorize(sheen, grad((0, 0.18), (1, 0.32)))
-    return _finish(g, albedo, height, emission, rough, metallic_v=0.75, normal_strength=0.8, ao_strength=0.8)
+    blocks = g.node("bricks", pattern=0, repeat=1, rows=6, columns=2, row_offset=0.5, mortar=0.01, bevel=0.05, round=0.0, corner=0.0)
+    tint = g.node("greyscale", (blocks, 1), mode=2)
+    # trim bands: the mortar of three rows (a band every third of the tile), carved with a scalloped relief
+    trims = g.node("bricks", pattern=0, repeat=1, rows=3, columns=1, row_offset=0.0, mortar=0.12, bevel=0.0, round=0.0, corner=0.0)
+    band_m = g.tone(trims, (0, 1), (0.02, 0), (1, 0))
+    scallop = g.node("pattern", mix=2, x_wave=0, x_scale=24, y_wave=0, y_scale=12)
+    carving = g.math(g.tone(scallop, (0, 0.3), (1, 1)), band_m, op=MUL)
+    # lancet windows: tall narrow slits on the rows midway between the trims (the mortar of six
+    # rows, less the trims)
+    rows6 = g.node("bricks", pattern=0, repeat=1, rows=6, columns=1, row_offset=0.0, mortar=0.16, bevel=0.0, round=0.0, corner=0.0)
+    win_rows = g.math(g.tone(rows6, (0, 1), (0.02, 0), (1, 0)), g.tone(trims, (0, 1), (0.3, 0), (1, 0)), op=SUB, clamp=True)
+    cols = g.node("bricks", pattern=0, repeat=1, rows=1, columns=24, row_offset=0.0, mortar=0.16, bevel=0.0, round=0.0, corner=0.0)
+    slits = g.tone(cols, (0, 1), (0.02, 0), (1, 0))
+    windows_all = g.math(win_rows, slits, op=MUL, clamp=True)
+    lit = g.tone(tint, (0, 0), (0.25, 0), (0.27, 1), (1, 1))
+    windows = g.math(windows_all, lit, op=MUL, clamp=True)
+    grime_n = g.node("fbm2", noise=2, scale_x=5, scale_y=5, folds=0, iterations=6, persistence=0.55, offset=0.3)
+    stone = g.colorize(tint, grad((0, 0.66), (1, 0.84)))
+    aged = g.blend(g.colorize(grime_n, grad((0, 0.6), (1, 1.0))), stone, None, mode=MULTIPLY, amount=0.6)
+    trim = g.blend(g.colorize(carving, grad((0, 0.75), (1, 1.0))), aged, band_m, mode=NORMAL_B, amount=1.0)
+    joints = g.tone(blocks, (0, 0.2), (0.1, 1), (1, 1))
+    albedo_a = g.blend(joints, trim, None, mode=MULTIPLY, amount=1.0)
+    albedo = g.blend(g.color("#1a1410"), albedo_a, windows, mode=NORMAL_B, amount=1.0)
+    height = g.math(g.math(blocks, None, op=MUL, in2=0.7), g.math(carving, None, op=MUL, in2=0.35), op=ADD)
+    height = g.math(height, g.math(windows, None, op=MUL, in2=0.3), op=SUB, clamp=True)
+    emission = g.blend(g.color("#ffffff"), g.color("#000000"), windows, mode=NORMAL_B, amount=1.0)
+    # the carved trim is polished, the blocks matte
+    rough = g.math(g.colorize(grime_n, grad((0, 0.45), (1, 0.7))), g.math(band_m, None, op=MUL, in2=0.3), op=SUB, clamp=True)
+    return _finish(g, albedo, height, emission, rough, metallic_v=0.6, normal_strength=1.4, ao_strength=1.4)
+
+
+def hull_industrial():
+    """Used-future plating: big worn panels, weld seams with rivet rows, grilles on some panels,
+    rust and soot streaking down, chipped edges, and a few small warning lamps."""
+    g = Graph("Hull Industrial")
+    panels = g.node("bricks_uneven", iterations=5, min_size=0.1, randomness=0.6, mortar=0.008, bevel=0.015, round=0.0, corner=0.0)
+    tint = g.node("greyscale", (panels, 1), mode=2)
+    grille = g.node("bricks", pattern=0, repeat=1, rows=48, columns=1, row_offset=0.0, mortar=0.45, bevel=0.0, round=0.0, corner=0.0)
+    grille_cells = g.tone(tint, (0, 0), (0.2, 0), (0.22, 1), (0.34, 1), (0.36, 0), (1, 0))
+    grilles = g.math(g.tone(grille, (0, 1), (0.5, 0), (1, 0)), grille_cells, op=MUL, clamp=True)
+    rivet_c = g.node("sdcircle", r=0.0035, cx=0, cy=0)
+    rivets_all = g.node("sdrepeat", rivet_c, rx=64, ry=64, r=0.0, variations=False)
+    rivets_s = g.node("sdshow", rivets_all, bevel=0.003, base=0.0)
+    near_seam = g.tone(panels, (0, 1), (0.2, 1), (0.3, 0), (1, 0))
+    rivets = g.math(rivets_s, near_seam, op=MUL, clamp=True)
+    streak = g.node("fbm2", noise=1, scale_x=4, scale_y=48, folds=0, iterations=5, persistence=0.65, offset=0.1)
+    grime_n = g.node("fbm2", noise=2, scale_x=6, scale_y=6, folds=0, iterations=7, persistence=0.6, offset=0.5)
+    chips = g.tone(grime_n, (0, 0), (0.72, 0), (0.78, 1), (1, 1))
+    # lamps: a sparse grid of tiny dots, only on a few panels
+    lamp_c = g.node("sdcircle", r=0.004, cx=0, cy=0)
+    lamps_all = g.node("sdrepeat", lamp_c, rx=16, ry=16, r=0.0, variations=False)
+    lamps_s = g.node("sdshow", lamps_all, bevel=0.001, base=0.0)
+    lamp_cells = g.tone(tint, (0, 0), (0.9, 0), (0.92, 1), (1, 1))
+    lamps = g.math(lamps_s, lamp_cells, op=MUL, clamp=True)
+    paint = g.colorize(tint, grad((0, 0.55), (1, 0.8)))
+    worn = g.blend(g.colorize(grime_n, grad((0, 0.8), (1, 0.95))), paint, chips, mode=NORMAL_B, amount=0.7)
+    soot = g.blend(g.colorize(streak, grad((0, 0.45), (1, 1.0))), worn, None, mode=MULTIPLY, amount=0.85)
+    seams = g.tone(panels, (0, 0.15), (0.06, 1), (1, 1))
+    col = g.blend(seams, soot, None, mode=MULTIPLY, amount=1.0)
+    col2 = g.blend(g.color("#2a2a2a"), col, grilles, mode=NORMAL_B, amount=0.85)
+    col3 = g.blend(g.color("#b0b0b0"), col2, rivets, mode=NORMAL_B, amount=0.5)
+    albedo = g.blend(g.color("#ffffff"), col3, lamps, mode=NORMAL_B, amount=1.0)
+    height = g.math(g.math(panels, None, op=MUL, in2=0.6), g.math(rivets, None, op=MUL, in2=0.2), op=ADD)
+    height = g.math(height, g.math(grilles, None, op=MUL, in2=0.25), op=SUB, clamp=True)
+    height = g.math(height, g.math(chips, None, op=MUL, in2=0.04), op=SUB, clamp=True)
+    emission = g.blend(g.color("#ffffff"), g.color("#000000"), lamps, mode=NORMAL_B, amount=1.0)
+    rough = g.math(g.colorize(grime_n, grad((0, 0.6), (1, 0.9))), g.math(chips, None, op=MUL, in2=0.35), op=SUB, clamp=True)
+    return _finish(g, albedo, height, emission, rough, metallic_v=0.55, normal_strength=1.5, ao_strength=1.5)
 
 
 def hull_machinery():
@@ -315,6 +367,7 @@ GRAPHS = {
     "hull_organic": hull_organic,
     "hull_geometric": hull_geometric,
     "hull_classic": hull_classic,
+    "hull_industrial": hull_industrial,
     "hull_machinery": hull_machinery,
 }
 

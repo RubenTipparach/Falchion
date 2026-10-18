@@ -57,7 +57,8 @@ const TREE: Record<DomainId, Record<BranchId, Row[]>> = {
       ['u-modular', 'Modular Frames', 1, [ship('prospector')], 'Bolt-together hulls; unlocks the Prospector Skiff.', { requires: [] }],
       ['u-slipways', 'Orbital Slipways', 2, [style('utilitarian'), bonus('build', 10)], 'Ships cost 10% less to build. Unlocks the Utilitarian ship style.'],
       ['u-shipyards', 'Mobile Shipyards', 3, [part('fabricator')], 'Build ships far from home.'],
-      ['u-titan-frames', 'Titan Frames', 4, [bonus('hull', 2)], 'Oversized frames for oversized jobs.'],
+      ['u-heavy-haulage', 'Heavy Haulage', 3, [style('industrial'), bonus('hull', 1)], 'Towing tugs and refinery haulers built to last, not to look at. Unlocks the Industrial ship style.', { requires: ['u-slipways'] }],
+      ['u-titan-frames', 'Titan Frames', 4, [bonus('hull', 2)], 'Oversized frames for oversized jobs.', { requires: ['u-shipyards'] }],
     ],
     geometric: [
       ['g-prism', 'Prismatic Frames', 1, [bonus('hull', 1)], 'Pure-form hulls with no wasted volume.', { requires: [] }],
@@ -71,7 +72,7 @@ const TREE: Record<DomainId, Record<BranchId, Row[]>> = {
     ],
     aesthetic: [
       ['a-heritage', 'Heritage Shipwrights', 1, [bonus('hull', 1)], 'Elegant lines from a proud tradition.', { requires: [] }],
-      ['a-ornament', 'Ornamental Plating', 2, [style('classic'), trait('ornate'), bonus('influence', 1)], 'Gilded trim that inspires awe. Unlocks the Aesthetic ship style.'],
+      ['a-ornament', 'Ornamental Plating', 2, [style('classic'), trait('ornate'), bonus('influence', 1)], 'Gilded trim that inspires awe. Unlocks the Classic ship style.'],
       ['a-sail-yachts', 'Solar Sail Yachts', 2, [bonus('speed', 1)], 'Light sails for long, graceful voyages.', { requires: ['a-heritage'] }],
       ['a-grand-halls', 'Grand Halls', 3, [bonus('morale', 5)], 'Crews fight harder aboard beautiful ships.', { requires: ['a-ornament'] }],
       ['a-flagship', 'Grand Flagships', 5, [ship('flagship')], 'The pride of an empire.', { requires: ['x-sacred-geometry'] }],

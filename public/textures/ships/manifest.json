@@ -1,12 +1,16 @@
 {
  "files": {
   "classic.png": {
-   "bytes": 44637,
-   "sha256": "218174a8763283bedb8adebd46f6a5974c3e919ffe0909fd2d44c67c236d3e70"
+   "bytes": 79927,
+   "sha256": "eccaafe49e0a008778310a1200c7f49aec13b5fadf16fce2f84d961b991a293a"
   },
   "geometric.png": {
    "bytes": 49815,
    "sha256": "b06264009ba54748ea6b18f680295f2927916c814b07071c813f4090da8c5f79"
+  },
+  "industrial.png": {
+   "bytes": 98338,
+   "sha256": "e7317e1267c6589b0cda37465f7b37615509b46e7d3b01f02802287ff615f5f8"
   },
   "machinery.png": {
    "bytes": 83603,

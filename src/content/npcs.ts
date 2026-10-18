@@ -56,7 +56,7 @@ export const NPC_ARCHETYPES: readonly NpcArchetype[] = [
   },
   {
     id: 'morrow', prefixes: ['Morrow', 'Blackwake', 'Redsail', 'Gallow'], suffixes: ['Corsairs', 'Reavers', 'Free Company', 'Raiders'],
-    color: '#ffd166', style: 'utilitarian', hull: { primary: '#3a3328', secondary: '#1a1610', accent: '#ffd166' }, livery: 'hazard',
+    color: '#ffd166', style: 'industrial', hull: { primary: '#3a3328', secondary: '#1a1610', accent: '#ffd166' }, livery: 'hazard',
     bonuses: { short: 2, capture: 3 }, disposition: -30, aggression: 0.35, biome: 'barren',
     pool: [['interceptor', 5, 1], ['boarding-corvette', 3, 1], ['brawler', 2, 2], ['tractor-tender', 1, 3], ['missile-barge', 2, 3]],
     tech: ['u-gas-scoops', 'u-flak-screens', 'o-parasite-boarders'],

@@ -13,7 +13,7 @@ import * as THREE from 'three';
  * has loaded.
  */
 
-export const HULL_TEXTURE_NAMES = ['technological', 'utilitarian', 'organic', 'geometric', 'classic', 'machinery'] as const;
+export const HULL_TEXTURE_NAMES = ['technological', 'utilitarian', 'organic', 'geometric', 'classic', 'industrial', 'machinery'] as const;
 export type HullTextureName = (typeof HULL_TEXTURE_NAMES)[number];
 
 /** World units one repeat of the plating covers (a ship of length 1 is about 4 long). */

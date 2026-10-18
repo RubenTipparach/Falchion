@@ -21,6 +21,8 @@ import { slotsOf } from '../../content/buildings';
 import type { Planet } from '../../core/galaxy/Planets';
 import { clear, fmt, h } from '../dom';
 import { thumb } from '../thumbs';
+import { BUILDING_ART_STYLES } from '../../content/artStyles';
+import { buildingArtStyle, setBuildingArtStyle } from '../../render/thumbs/drawnArt';
 import { COMMERCE, COMPANY_KINDS, EXCHANGE_RESOURCES } from '../../content/commerce';
 import { NO_COMMERCE } from '../../core/economy/Commerce';
 import { DEFAULT_RESERVE, FOCI, type GovernorFocus } from '../../content/governor';
@@ -146,7 +148,20 @@ export class EmpirePanel extends Drawer {
       h('section', { class: 'card' }, h('h4', {}, 'Your empire is saved'),
         h('p', { class: 'small muted' }, `The world advances one year per minute, even while you are away. Progress is saved in this browser.`),
         h('button', { class: 'btn', onclick: () => { if (confirm('Abandon this empire and found a new one? This cannot be undone.')) this.actions.resetEmpire(); } }, 'Found a new empire')),
+      this.artCard(),
     ];
+  }
+
+  /** How building pictures are drawn, for this browser only (change hand-drawn-art). */
+  private artCard(): HTMLElement {
+    const cur = buildingArtStyle();
+    const sample = ['farm', 'mine', 'lab', 'shipyard', 'capitol'];
+    return h('section', { class: 'card art-style' },
+      h('h4', {}, 'Building art'),
+      h('p', { class: 'small muted' }, 'How buildings are pictured on planet cards and build menus. Only you see your choice.'),
+      h('div', { class: 'seg' }, ...BUILDING_ART_STYLES.map((st) => h('button', { class: `seg-btn ${cur.id === st.id ? 'active' : ''}`, title: st.blurb, onclick: () => { setBuildingArtStyle(st.id); this.render(); } }, st.name))),
+      h('p', { class: 'small' }, cur.blurb),
+      h('div', { class: 'art-sample' }, ...sample.map((id) => thumb('building', id, 56))));
   }
 
   private trade(): HTMLElement[] {

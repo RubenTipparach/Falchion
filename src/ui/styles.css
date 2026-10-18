@@ -1049,3 +1049,6 @@ svg.spark.down polyline { stroke: var(--bad); }
 .floor-pick { background: rgba(10, 16, 32, 0.8); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; font: inherit; }
 .colony-item { display: grid; gap: 2px; }
 .colony-item .cr-floor { padding: 0 10px 4px 64px; }
+img.thumb.drawn { background: radial-gradient(circle at 50% 45%, rgba(84, 98, 128, 0.35), rgba(10, 15, 26, 0.5) 72%); }
+img.thumb.pixelated { image-rendering: pixelated; }
+.card.art-style .art-sample { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }

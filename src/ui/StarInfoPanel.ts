@@ -20,6 +20,7 @@ import { collectWithFx } from './collectFx';
 import { clear, fmt, h, touchFirst } from './dom';
 import { icon, resourceIcon } from './icons';
 import { FREIGHTER } from '../core/economy/Trade';
+import { populationOf } from '../core/economy/Population';
 
 const minesOf = (classId: string) => SHIP_CLASSES.find((c) => c.id === classId)?.mines;
 
@@ -36,6 +37,13 @@ export interface StarDetails {
 /** Card describing the selected star system. */
 export class StarInfoPanel {
   readonly el = h('section', { class: 'star-card frame hidden', 'aria-label': 'Selected system' });
+  /**
+   * The planet whose card the player closed: the card stays hidden while that planet is focused,
+   * and the camera stays where it is (closing a card is not a camera move).
+   */
+  private closedPlanetId: string | null = null;
+  /** The planet card opened or closed (the city locator offers to reopen it). */
+  onCardChange: () => void = () => {};
 
   constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly describe: (s: StarSystem) => StarDetails, private readonly thumb: (p: Planet) => string, private readonly tables: EconomyTables) {
     store.subscribe((s, prev) => {
@@ -43,7 +51,21 @@ export class StarInfoPanel {
     });
   }
 
+  /** Show the focused planet's card again (after the player closed it). */
+  showPlanet(): void {
+    if (!this.closedPlanetId) return;
+    this.closedPlanetId = null;
+    this.onCardChange();
+    this.render(this.store.state);
+  }
+
+  /** Whether the focused planet's card is closed (for the city locator's "Planet card" button). */
+  get planetClosed(): boolean {
+    return !!this.closedPlanetId && this.closedPlanetId === this.store.state.selectedPlanet?.id;
+  }
+
   private render(s: GameState): void {
+    if (s.selectedPlanet?.id !== this.closedPlanetId) this.closedPlanetId = null;
     // The planet card is wider: the planet preview and its colony details need the room.
     this.el.classList.toggle('planet-view', !s.selectedFleet && !!s.selectedPlanet && s.selectedPlanet.starId === s.selected?.id);
     if (s.selectedFleet) {
@@ -54,7 +76,10 @@ export class StarInfoPanel {
     this.el.classList.toggle('hidden', !star);
     clear(this.el);
     if (!star) return;
-    if (s.selectedPlanet && s.selectedPlanet.starId === star.id) return this.renderPlanet(s, star, s.selectedPlanet);
+    if (s.selectedPlanet && s.selectedPlanet.starId === star.id) {
+      if (this.closedPlanetId === s.selectedPlanet.id) return void this.el.classList.add('hidden');
+      return this.renderPlanet(s, star, s.selectedPlanet);
+    }
     const d = this.describe(star);
     const isHome = star.id === s.home.id;
     const here = this.q.groupsAt(star).filter((g) => g.id !== 'dock' || isHome);
@@ -139,16 +164,22 @@ export class StarInfoPanel {
         h('div', {}, h('span', { class: 'eyebrow' }, `${star.name} · planet ${p.index + 1} of ${star.planetCount}`), h('h3', {}, p.name),
           h('p', { class: 'muted' }, `${biome?.name ?? p.biome} world · size ${p.size}`)),
         this.shareButton(star, p),
-        h('button', { class: 'icon-btn', 'aria-label': 'Back to system', title: 'Back to system (Esc)', onclick: () => this.actions.focusPlanet(star, null) }, icon('close'))),
+        // Closing the card keeps the view: the camera stays on the planet (or its surface).
+        h('button', { class: 'icon-btn', 'aria-label': 'Close the planet card', title: 'Close (the view stays on the planet)', onclick: () => this.closePlanet(p) }, icon('close'))),
       portrait,
       h('dl', {},
         !colony ? h('dt', {}, 'If colonised') : '', !colony ? h('dd', {}, yields.length ? yields.map(([r, n]) => `+${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`).join('  ') + ' / yr' : '—') : '',
         h('dt', {}, 'Survey'), h('dd', {}, colony ? 'Settled' : done ? `${done.kind} · ${done.success ? 'success' : 'failed'}` : 'Unexplored'),
+        ...(colony ? (() => {
+          const pop = populationOf(colony);
+          return [h('dt', {}, 'Population'), h('dd', {}, `Pop ${pop} · ${pop} ${pop === 1 ? 'city' : 'cities'}`)];
+        })() : []),
         ...(done?.success && !colony ? [h('dt', {}, 'Resources'), h('dd', {}, haulView(this.q.cacheOf(p)), s.collectedCaches.includes(p.id) ? h('span', { class: 'muted' }, ' · collected') : '')] : []),
         ...(done?.crate ? [h('dt', {}, 'Loot crate'), h('dd', {}, crateLine(done.crate, s.openedCrates.includes(p.id)))] : [])),
       done ? h('p', { class: 'small muted' }, done.narrative) : '',
       colony ? h('div', {}, h('span', { class: 'eyebrow' }, colony.capital ? 'Capital' : 'Your colony'), colonyView(colony, s.empire.materials, (b) => this.actions.build(p.id, b), this.tables, this.q.jobs(p.id), s.turn, {
-        unlocked: (id) => this.q.isBuildingUnlocked(id), openResearch: (id) => this.actions.openResearch(id), nodeName: (id) => this.tables.tree.node(id).name })) : '',
+        unlocked: (id) => this.q.isBuildingUnlocked(id), openResearch: (id) => this.actions.openResearch(id), nodeName: (id) => this.tables.tree.node(id).name },
+        p.biome !== 'gas' ? (id) => this.actions.land(star, p, { building: id }) : undefined)) : '',
       !done && !colony && !canExplore ? h('p', { class: 'small red' }, `Exploring needs a ship on station here with ${cost} supply.`) : '',
       h('div', { class: 'actions' },
         !done && !colony ? h('button', { class: 'btn primary', disabled: !canExplore, onclick: () => this.actions.explore(p) }, icon('explore'), ` Explore · ${cost} supply`) : '',
@@ -157,6 +188,12 @@ export class StarInfoPanel {
         p.biome !== 'gas' ? h('button', { class: 'btn land', title: colony ? `Descend to ${colony.name.replace(/ \(capital\)$/, '')}` : 'Descend to the surface', onclick: () => this.actions.land(star, p) }, icon('land'), ' Land') : '',
         h('button', { class: 'btn', onclick: () => this.actions.focusPlanet(star, null) }, 'Back to system')),
     );
+  }
+
+  private closePlanet(p: Planet): void {
+    this.closedPlanetId = p.id;
+    this.onCardChange();
+    this.el.classList.add('hidden');
   }
 
   /** Share a hotlink to the system or planet (share sheet on phones, else copied), with a brief confirmation. */

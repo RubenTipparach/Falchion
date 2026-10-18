@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { PlanetLook } from '../../content/planetLooks';
 import { Rng } from '../../core/rng/Rng';
+import { LIGHT_MAP_GLSL, NO_LIGHTS } from './NightLightMap';
 import { NOISE_GLSL } from './noise.glsl';
 import { surfaceLookOf } from '../../core/surface/Terrain';
 
@@ -27,9 +28,10 @@ const FRAG = /* glsl */ `
 uniform vec3 uC0; uniform vec3 uC1; uniform vec3 uC2; uniform vec3 uC3;
 uniform vec3 uCloud; uniform vec3 uAtmo; uniform vec3 uGlow;
 uniform float uSea; uniform float uIce; uniform float uClouds; uniform float uAtmoStrength; uniform float uDetail;
-uniform float uCraters; uniform float uLights; uniform float uTime; uniform vec3 uSeed; uniform vec3 uStarPos; uniform vec3 uStarColor;
+uniform float uCraters; uniform sampler2D uLightMap; uniform vec3 uCityGlow; uniform float uTime; uniform vec3 uSeed; uniform vec3 uStarPos; uniform vec3 uStarColor;
 varying vec3 vObj; varying vec3 vNormalW; varying vec3 vPosW;
 ${NOISE_GLSL}
+${LIGHT_MAP_GLSL}
 void main() {
   vec3 n = normalize(vNormalW);
   vec3 L = normalize(uStarPos - vPosW);
@@ -73,15 +75,15 @@ void main() {
   float caps = smoothstep(uIce, uIce + 0.06, lat + h * 0.12);
   col = mix(col, vec3(0.93, 0.96, 1.0), caps);
   spec *= 1.0 - caps;
-  if (uLights > 0.5 && h > uSea) {
-    float city = smoothstep(0.55, 0.75, snoise(p * 9.0)) * smoothstep(0.1, -0.2, ndl);
-    emissive += uGlow * city * 0.9;
-  }
+  // Cities and roads (the planet's light map, shared with the close-up): grey by day, lit at night.
+  float lights = lightMapAt(uLightMap, vObj);
+  col = mix(col, vec3(0.42, 0.42, 0.4), lights * 0.35);
   // Clouds drift slowly
   float c = fbm(vObj * (uDetail * 1.4) + uSeed.zxy + vec3(uTime * 0.015, 0.0, uTime * 0.008));
   float cloud = smoothstep(0.05, 0.55, c) * uClouds;
   col = mix(col, uCloud, cloud);
   spec *= 1.0 - cloud;
+  emissive += uCityGlow * lights * (1.0 - smoothstep(-0.18, 0.08, ndl)) * (1.0 - cloud * 0.5) * 1.1;
 #endif
 
   vec3 H = normalize(L + V);
@@ -92,8 +94,11 @@ void main() {
   gl_FragColor = vec4(lit, 1.0);
 }`;
 
-/** Procedural planet surface material for a biome look, varied by seed (the same roll as the surface view). */
-export function createPlanetMaterial(look: PlanetLook, seed: number, opts: { lights?: boolean } = {}): THREE.ShaderMaterial {
+/**
+ * Procedural planet surface material for a biome look, varied by seed (the same roll as the surface
+ * view). `lights` is the planet's night-light map (NightLightMap); null for a world nobody holds.
+ */
+export function createPlanetMaterial(look: PlanetLook, seed: number, opts: { lights?: THREE.Texture | null } = {}): THREE.ShaderMaterial {
   const s = surfaceLookOf(look, seed);
   const c = (hex: string) => new THREE.Color(hex);
   return new THREE.ShaderMaterial({
@@ -103,7 +108,8 @@ export function createPlanetMaterial(look: PlanetLook, seed: number, opts: { lig
       uCloud: { value: c(s.cloudColor) }, uAtmo: { value: c(s.atmosphere) }, uGlow: { value: c(s.glow) },
       uSea: { value: s.sea }, uIce: { value: s.ice },
       uClouds: { value: s.clouds }, uAtmoStrength: { value: s.atmosphereStrength },
-      uDetail: { value: s.detail }, uCraters: { value: s.craters ? 1 : 0 }, uLights: { value: opts.lights ? 1 : 0 },
+      uDetail: { value: s.detail }, uCraters: { value: s.craters ? 1 : 0 },
+      uLightMap: { value: opts.lights ?? NO_LIGHTS }, uCityGlow: { value: c(s.cityGlow) },
       uTime: { value: 0 }, uSeed: { value: new THREE.Vector3(...s.seed) },
       uStarPos: { value: new THREE.Vector3() }, uStarColor: { value: new THREE.Color('#ffffff') },
     },
@@ -154,4 +160,9 @@ export function createRingMaterial(color: string, seed: number): THREE.ShaderMat
         gl_FragColor = vec4(uColor * (0.7 + 0.3 * bands), a);
       }`,
   });
+}
+
+/** Show a planet's night lights (its light map), or none. */
+export function setPlanetLights(material: THREE.ShaderMaterial, lights: THREE.Texture | null): void {
+  material.uniforms.uLightMap.value = lights ?? NO_LIGHTS;
 }

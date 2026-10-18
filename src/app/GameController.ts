@@ -32,10 +32,12 @@ import { SYSTEM_VIEW_WIDTH, SystemLayer, planetRadius } from '../render/map/Syst
 import type { SurfaceLayer, SurfaceTarget } from '../render/planets/surface/SurfaceLayer';
 import { foreignSeat, type SettlementInput } from '../core/surface/SurfaceLayout';
 import type { Drawer } from '../ui/Drawer';
-import type { FleetInfo, GameActions, GameQueries, PanelId } from '../ui/GameActions';
+import type { CityEntry, FleetInfo, GameActions, GameQueries, LandingSpot, PanelId } from '../ui/GameActions';
+import { planetLayout } from '../render/planets/planetLayouts';
 import type { Hud } from '../ui/Hud';
 import type { TopBar } from '../ui/TopBar';
 import type { GameState } from './GameState';
+import { populationOf } from '../core/economy/Population';
 import { routePath, systemRoute } from './Routes';
 import { touchFirst } from '../ui/dom';
 
@@ -144,6 +146,8 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
   /** Other players' empires from the live feed: diplomacy and allied systems. */
   setOtherEmpires(list: readonly OtherEmpire[]): void {
     this.empires = list;
+    // Another empire's main world shows its city lights.
+    this.view?.system.refreshLights();
   }
 
   protected override otherEmpires(): readonly OtherEmpire[] {
@@ -348,6 +352,8 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
 
   /** Opens the founding screen to edit the empire's name, colours and flag (set by main). */
   onEditEmpire: () => void = () => {};
+  /** A planet was focused (the UI reopens its card if the player had closed it). */
+  onFocusPlanet: ((planet: Planet) => void) | null = null;
 
   async shareLink(star: StarSystem, planet: Planet | null = null): Promise<'shared' | 'copied' | 'failed'> {
     const url = new URL(routePath(systemRoute(star, planet ? planet.index : null)), location.origin).toString();
@@ -384,6 +390,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
 
   focusPlanet(star: StarSystem, planet: Planet | null): void {
     if (this.state.selected?.id !== star.id) this.select(star);
+    if (planet) this.onFocusPlanet?.(planet);
     const cam = this.view.map.controller;
     if (!planet) {
       this.clearPlanetFocus();
@@ -409,13 +416,21 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
   }
 
   /** Descend to a rocky planet's surface (its capital or main city): focuses it first if need be. */
-  land(star: StarSystem, planet: Planet): void {
+  land(star: StarSystem, planet: Planet, at?: LandingSpot): void {
     if (planet.biome === 'gas') return;
     if (this.state.selectedPlanet?.id !== planet.id || this.state.selectedFleet) this.focusPlanet(star, planet);
     else if (!this.view.map.controller.following) this.followPlanet(planet, null);
     this.refreshSurface();
-    this.view.surface.land();
+    this.view.surface.land(at);
   }
+
+  /** The major cities on a planet, capital first, from the same layout the surface draws. */
+  citiesOf = (planet: Planet): CityEntry[] => {
+    const colony = this.surfaceTarget(planet)?.colony;
+    if (!colony) return [];
+    return planetLayout(planet, colony).layout.settlements.flatMap((c, index) =>
+      c.major ? [{ name: c.name, kind: c.kind === 'capital' ? 'capital' as const : 'city' as const, index }] : []);
+  };
 
   /** On the surface: rise back to planet view. */
   leaveSurface(): void {
@@ -431,12 +446,12 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     const own = this.colonyAt(planet.id);
     let colony: SettlementInput | null = null;
     if (own) {
-      colony = { owner: 'own', name: own.name.replace(/ \(capital\)$/, ''), capital: !!own.capital, size: own.size ?? planet.size, buildings: own.buildings ?? [] };
+      colony = { owner: 'own', name: own.name.replace(/ \(capital\)$/, ''), capital: !!own.capital, size: own.size ?? planet.size, buildings: own.buildings ?? [], pop: populationOf(own) };
     } else if (star) {
       // Another empire's system: a generic city on its main world.
       const market = this.marketAt(star);
       if (market && market.kind !== 'own' && foreignSeat(this.planets(star))?.id === planet.id) {
-        colony = { owner: 'foreign', name: this.describe(star).owner ?? market.name, capital: false, size: planet.size, buildings: [] };
+        colony = { owner: 'foreign', name: this.describe(star).owner ?? market.name, capital: false, size: planet.size, buildings: [], pop: 1 };
       }
     }
     const done = this.state.explored[planet.id];
@@ -445,6 +460,8 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
 
   private refreshSurface(): void {
     this.view.surface.setTarget(this.surfaceTarget(this.state.selectedPlanet));
+    // Night lights in the system view come from the same colonies.
+    this.view.system.refreshLights();
   }
 
   private clearPlanetFocus(): void {

@@ -4,12 +4,17 @@
  * and the CPU-baked globe agree where they meet.
  */
 
-/** Most settlements the terrain shader flattens and draws streets for (main city + towns). */
-export const MAX_SITES = 8;
+import { MAX_SETTLEMENTS } from '../../../core/surface/SurfaceLayout';
+import { LIGHT_MAP_GLSL } from '../NightLightMap';
+
+/** Most settlements the terrain shader flattens and draws streets for (main city, cities and towns). */
+export const MAX_SITES = MAX_SETTLEMENTS;
 /** Terrain relief in planet radii (exaggerated so mountains read from orbit). */
 export const AMP = 0.022;
 /** Octaves of the baked globe (the patch fades to this at its edge). */
 export const BASE_OCT = 7;
+/** Narrowest a road is drawn, in screen pixels (thinner roads fade instead). */
+export const ROAD_MIN_PX = 1.4;
 
 export const NOISE_GLSL = /* glsl */ `
 float m289(float x) { return x - floor((x + 0.5) * (1.0 / 289.0)) * 289.0; }
@@ -40,7 +45,9 @@ float snoise(vec3 v) {
   vec4 b1 = vec4(x.zw, y.zw);
   vec4 s0 = floor(b0) * 2.0 + 1.0;
   vec4 s1 = floor(b1) * 2.0 + 1.0;
-  vec4 sh = -step(h, vec4(0.0));
+  // h is a multiple of 1/7 and often exactly 0: a margin makes every GPU (and the CPU copy,
+  // src/core/surface/Noise.ts) flip the same gradients, whatever its rounding.
+  vec4 sh = -step(h, vec4(0.05));
   vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
   vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
   vec3 p0 = vec3(a0.xy, h.x);
@@ -96,26 +103,98 @@ float elevOf(float h) { return uDry > 0.5 ? max((h + 0.6) * 0.5, 0.0) : max(h - 
 float radiusOf(float h) { return 1.0 + ${AMP.toFixed(4)} * elevOf(h); }
 `;
 
+/** The detail patch's square (gnomonic, round uPC): how far out a direction is in it (< 1 inside). */
+const PATCH_GLSL = /* glsl */ `
+uniform float uPatchOn; uniform vec3 uPC, uPT1, uPT2; uniform float uPSize;
+float patchEdge(vec3 d) {
+  if (uPatchOn < 0.5) return 9.0;
+  float dc = dot(d, uPC);
+  if (dc <= 0.0) return 9.0;
+  vec3 q = d / dc - uPC;
+  vec2 uv = vec2(dot(q, uPT1), dot(q, uPT2)) / uPSize;
+  return max(abs(uv.x), abs(uv.y));
+}
+`;
+
+/**
+ * The ground as drawn. Outside the detail patch it is the baked globe: the cube-sphere grid of
+ * SurfaceTerrain (rebuilt here from the same noise), flat between its vertices. Inside the patch it
+ * is the noise itself, with more octaves near the camera. The patch's outer ring morphs onto the
+ * globe's own triangles (a geomorph), so the two meet exactly at the patch's edge: the globe's
+ * coarse triangles turn sharp ridges into broad pyramids, and where the patch cut them off they
+ * used to float above the horizon with sky beneath them.
+ */
+const GROUND_GLSL = /* glsl */ `
+uniform float uBaseN, uOct;
+const float PI4 = 0.78539816;
+void faceOf(vec3 d, out vec3 n, out vec3 u, out vec3 v) {
+  vec3 a = abs(d);
+  if (a.x >= a.y && a.x >= a.z) {
+    if (d.x > 0.0) { n = vec3(1.0, 0.0, 0.0); u = vec3(0.0, 0.0, -1.0); } else { n = vec3(-1.0, 0.0, 0.0); u = vec3(0.0, 0.0, 1.0); }
+    v = vec3(0.0, 1.0, 0.0);
+  } else if (a.y >= a.z) {
+    u = vec3(1.0, 0.0, 0.0);
+    if (d.y > 0.0) { n = vec3(0.0, 1.0, 0.0); v = vec3(0.0, 0.0, -1.0); } else { n = vec3(0.0, -1.0, 0.0); v = vec3(0.0, 0.0, 1.0); }
+  } else {
+    v = vec3(0.0, 1.0, 0.0);
+    if (d.z > 0.0) { n = vec3(0.0, 0.0, 1.0); u = vec3(1.0, 0.0, 0.0); } else { n = vec3(0.0, 0.0, -1.0); u = vec3(-1.0, 0.0, 0.0); }
+  }
+}
+float gridT(float i) { return tan((i / uBaseN * 2.0 - 1.0) * PI4); }
+vec3 globeCorner(vec3 n, vec3 u, vec3 v, float i, float j) {
+  vec3 d = normalize(n + u * gridT(i) + v * gridT(j));
+  return d * radiusOf(shapedH(d, ${BASE_OCT}.0));
+}
+/** Radius of the baked globe's surface along d (the plane of its triangle there). */
+float globeRadius(vec3 d) {
+  vec3 n, u, v;
+  faceOf(d, n, u, v);
+  float dn = dot(d, n), s = dot(d, u) / dn, t = dot(d, v) / dn;
+  float gi = (atan(s) / PI4 + 1.0) * 0.5 * uBaseN, gj = (atan(t) / PI4 + 1.0) * 0.5 * uBaseN;
+  float i = clamp(floor(gi), 0.0, uBaseN - 1.0), j = clamp(floor(gj), 0.0, uBaseN - 1.0);
+  float fx = (s - gridT(i)) / (gridT(i + 1.0) - gridT(i)), fy = (t - gridT(j)) / (gridT(j + 1.0) - gridT(j));
+  vec3 A = globeCorner(n, u, v, i, j), D = globeCorner(n, u, v, i + 1.0, j + 1.0);
+  vec3 X = fx >= fy ? globeCorner(n, u, v, i + 1.0, j) : globeCorner(n, u, v, i, j + 1.0);
+  vec3 nrm = cross(X - A, D - A);
+  return dot(A, nrm) / dot(d, nrm);
+}
+/** Octaves at a point of the patch: all of them near the centre, the globe's at the edge. */
+float patchOctaves(float edge) { return mix(${BASE_OCT}.0, uOct, 1.0 - smoothstep(0.55, 0.98, edge)); }
+/** How far the patch has morphed onto the globe's triangles (1 at the edge). */
+float patchMorph(float edge) { return smoothstep(0.68, 0.97, edge); }
+/** Ground radius along d as drawn, given its place in the patch (patchEdge). */
+float groundRadius(vec3 d, float edge) {
+  if (edge >= 0.995) return globeRadius(d);
+  float r = radiusOf(shapedH(d, patchOctaves(edge)));
+  float m = patchMorph(edge);
+  return m > 0.0 ? mix(r, globeRadius(d), m) : r;
+}
+`;
+
 export const TERRAIN_FRAG = /* glsl */ `
 uniform vec3 uC0, uC1, uC2, uC3, uAtmo, uGlow, uCityGlow, uSun, uCam;
 uniform float uAtmoStrength, uIce, uSnow, uLava, uTime, uFine, uFar, uClose, uFade;
-uniform float uPatchOn; uniform vec3 uPC, uPT1, uPT2; uniform float uPSize;
+uniform sampler2D uLightMap;
 varying vec3 vDir; varying vec3 vN; varying vec3 vW; varying float vH;
 ${NOISE_GLSL}
 ${TERRAIN_GLSL}
+${PATCH_GLSL}
+${LIGHT_MAP_GLSL}
+/**
+ * Detail noise anchored to the planet: the two power-of-two frequencies either side of f, blended
+ * by where f falls between them. Zooming changes only the blend (detail fades in and out); a
+ * frequency that followed the zoom made the ground's pattern slide and shuffle.
+ */
+float bandNoise(vec3 d, float f, float off) {
+  float l = log2(f), f0 = exp2(floor(l)), w = smoothstep(0.0, 1.0, fract(l));
+  return mix(snoise(d * f0 + off), snoise(d * (f0 * 2.0) + off), w);
+}
 float lineAA(float g, float halfW) { float d = abs(g - floor(g + 0.5)); float fw = fwidth(g); return 1.0 - smoothstep(halfW - fw, halfW + fw, d); }
 void main() {
   vec3 dir = normalize(vDir);
 #ifdef IS_BASE
   // The globe gives way to the detail patch where the patch is drawn.
-  if (uPatchOn > 0.5) {
-    float dc = dot(dir, uPC);
-    if (dc > 0.0) {
-      vec3 q = dir / dc - uPC;
-      vec2 uv = vec2(dot(q, uPT1), dot(q, uPT2)) / uPSize;
-      if (max(abs(uv.x), abs(uv.y)) < 0.995) discard;
-    }
-  }
+  if (patchEdge(dir) < 0.995) discard;
 #endif
   vec3 n = normalize(vN);
   vec3 L = uSun;
@@ -128,10 +207,10 @@ void main() {
   // Zoom-scaled detail noise, faded out where it would alias (far terrain, the horizon).
   float fwq = length(fwidth(dir * uFine));
   float fade1 = 1.0 - smoothstep(0.2, 0.7, fwq);
-  float fine = snoise(dir * uFine) * 0.6 * fade1;
+  float fine = bandNoise(dir, uFine, 0.0) * 0.6 * fade1;
 #ifndef LITE
   float fade2 = 1.0 - smoothstep(0.2, 0.7, fwq * 2.9);
-  fine += snoise(dir * uFine * 2.9 + 3.0) * 0.4 * fade2;
+  fine += bandNoise(dir, uFine * 2.9, 3.0) * 0.4 * fade2;
 #endif
   float coarse = snoise(p * 6.0);
   vec3 col; vec3 em = vec3(0.0); float spec = 0.0; float cracks = 0.0;
@@ -143,7 +222,7 @@ void main() {
   } else {
     float e = uDry > 0.5 ? smoothstep(-0.6, 0.7, h) : smoothstep(uSea, uSea + 0.7, h);
     col = mix(uC2, uC3, clamp(e + fine * 0.06, 0.0, 1.0));
-    float veg = smoothstep(-0.25, 0.45, snoise(dir * uFine * 0.23 + 7.0)) * (1.0 - smoothstep(0.2, 0.7, fwq * 0.23));
+    float veg = smoothstep(-0.25, 0.45, bandNoise(dir, uFine * 0.23, 7.0)) * (1.0 - smoothstep(0.2, 0.7, fwq * 0.23));
     col = mix(col, col * vec3(0.72, 0.86, 0.68), veg * 0.45);
     col *= 0.86 + 0.14 * coarse + 0.1 * fine;
     if (uDry < 0.5) col = mix(mix(uC3, vec3(0.86, 0.8, 0.62), 0.55), col, smoothstep(0.0, 0.012, h - uSea + fine * 0.004));
@@ -200,12 +279,14 @@ void main() {
     vec3 lamp = mix(uCityGlow, vec3(1.0, 0.86, 0.6), avenue);
     em += lamp * night * inCity * (roads * 0.16 + major * 0.28 + avenue * 0.3);
     em += uCityGlow * night * inCity * 0.035;
-    // From orbit the grid collapses into a soft glow cluster.
-    float glowD = sprawl * sprawl * (0.35 + 0.65 * smoothstep(-0.2, 0.7, snoise(dir * 900.0 + float(i))));
-    em += uCityGlow * night * uFar * glowD * uCityC[i].y;
     spec *= 1.0 - inCity;
     urbanAll = max(urbanAll, max(inCity, sprawl * 0.9));
   }
+  // From orbit the streets and roads collapse into the planet's light map, the same one the
+  // system view draws, so the lights stay where they were seen from afar.
+  float lightMap = lightMapAt(uLightMap, dir);
+  em += uCityGlow * night * uFar * lightMap * 1.1;
+  col = mix(col, vec3(0.42, 0.42, 0.4), lightMap * 0.35 * uFar * (1.0 - urbanAll));
   cracks *= 1.0 - urbanAll;
   em += uGlow * cracks * 2.0;
   col = mix(col, uGlow * 0.4, cracks * 0.5);
@@ -256,14 +337,16 @@ void main() {
 /** The detail patch: a grid on the sphere near the camera, displaced on the GPU with more octaves. */
 export const PATCH_VERT = /* glsl */ `
 attribute vec2 aUV; attribute float aSkirt;
-uniform vec3 uPC, uPT1, uPT2; uniform float uPSize, uOct, uEps;
+uniform float uEps;
 varying vec3 vDir; varying vec3 vN; varying vec3 vW; varying float vH;
 ${NOISE_GLSL}
 ${TERRAIN_GLSL}
+${PATCH_GLSL}
+${GROUND_GLSL}
 vec3 pdir(vec2 uv) { return normalize(uPC + (uv.x * uPT1 + uv.y * uPT2) * uPSize); }
 void main() {
   float edge = max(abs(aUV.x), abs(aUV.y));
-  float oct = mix(${BASE_OCT}.0, uOct, 1.0 - smoothstep(0.55, 0.98, edge));
+  float oct = patchOctaves(edge);
   vec3 d0 = pdir(aUV);
   float h0 = shapedH(d0, oct);
   vec3 P0 = d0 * radiusOf(h0);
@@ -271,7 +354,10 @@ void main() {
   vec3 d2 = pdir(aUV + vec2(0.0, uEps)); vec3 P2 = d2 * radiusOf(shapedH(d2, oct));
   vec3 nn = normalize(cross(P1 - P0, P2 - P0));
   if (dot(nn, d0) < 0.0) nn = -nn;
-  vec3 P = d0 * (length(P0) - aSkirt * uPSize * 0.03);
+  // Shading keeps the noise's own normal; the position morphs onto the globe toward the edge.
+  float m = patchMorph(edge);
+  float r = m > 0.0 ? mix(length(P0), globeRadius(d0), m) : length(P0);
+  vec3 P = d0 * (r - aSkirt * uPSize * 0.03);
   vDir = d0; vN = nn; vW = P; vH = h0;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(P, 1.0);
 }`;
@@ -416,3 +502,59 @@ void main() {
 /** Full-screen backdrop that fades the map's sky out as the close-up takes the whole screen. */
 export const BACKDROP_VERT = /* glsl */ `void main() { gl_Position = vec4(position.xy, 0.9999, 1.0); }`;
 export const BACKDROP_FRAG = /* glsl */ `uniform vec3 uColor; uniform float uAlpha; void main() { gl_FragColor = vec4(uColor, uAlpha); }`;
+
+/**
+ * Roads: ribbons laid on the terrain exactly as it is drawn (GROUND_GLSL): the patch's own height
+ * near the camera, the baked globe's triangle under them elsewhere.
+ * Each ribbon is at least ROAD_MIN_PX wide on screen and fades when thinner than that, so from
+ * close orbit roads read as faint lines. Lamps light them at night.
+ */
+export const ROAD_VERT = /* glsl */ `
+attribute vec3 aTan; attribute float aSide; attribute float aAlong; attribute float aBridge; attribute float aTrunk;
+uniform float uWidth, uPx; uniform vec3 uCam;
+varying vec3 vW; varying vec3 vUp; varying float vAlong; varying float vBridge; varying float vAlpha; varying float vTrunk; varying float vAcross;
+${NOISE_GLSL}
+${TERRAIN_GLSL}
+${PATCH_GLSL}
+${GROUND_GLSL}
+void main() {
+  vec3 d = normalize(position);
+  float edge = patchEdge(d);
+  float r = groundRadius(d, edge);
+  if (aBridge > 0.5) r = max(r, 1.0) + 0.0004;
+  vec3 P = d * r;
+  float dist = length(uCam - P);
+  float want = uWidth * (aTrunk > 0.5 ? 1.0 : 0.7);
+  float minW = uPx * dist * ${ROAD_MIN_PX.toFixed(1)};
+  float w = max(want, minW);
+  vec3 side = normalize(cross(d, aTan));
+  P += side * aSide * w * 0.5 + d * (0.00002 + dist * 0.0006);
+  vW = P; vUp = d; vAlong = aAlong; vBridge = aBridge; vTrunk = aTrunk; vAcross = aSide;
+  vAlpha = clamp(want / minW, 0.3, 1.0);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(P, 1.0);
+}`;
+
+export const ROAD_FRAG = /* glsl */ `
+uniform vec3 uSun, uCam, uAtmo, uCityGlow; uniform float uClose, uAtmoStrength, uFade, uFar;
+varying vec3 vW; varying vec3 vUp; varying float vAlong; varying float vBridge; varying float vAlpha; varying float vTrunk; varying float vAcross;
+void main() {
+  float sunUp = dot(normalize(vUp), uSun);
+  float day = smoothstep(-0.1, 0.25, sunUp);
+  float night = 1.0 - smoothstep(-0.18, 0.08, sunUp);
+  vec3 col = mix(vec3(0.11, 0.11, 0.12), vec3(0.5, 0.49, 0.46), vBridge);
+  // A pale centre line by day, where it can be seen.
+  float centre = 1.0 - smoothstep(0.06, 0.16, abs(vAcross));
+  col = mix(col, vec3(0.75, 0.72, 0.6), centre * 0.5 * vAlpha);
+  vec3 lit = col * (0.04 + 0.9 * day);
+  // Street lamps along the road; far away they average into a steady glow.
+  float g = vAlong / 0.0012;
+  float fw = fwidth(g);
+  float lamp = mix(1.0 - smoothstep(0.15, 0.35, abs(fract(g) - 0.5) * 2.0 - 0.3), 0.45, smoothstep(0.3, 0.8, fw));
+  lit += uCityGlow * night * (0.25 + 0.9 * lamp) * (vTrunk > 0.5 ? 1.0 : 0.75);
+  float dist = length(uCam - vW);
+  vec3 airCol = uAtmo * (0.12 + 0.88 * smoothstep(-0.3, 0.6, sunUp));
+  lit = mix(lit, airCol * 0.8, clamp((1.0 - exp(-dist / 0.3)) * 0.55 * uClose * 0.75 * uAtmoStrength, 0.0, 0.85));
+  // From orbit the light map carries the lights: the ribbons fade to faint lines.
+  float far = mix(1.0, 0.55, uFar);
+  gl_FragColor = vec4(lit, vAlpha * uFade * far);
+}`;

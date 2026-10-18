@@ -6,7 +6,9 @@ import { GalaxyModel, SPECTRAL_COLORS, SpectralClass, StarSystem } from '../../c
 import { planetsOf, Planet } from '../../core/galaxy/Planets';
 import { worldToHex } from '../../core/hex/Hex';
 import { Rng, hashSeed } from '../../core/rng/Rng';
-import { createPlanetMaterial, createRingMaterial, createStarMaterial } from '../planets/PlanetMaterial';
+import type { SettlementInput } from '../../core/surface/SurfaceLayout';
+import { createPlanetMaterial, createRingMaterial, createStarMaterial, setPlanetLights } from '../planets/PlanetMaterial';
+import { hasPlanetLightMap, planetLightMap } from '../planets/planetLayouts';
 import type { MapLayer, ViewState } from './MapLayer';
 import { fade } from './ZoomModel';
 
@@ -14,10 +16,13 @@ const STAR_SCALE: Record<SpectralClass, number> = { O: 1.8, B: 1.5, A: 1.25, F: 
 /** Show the system below this visible width (ly). */
 export const SYSTEM_VIEW_WIDTH = 9;
 const LABELS_BELOW = 3;
-/** Planet spin (radians per second), and while a close-up of it is shown (a day of about four minutes). */
-const SPIN = 0.15;
-const HELD_SPIN = SPIN / 6;
-const STAR_V = new THREE.Vector3();
+/**
+ * Planet spin (radians per second): a day of about seven minutes. A planet keeps this spin while
+ * its close-up is shown, so day and night on the ground follow the planet seen from orbit.
+ */
+const SPIN = 0.015;
+/** Orbital speed scale: radians per second for an orbit of 1/12 ly (further out is slower). */
+const ORBIT_RATE = 0.01;
 const TMP = new THREE.Vector3();
 
 interface OrbitingPlanet {
@@ -29,8 +34,10 @@ interface OrbitingPlanet {
   readonly phase: number;
   readonly speed: number;
   readonly label: CSS2DObject;
-  /** Turned so far (radians): planets turn steadily, slower while a close-up holds them. */
+  /** Turned so far (radians). */
   spin: number;
+  /** Key of the night lights shown (what stands on the planet), null for none, undefined before the first check. */
+  lightsKey?: string | null;
 }
 
 interface BuiltSystem {
@@ -52,7 +59,8 @@ export interface PlanetFrame {
 }
 
 export interface SystemEvents {
-  isHome(star: StarSystem): boolean;
+  /** What stands on a planet (from the game state), for its night lights; null when nobody holds it. */
+  colonyOf(planet: Planet): SettlementInput | null;
   onPlanetClick(star: StarSystem, planet: Planet): void;
 }
 
@@ -66,8 +74,11 @@ export class SystemLayer implements MapLayer {
   private readonly coronaTexture = radialTexture();
   private selectedId: string | null = null;
   private hoverId: string | null = null;
-  /** A planet a close-up draws instead (the surface view): hidden here, turning slower. */
+  /** A planet a close-up draws instead (the surface view): hidden here. */
   private heldId: string | null = null;
+  /** Night lights need a check (a new system, or the colonies changed). */
+  private lightsDirty = true;
+  private readonly starWorld = new THREE.Vector3();
   private lastTime = 0;
   private origin = { x: 0, z: 0 };
 
@@ -101,12 +112,14 @@ export class SystemLayer implements MapLayer {
     this.selectedId = planetId;
   }
 
-  /**
-   * A close-up (the surface view) is drawing this planet from the same viewpoint: hide it here and
-   * slow its spin (a long day on the ground, so the view does not wheel). null releases it.
-   */
+  /** A close-up (the surface view) is drawing this planet from the same viewpoint: hide it here. null releases it. */
   holdPlanet(planetId: string | null): void {
     this.heldId = planetId;
+  }
+
+  /** The colonies changed: re-check every planet's night lights. */
+  refreshLights(): void {
+    this.lightsDirty = true;
   }
 
   /** Absolute galaxy position of a planet (for the camera to follow). */
@@ -151,8 +164,9 @@ export class SystemLayer implements MapLayer {
     const t = view.time;
     const dt = Math.min(1, Math.max(0, t - this.lastTime));
     this.lastTime = t;
-    // Star position in view space: planet shading is camera-relative.
-    const starPos = sys.root.getWorldPosition(STAR_V).applyMatrix4(view.camera.matrixWorldInverse);
+    // Star position for planet shading (made camera-relative as each planet is drawn, see build).
+    sys.root.getWorldPosition(this.starWorld);
+    this.updateLights(sys);
     sys.starMaterial.uniforms.uTime.value = t;
     sys.corona.material.opacity = 0.75 + 0.08 * Math.sin(t * 1.3);
     const showLabels = view.visibleWidth < LABELS_BELOW && view.visibleWidth > 0.2;
@@ -161,12 +175,10 @@ export class SystemLayer implements MapLayer {
     sys.starLabel.element.style.opacity = labelFade;
     for (const p of sys.planets) {
       p.pivot.rotation.y = p.phase + t * p.speed;
-      const held = p.planet.id === this.heldId;
-      p.spin += dt * (held ? HELD_SPIN : SPIN);
+      p.spin += dt * SPIN;
       p.mesh.rotation.y = p.spin;
-      p.mesh.parent!.visible = !held;
+      p.mesh.parent!.visible = p.planet.id !== this.heldId;
       p.material.uniforms.uTime.value = t;
-      p.material.uniforms.uStarPos.value.copy(starPos);
       p.label.visible = showLabels;
       p.label.element.style.opacity = labelFade;
       p.label.element.classList.toggle('active', p.planet.id === this.selectedId);
@@ -200,9 +212,14 @@ export class SystemLayer implements MapLayer {
 
       const look = PLANET_LOOKS[planet.biome] ?? PLANET_LOOKS.barren;
       const radius = planetRadius(planet);
-      const material = createPlanetMaterial(look, hashSeed(planet.id, 'surface'), { lights: this.events.isHome(star) && planet.index === 0 });
+      const material = createPlanetMaterial(look, hashSeed(planet.id, 'surface'));
       material.uniforms.uStarColor.value.set(color).lerp(new THREE.Color('#ffffff'), 0.6);
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 64, 40), material);
+      // Shading is camera-relative: the star in the view space of whichever camera draws the planet
+      // (a close-up may move the map camera after the layers have updated).
+      mesh.onBeforeRender = (_r, _s, camera) => {
+        material.uniforms.uStarPos.value.copy(this.starWorld).applyMatrix4(camera.matrixWorldInverse);
+      };
       mesh.rotation.z = rng.range(-0.4, 0.4);
       const pivot = new THREE.Object3D();
       const holder = new THREE.Object3D();
@@ -221,9 +238,30 @@ export class SystemLayer implements MapLayer {
       holder.add(lbl);
       pivot.add(holder);
       root.add(pivot);
-      planets.push({ planet, pivot, mesh, material, radius, phase: rng.range(0, Math.PI * 2), speed: 0.1 / Math.pow(orbit * 12, 1.5), label: lbl, spin: this.lastTime * SPIN });
+      planets.push({ planet, pivot, mesh, material, radius, phase: rng.range(0, Math.PI * 2), speed: ORBIT_RATE / Math.pow(orbit * 12, 1.5), label: lbl, spin: this.lastTime * SPIN });
     }
+    this.lightsDirty = true;
     return { star, root, starMaterial, corona, planets, starLabel };
+  }
+
+  /**
+   * Night lights from what stands on each planet (the same layout the close-up draws). A layout
+   * takes tens of milliseconds, so at most one new one is made per frame.
+   */
+  private updateLights(sys: BuiltSystem): void {
+    if (!this.lightsDirty) return;
+    let pending = false, made = false;
+    for (const p of sys.planets) {
+      if (p.planet.biome === 'gas') { p.lightsKey = null; continue; }
+      const colony = this.events.colonyOf(p.planet);
+      const key = colony ? JSON.stringify(colony) : null;
+      if (key === p.lightsKey) continue;
+      if (made && !hasPlanetLightMap(p.planet, colony)) { pending = true; continue; }
+      made = made || !hasPlanetLightMap(p.planet, colony);
+      setPlanetLights(p.material, planetLightMap(p.planet, colony));
+      p.lightsKey = key;
+    }
+    this.lightsDirty = pending;
   }
 
   private clear(): void {

@@ -30,7 +30,9 @@ float snoise(vec3 v) {
   vec4 b1 = vec4(x.zw, y.zw);
   vec4 s0 = floor(b0) * 2.0 + 1.0;
   vec4 s1 = floor(b1) * 2.0 + 1.0;
-  vec4 sh = -step(h, vec4(0.0));
+  // h is a multiple of 1/7 and often exactly 0: a margin makes every GPU (and the CPU copy,
+  // src/core/surface/Noise.ts) flip the same gradients, whatever its rounding.
+  vec4 sh = -step(h, vec4(0.05));
   vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
   vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
   vec3 p0 = vec3(a0.xy, h.x);

@@ -6,4 +6,7 @@ export const TOWN_NAMES: readonly string[] = [
   'Quillon', 'Pommel', 'Fuller’s Rest', 'Tang Ridge', 'Crossguard', 'Scabbard', 'Bladesend',
   'Forte', 'Foible', 'Hilt Landing', 'Grip Hollow', 'Edgewater', 'Ricasso Flats', 'Guardpost',
   'Swordsmith', 'Peen', 'Ferrule', 'Langet', 'Chape', 'Riverguard',
+  'Damascus Ford', 'Tempering', 'Whetstone', 'Anvil Bay', 'Kris Hollow', 'Sabreline', 'Rapier Point',
+  'Cutlass Cove', 'Gladius', 'Claymore', 'Broadsword', 'Estoc', 'Tulwar', 'Spatha', 'Basket Hilt',
+  'Grindstone', 'Quench', 'Bevel Heights',
 ];

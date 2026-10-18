@@ -62,8 +62,21 @@ export interface FleetInfo {
   readonly surveying: Planet | null;
 }
 
+/** A major city on a planet's surface, for the city locator (one per point of population). */
+export interface CityEntry {
+  readonly name: string;
+  readonly kind: 'capital' | 'city';
+  /** Where it is in the planet's surface layout (what `land` flies to). */
+  readonly index: number;
+}
+
+/** Where a landing goes on a planet: one of its cities (by `CityEntry.index`) or one of its buildings. */
+export type LandingSpot = { readonly city: number } | { readonly building: string };
+
 /** Read-only game queries the panels use (implemented by the app layer). */
 export interface GameQueries {
+  /** A planet's major cities, capital first (empty when nobody has settled it). */
+  citiesOf(planet: Planet): readonly CityEntry[];
   /** How much of a system has been surveyed: explored or settled planets out of all. */
   surveyProgress(star: StarSystem): { done: number; total: number };
   groups(): FleetGroup[];
@@ -160,8 +173,11 @@ export interface GameActions {
   select(star: StarSystem | null): void;
   /** Fly into a system and follow one of its planets (null = back to the system). */
   focusPlanet(star: StarSystem, planet: Planet | null): void;
-  /** Descend to a rocky planet's surface: its capital or main city (a camera move, not an order). */
-  land(star: StarSystem, planet: Planet): void;
+  /**
+   * Descend to a rocky planet's surface: its capital or main city, or `at` one of its cities or
+   * buildings (a camera move, not an order).
+   */
+  land(star: StarSystem, planet: Planet, at?: LandingSpot): void;
   /** Form a new fleet from docked ships and send it to a star. */
   formFleet(ships: Squadron[], to: StarSystem, name?: string): void;
   /** Send a deployed fleet to a star (straight line from where it is now). */

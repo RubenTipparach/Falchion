@@ -37,7 +37,9 @@ emission only, so few samples are enough).
 
 - **Look at the contact sheet before calling it done**:
   `montage -background '#20242c' -fill white -label '%t' -geometry 256x256+6+6 -tile 5x public/art/buildings/<style>/*.png sheet.png`,
-  and pixel art with `-filter point` so it is not smoothed. Then look at it in the game, in the
+  and pixel art with `-filter point` so it is not smoothed. Add `-depth 8` to any sheet that is
+  shared or committed: montage writes 16-bit PNGs here, which phones and the Claude app do not
+  show. Then look at it in the game, in the
   build menu (30 px) and on the planet card (28 px): a picture must still read at that size, so
   one clear silhouette and one accent (a glow, a flag, a dome) beat detail.
 - Every building gets a picture in every drawn style in the same change that adds the building.

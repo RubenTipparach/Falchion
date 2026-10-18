@@ -76,7 +76,20 @@ export class EmpirePanel extends Drawer {
       if (star && planet) this.actions.focusPlanet(star, planet);
       else if (star) this.actions.flyTo(star, true);
     };
+    // Colonists (change commerce): the population a colony must have before an ark takes one of its people.
+    const empireFloor = s.commerce?.colonistFloor ?? 2;
+    const floorSelect = (value: number | null, onPick: (n: number | null) => void, inherit?: number) => {
+      const sel = h('select', { class: 'floor-pick', 'aria-label': 'Colonist floor' },
+        ...(inherit !== undefined ? [h('option', { value: '', selected: value === null }, `Empire (${inherit})`)] : []),
+        ...[2, 3, 4, 5, 6, 8, 10, 15, 20].map((n) => h('option', { value: String(n), selected: value === n }, String(n)))) as HTMLSelectElement;
+      sel.addEventListener('change', () => onPick(sel.value === '' ? null : Number(sel.value)));
+      return sel;
+    };
     return [
+      h('section', { class: 'card colonist-floor' },
+        h('div', { class: 'row-between' }, h('b', {}, 'Colonists'),
+          h('label', { class: 'small' }, 'Take colonists only from worlds with population ', floorSelect(empireFloor, (n) => this.actions.setColonistFloor(n, null)), ' or more')),
+        h('p', { class: 'small muted' }, 'An ark (yours or a colony company\'s) takes one person from a world at or above this, so it never drops below it less one. Set a different floor for a colony below.')),
       h('p', { class: 'small muted' }, 'Click a colony to open it and manage its buildings.'),
       h('div', { class: 'colony-list' }, ...s.economy.colonies.map((c) => {
         const y = colonyYield(c, this.t);
@@ -86,12 +99,15 @@ export class EmpirePanel extends Drawer {
         const queued = c.planetId ? this.q.jobs(c.planetId).length : 0;
         const slots = c.planetId ? slotsOf(c.size ?? 3, c.capital) : 0;
         const planet = c.planetId ? this.q.planetById(c.planetId) : null;
-        return h('button', { class: 'colony-row', title: `Open ${c.name}`, onclick: () => open(c) },
+        const row = h('button', { class: 'colony-row', title: `Open ${c.name}`, onclick: () => open(c) },
           planet ? h('img', { class: 'planet-thumb cr-thumb', src: this.thumb(planet), alt: `${c.name}, ${c.biome}` }) : h('span', { class: 'cr-thumb' }),
           h('span', { class: 'cr-name' }, h('b', {}, c.name), h('small', { class: 'muted' }, `${BIOMES.find((b) => b.id === c.biome)?.name ?? c.biome}${c.size ? ` · size ${c.size}` : ''}`)),
           h('span', { class: 'cr-out small' }, out.join('  ') || '—'),
           h('span', { class: 'cr-slots mono small', title: 'Buildings / slots' }, slots ? `${built}/${slots}` : '—', queued ? h('span', { class: 'tag' }, `+${queued} building`) : ''),
           icon('locate'));
+        return h('div', { class: 'colony-item' }, row,
+          c.planetId ? h('label', { class: 'cr-floor small muted', title: 'Population this colony must have before an ark takes one of its people' },
+            `Pop ${c.pop ?? 1} · gives colonists at `, floorSelect(c.colonistFloor ?? null, (n) => this.actions.setColonistFloor(n, c.planetId!), empireFloor), ' or more') : '');
       })),
     ];
   }

@@ -21,6 +21,8 @@ export interface CommerceState {
   readonly portfolio?: Readonly<Record<string, number>>;
   /** Companies chartered so far (their ids). */
   readonly chartered?: number;
+  /** Population a colony must have before it gives one up for colonists (at least 2; default 2). */
+  readonly colonistFloor?: number;
 }
 
 export const NO_COMMERCE: CommerceState = { tariff: 10, companies: [] };

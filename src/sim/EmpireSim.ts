@@ -560,7 +560,7 @@ export class EmpireSim {
     const orders = kind === 'Survey Group' ? { autoExplore: true, autoReturn: true } : undefined;
     // Arks leave with colonists from the capital, one colony's worth each, while it has people to spare.
     const capital = s.economy.colonies.find((c) => c.capital);
-    const colonists = countOf(wanted, ARK) ? Math.min(countOf(wanted, ARK), Math.max(0, (capital?.pop ?? 1) - 1)) : 0;
+    const colonists = countOf(wanted, ARK) && capital ? Math.min(countOf(wanted, ARK), this.spare(capital)) : 0;
     this.deps.store.update({ fleets: [...s.fleets, fleet], loadouts: { ...s.loadouts, [id]: { ships: wanted, ...fullStores(wanted, specOf), orders, ...(countOf(wanted, ARK) ? { colonists } : {}) } } });
     if (colonists && capital?.planetId) this.movePeople(capital.planetId, -colonists);
     if (!quiet) this.dispatch(`${label} departs for ${to.name} (${formatDuration(travelTurns(hexDistance(s.home.hex, to.hex), speed), CLOCK)})`);
@@ -943,7 +943,7 @@ export class EmpireSim {
   /**
    * Settle a surveyed planet with a Colony Ark on station there (change commerce): the ark is not
    * used up, but it spends its colonists and all of its supply. A fleet's ark needs colonists aboard
-   * (see embark); an ark at the home dock takes them from the capital, which needs population 2.
+   * (see embark); an ark at the home dock takes them from the capital, if it can spare them (colonistFloor).
    */
   settle(planet: Planet): void {
     const s = this.state;
@@ -974,9 +974,9 @@ export class EmpireSim {
     if (fleet) return fleet;
     const capital = this.state.economy.colonies.find((c) => c.capital);
     const dock = arks.find((g) => g.id === 'dock' && g.stores.supply >= ARK_SUPPLY);
-    if (dock && capital && (capital.pop ?? 1) >= 2) return dock;
-    if (arks.some((g) => g.id !== 'dock' && !(g.colonists ?? 0))) return `The ark at ${star.name} has no colonists: load them at a colony with population 2 or more (Embark)`;
-    if (arks.some((g) => g.id === 'dock')) return `Settling from the dock takes colonists from ${capital?.name ?? 'the capital'}, which needs population 2, and ${ARK_SUPPLY} supply`;
+    if (dock && capital && this.spare(capital) > 0) return dock;
+    if (arks.some((g) => g.id !== 'dock' && !(g.colonists ?? 0))) return `The ark at ${star.name} has no colonists: load them at a colony that can spare people (Embark)`;
+    if (arks.some((g) => g.id === 'dock')) return `Settling from the dock takes colonists from ${capital?.name ?? 'the capital'}, which gives them only at population ${capital ? this.colonistFloor(capital) : 2} or more, and ${ARK_SUPPLY} supply`;
     return `The ark at ${star.name} needs ${ARK_SUPPLY} supply to settle: resupply in a friendly system`;
   };
 
@@ -995,6 +995,31 @@ export class EmpireSim {
     this.deps.report?.('colony', `settled ${planet.name} in ${star.name}`, placeOf(star));
   }
 
+  /**
+   * The population a colony must have to give up one for colonists: its own floor, else the
+   * empire's (change commerce), never below 2 (a world keeps at least one).
+   */
+  colonistFloor = (c: Colony): number => Math.max(2, c.colonistFloor ?? this.commerce.colonistFloor ?? 2);
+
+  /** Colonists a colony can spare now: its population down to one below its floor. */
+  protected spare(c: Colony): number {
+    return Math.max(0, (c.pop ?? 1) - (this.colonistFloor(c) - 1));
+  }
+
+  /** Set the colonist floor for the whole empire (no planet), or for one colony (null: back to the empire's). */
+  setColonistFloor(floor: number | null, planetId: string | null): void {
+    const n = floor === null ? null : Math.max(2, Math.min(50, Math.round(floor)));
+    if (!planetId) {
+      if (n !== null) this.updateCommerce((c) => ({ ...c, colonistFloor: n }));
+      return;
+    }
+    this.deps.store.update((st) => ({ economy: { ...st.economy, colonies: st.economy.colonies.map((c) => {
+      if (c.planetId !== planetId) return c;
+      const { colonistFloor: _old, ...rest } = c;
+      return n === null ? rest : { ...rest, colonistFloor: n };
+    }) } }));
+  }
+
   /** Add (or take, negative) population on a colony. */
   protected movePeople(planetId: string, delta: number): void {
     this.deps.store.update((st) => ({ economy: { ...st.economy, colonies: st.economy.colonies.map((c) => (c.planetId === planetId ? { ...c, pop: Math.max(1, (c.pop ?? 1) + delta) } : c)) } }));
@@ -1002,7 +1027,8 @@ export class EmpireSim {
 
   /**
    * Load colonists onto a fleet's empty arks from your colonies in the system it is at: one per
-   * ark, each from a colony with population 2 or more (the most populous first), which loses one.
+   * ark, each from a colony that can spare people (population at or above its colonist floor, the
+   * most populous first), which loses one.
    * Returns how many boarded.
    */
   embark(fleetId: string, quiet = false): number {
@@ -1016,14 +1042,14 @@ export class EmpireSim {
     let boarded = 0;
     for (;;) {
       if (room <= 0) break;
-      const from = this.state.economy.colonies.filter((c) => c.starId === star.id && (c.pop ?? 1) >= 2).sort((a, b) => (b.pop ?? 1) - (a.pop ?? 1))[0];
+      const from = this.state.economy.colonies.filter((c) => c.starId === star.id && this.spare(c) > 0).sort((a, b) => (b.pop ?? 1) - (a.pop ?? 1))[0];
       if (!from?.planetId) break;
       this.movePeople(from.planetId, -1);
       boarded++;
       room--;
     }
     if (!boarded) {
-      if (!quiet) this.dispatch(`No colony at ${star.name} has people to spare: colonists board from a colony with population 2 or more`, 'bad');
+      if (!quiet) this.dispatch(`No colony at ${star.name} has people to spare: a colony gives colonists only at its colonist floor or above (Empire › Colonies)`, 'bad');
       return 0;
     }
     this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...st.loadouts[fleetId], colonists: (st.loadouts[fleetId].colonists ?? 0) + boarded } } }));
@@ -1822,7 +1848,7 @@ export class EmpireSim {
     const name = companyName(kind, star.name, hashSeed(this.me, n), this.commerce.companies.map((x) => x.name));
     const company = charter(`co-${n}`, name, kind, `company-${n}-t${s.turn}`, s.turn);
     // A colony company's first ark takes its colonists from the yard's world, if it can spare them.
-    const colonists = kind === 'colony' && yard.planetId && (yard.pop ?? 1) >= 2 ? 1 : 0;
+    const colonists = kind === 'colony' && yard.planetId && this.spare(yard) > 0 ? 1 : 0;
     if (colonists) this.movePeople(yard.planetId!, -1);
     const ipo = Math.round((shipValue(c.cost) * (company.shares - company.held)) / company.shares);
     const before = this.state.empire.materials;
@@ -1990,9 +2016,9 @@ export class EmpireSim {
     return `${company.name} settled ${planet.name}${fee ? ` for a fee of ${fee} credits` : ''}`;
   }
 
-  /** The nearest system with a colony of yours that can spare colonists (population 2 or more). */
+  /** The nearest system with a colony of yours that can spare colonists (at or above its colonist floor). */
   protected nearestPeopled(from: Hex): StarSystem | null {
-    const stars = [...new Set(this.state.economy.colonies.filter((c) => (c.pop ?? 1) >= 2 && c.starId).map((c) => c.starId!))]
+    const stars = [...new Set(this.state.economy.colonies.filter((c) => this.spare(c) > 0 && c.starId).map((c) => c.starId!))]
       .map((id) => this.starById(id)).filter((x): x is StarSystem => !!x);
     return stars.sort((a, b) => hexDistance(from, a.hex) - hexDistance(from, b.hex) || (a.id < b.id ? -1 : 1))[0] ?? null;
   }
@@ -2106,7 +2132,7 @@ export class EmpireSim {
     if (c.kind === 'mining') return at ? (stockFor(this.fieldReport(at), minedBy(l.ships, (id) => this.classById.get(id)?.mines)) > 0 ? `Mining at ${at.name}` : 'No field with rock left in reach') : `Heading to ${dest?.name ?? 'a field'} to mine`;
     const bound = l.orders?.settle ? this.planetById(l.orders.settle) : null;
     if (bound) return `Taking colonists to ${bound.name}`;
-    if (!(l.colonists ?? 0)) return at ? `Waiting at ${at.name} for colonists: a colony there needs population 2` : `Heading to ${dest?.name ?? 'a colony'} for colonists`;
+    if (!(l.colonists ?? 0)) return at ? `Waiting at ${at.name} for colonists: no colony there is at its colonist floor` : `Heading to ${dest?.name ?? 'a colony'} for colonists`;
     if (l.supply < ARK_SUPPLY) return 'Resupplying';
     return `No surveyed world to settle within ${COMMERCE.colonyReach} ly: survey more systems nearby`;
   };

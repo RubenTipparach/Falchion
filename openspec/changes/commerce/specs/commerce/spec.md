@@ -74,3 +74,10 @@ A colony ark SHALL NOT be used up by settling. Each ark SHALL carry one colony's
 #### Scenario: Settling and reloading
 - **WHEN** an ark settles a planet
 - **THEN** the ark remains, empty and out of supply, and must load colonists at a populated colony before it can settle again
+
+### Requirement: Colonist floors
+The player SHALL set the population a colony must have before an ark takes one of its people: one floor for the empire (at least 2, default 2) and, optionally, a different floor for any colony. Every ark, the player's or a colony company's, SHALL load colonists only from colonies at or above their floor.
+
+#### Scenario: A floor of four
+- **WHEN** the empire's floor is 4 and the capital has population 3
+- **THEN** an ark leaving the dock takes no colonists from it

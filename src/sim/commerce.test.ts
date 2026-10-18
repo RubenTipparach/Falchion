@@ -353,3 +353,28 @@ describe('the empire governor (change empire-governor)', () => {
     expect(s.state.economy.focus).toBeTruthy();
   });
 });
+
+describe('colonist floors', () => {
+  it('an ark takes colonists only from a world at or above its floor: the empire\'s, or the colony\'s own', () => {
+    const { sim: s, store } = sim((st) => ({ economy: { ...st.economy, colonies: st.economy.colonies.map((c) => (c.capital ? { ...c, pop: 3 } : c)) } }));
+    const capital = () => s.state.economy.colonies.find((c) => c.capital)!;
+    s.setColonistFloor(4, null);
+    s.formFleet([{ classId: ARK, count: 1 }], s.state.home, 'Ark');
+    const fleet = s.state.fleets.at(-1)!;
+    expect(s.state.loadouts[fleet.id].colonists).toBe(0);
+    expect(capital().pop).toBe(3);
+    expect(s.embark(fleet.id)).toBe(0);
+    // This colony's own floor overrides the empire's.
+    s.setColonistFloor(3, capital().planetId!);
+    expect(s.colonistFloor(capital())).toBe(3);
+    expect(s.embark(fleet.id)).toBe(1);
+    expect(capital().pop).toBe(2);
+    // Back to the empire's.
+    s.setColonistFloor(null, capital().planetId!);
+    expect(capital().colonistFloor).toBeUndefined();
+    expect(s.colonistFloor(capital())).toBe(4);
+    // Never below 2.
+    s.setColonistFloor(1, null);
+    expect(store.state.commerce!.colonistFloor).toBe(2);
+  });
+});

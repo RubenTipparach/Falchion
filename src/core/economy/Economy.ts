@@ -46,6 +46,8 @@ export interface Colony {
   /** Population (at least 1; see Population.ts), and food put towards the next point of it. */
   readonly pop?: number;
   readonly growth?: number;
+  /** Population it must have before it gives one up for colonists (change commerce); missing: the empire's. */
+  readonly colonistFloor?: number;
 }
 
 /** Food a colony of population 1 eats per turn (each point of population eats this much). */

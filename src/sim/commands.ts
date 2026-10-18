@@ -147,6 +147,7 @@ export const COMMANDS = {
   buyShares: [share, count],
   sellShares: [share, count],
   setGovernor: [focus, bool, bool, count],
+  setColonistFloor: [nullable(count), nullable(id)],
   buildDepot: [star],
   build: [id, id],
   toggleTrait: [id],

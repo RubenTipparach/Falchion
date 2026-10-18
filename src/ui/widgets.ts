@@ -135,5 +135,5 @@ export function colonistsView(g: FleetGroup, embark: () => void): HTMLElement | 
   const room = arks - g.colonists;
   return h('div', { class: 'row colonists' },
     h('span', { class: 'small' }, `Colonists aboard: ${g.colonists} of ${arks}`),
-    !g.company && room > 0 && g.stationed && g.friendly ? h('button', { class: 'chip', title: 'Load colonists from your colony here (it needs population 2 or more, and loses one per ark)', onclick: embark }, 'Embark colonists') : null);
+    !g.company && room > 0 && g.stationed && g.friendly ? h('button', { class: 'chip', title: 'Load colonists from your colony here (only from a colony at its colonist floor or above; it loses one per ark)', onclick: embark }, 'Embark colonists') : null);
 }

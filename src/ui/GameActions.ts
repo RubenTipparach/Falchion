@@ -141,6 +141,8 @@ export interface GameQueries {
   exchangeQuote(exchangeId: string, r: Resource, side: 'buy' | 'sell', amount: number): number;
   /** Trade goods on an exchange against a freighter run to that empire. */
   shippingQuote(exchangeId: string): { exchange: number; freighter: number; years: number; from: string; to: string } | null;
+  /** The population a colony must have to give up colonists. */
+  colonistFloor(c: Colony): number;
   /** Every share you can trade. */
   stocks(): StockView[];
 }
@@ -259,6 +261,8 @@ export interface GameActions {
   /** The tariff other players pay you: everyone's (null), or one player's. */
   setTariff(rate: number, player: string | null): void;
   buyShares(key: string, n: number): void;
+  /** Population a colony needs before giving up colonists: the empire's (no planet) or one colony's (null resets it). */
+  setColonistFloor(floor: number | null, planetId: string | null): void;
   /** The empire governor (change empire-governor). */
   setGovernor(focus: GovernorFocus, build: boolean, research: boolean, reserve: number): void;
   sellShares(key: string, n: number): void;

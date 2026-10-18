@@ -1042,3 +1042,10 @@ svg.spark.down polyline { stroke: var(--bad); }
 .card.governor.on { border-color: rgba(124, 255, 155, 0.4); }
 .card.governor .focus-pick { margin: 6px 0; }
 .card.governor .slider.reserve { grid-template-columns: 120px 1fr 56px; margin-top: 8px; }
+
+/* Colonist floors (change commerce) */
+.colonist-floor { margin-bottom: 8px; }
+.colonist-floor label, .cr-floor { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.floor-pick { background: rgba(10, 16, 32, 0.8); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; font: inherit; }
+.colony-item { display: grid; gap: 2px; }
+.colony-item .cr-floor { padding: 0 10px 4px 64px; }

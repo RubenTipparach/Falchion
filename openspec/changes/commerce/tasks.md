@@ -12,3 +12,4 @@
 - [x] 2.1 Trade tab: exchange with shipping comparison, tariffs
 - [x] 2.2 Companies tab: your companies, stock market
 - [x] 2.3 Shipyard charter toggle; company fleets read-only; ark colonists and Embark
+- [x] 2.4 Colonist floors: the empire's and each colony's (Empire › Colonies)

@@ -53,20 +53,34 @@ export function technologicalAccent(kit: ShipKit): void {
   kit.addMirrored(() => kit.box(0.025, 0.03, size.z * 0.2, kit.mat.accent), 'detail', w * 0.8 + w * 1.4 + 0.08, center.y + (w * 1.4) * 0.2, center.z - size.z * 0.15);
 }
 
-/** A gilded prow spire, swept golden fins and a band around the hull. */
+/**
+ * A gothic tower with a gilt-tipped spire and pinnacles on the back, flying buttresses down the
+ * flanks, a gilt beak on the bow and a gilt band amidships.
+ */
 export function classicAccent(kit: ShipKit): void {
   const { size, center } = kit.hullBox();
-  const front = center.z + size.z / 2, w = coreRadius(size);
-  const spire = new THREE.Mesh(new THREE.ConeGeometry(0.04 + w * 0.12, size.z * 0.18 + 0.2, 8).rotateX(Math.PI / 2), kit.mat.gold);
-  kit.add(spire, 'detail', center.x, center.y, front + size.z * 0.06);
-  kit.addMirrored(() => {
-    const fin = kit.box(0.025, w * 1.4 + 0.15, size.z * 0.28, kit.mat.gold);
-    fin.rotation.x = 0.55;
-    fin.rotation.z = 0.35;
-    return fin;
-  }, 'detail', w * 0.75, center.y + w * 0.6, center.z - size.z * 0.3);
-  const band = new THREE.Mesh(new THREE.TorusGeometry(w * 1.08, 0.02 + w * 0.05, 8, 32), kit.mat.gold);
-  kit.add(band, 'detail', center.x, center.y, center.z + size.z * 0.2);
+  const w = coreRadius(size), top = center.y + w * 0.8, front = center.z + size.z / 2;
+  const tw = 0.06 + w * 0.45, th = 0.05 + w * 0.5, sh = 0.12 + w * 1.1, tz = center.z - size.z * 0.22;
+  kit.add(kit.box(tw, th, tw, kit.mat.hull), 'detail', center.x, top + th / 2, tz);
+  kit.add(new THREE.Mesh(new THREE.ConeGeometry(tw * 0.42, sh, 8), kit.mat.detail), 'detail', center.x, top + th + sh / 2, tz);
+  kit.add(new THREE.Mesh(new THREE.ConeGeometry(tw * 0.1, sh * 0.28, 6), kit.mat.gold), 'detail', center.x, top + th + sh * 0.95, tz);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    kit.add(new THREE.Mesh(new THREE.ConeGeometry(tw * 0.09, sh * 0.35, 4), kit.mat.detail), 'detail', center.x + sx * tw * 0.44, top + th + sh * 0.175, tz + sz * tw * 0.44);
+  }
+  kit.add(kit.box(tw * 0.13, th * 0.5, 0.012, kit.mat.accent), 'detail', center.x, top + th * 0.55, tz + tw / 2 + 0.004);
+  // Flying buttresses: a pier with a pinnacle on each flank, an arm leaning in to the tower.
+  for (const dz of [0.1, -0.15]) {
+    kit.addMirrored(() => {
+      const arm = kit.box(0.02 + w * 0.05, w * 1.1 + 0.05, 0.02 + w * 0.04, kit.mat.detail);
+      arm.rotation.z = 0.7;
+      return arm;
+    }, 'detail', w * 0.75, center.y + w * 0.45, center.z + size.z * dz);
+    kit.addMirrored(() => new THREE.Mesh(new THREE.ConeGeometry(0.015 + w * 0.04, 0.05 + w * 0.25, 4), kit.mat.gold), 'detail', w * 1.12, center.y + w * 0.25, center.z + size.z * dz);
+  }
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.03 + w * 0.2, size.z * 0.12 + 0.1, 4).rotateX(Math.PI / 2), kit.mat.gold);
+  kit.add(beak, 'detail', center.x, center.y, front + size.z * 0.04);
+  const band = new THREE.Mesh(new THREE.TorusGeometry(w * 1.05, 0.015 + w * 0.04, 6, 24), kit.mat.gold);
+  kit.add(band, 'detail', center.x, center.y, center.z + size.z * 0.15);
 }
 
 /** Polyhedra orbiting the hull, and prism pylons on the flanks. */

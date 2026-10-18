@@ -173,7 +173,10 @@ async function bootstrap(): Promise<void> {
   const hexGrid = map.layers.add(new HexGridLayer(galaxy.params.radius, lite));
   const nearStars = map.layers.add(new NearStarLayer(galaxy));
   nearStars.surveyed = controller.surveyedPercent;
-  const system = map.layers.add(new SystemLayer(galaxy, { colonyOf: (planet) => controller.surfaceTarget(planet)?.colony ?? null, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet), planets: (star) => controller.planets(star) }));
+  const system = map.layers.add(new SystemLayer(galaxy, { colonyOf: (planet) => controller.surfaceTarget(planet)?.colony ?? null, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet), planets: (star) => controller.planets(star), fields: (star) => controller.fieldReport(star) }));
+  // Asteroid belts thin as fields are mined and fill back as they refill: re-read them when the shared world or the year changes.
+  shared.onChange(() => system.refreshFields());
+  store.subscribe((s, prev) => { if (s.turn !== prev.turn) system.refreshFields(); });
   // Surface view: the focused planet's close-up, below planet view (draws its own scene when near).
   const surface = map.layers.add(new SurfaceLayer({ zoom: map.controller.zoom, input: map.controller, frame: (id) => system.planetFrame(id), hold: (id) => system.holdPlanet(id), canvas: map.canvas, lite }));
   const selection = map.layers.add(new SelectionLayer());

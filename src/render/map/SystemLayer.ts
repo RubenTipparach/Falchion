@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { BIOMES } from '../../content/biomes';
 import { PLANET_LOOKS } from '../../content/planetLooks';
+import { RESOURCES } from '../../content/resources';
 import { describeStar } from '../../content/stars';
+import type { AsteroidField } from '../../core/galaxy/Asteroids';
 import { GalaxyModel, StarSystem } from '../../core/galaxy/GalaxyModel';
 import { planetsOf, Planet } from '../../core/galaxy/Planets';
 import { worldToHex } from '../../core/hex/Hex';
@@ -11,6 +13,8 @@ import type { SettlementInput } from '../../core/surface/SurfaceLayout';
 import { createPlanetMaterial, createRingMaterial, setPlanetLights } from '../planets/PlanetMaterial';
 import { hasPlanetLightMap, planetLightMap } from '../planets/planetLayouts';
 import { createStarVisual, StarVisual } from '../stars/StarVisuals';
+import { AsteroidBelt, type BeltField } from './AsteroidBelts';
+import { placeBelts, type OrbitSlot } from './beltLayout';
 import type { MapLayer, ViewState } from './MapLayer';
 import { fade } from './ZoomModel';
 
@@ -29,6 +33,7 @@ const FIRST_ORBIT = 0.06;
 /** Gap kept between the star's outermost part and the innermost planet orbit. */
 const ORBIT_CLEARANCE = 0.025;
 const TMP = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
 
 interface OrbitingPlanet {
   readonly planet: Planet;
@@ -51,6 +56,14 @@ interface BuiltSystem {
   readonly visual: StarVisual;
   readonly planets: OrbitingPlanet[];
   readonly starLabel: CSS2DObject;
+  readonly belts: DrawnBelt[];
+}
+
+interface DrawnBelt {
+  readonly belt: AsteroidBelt;
+  readonly label: CSS2DObject;
+  /** What the field had left when last drawn. */
+  left: number;
 }
 
 /** A planet as drawn this frame (see SystemLayer.planetFrame). */
@@ -68,6 +81,8 @@ export interface SystemEvents {
   onPlanetClick(star: StarSystem, planet: Planet): void;
   /** A system's planets as the game sees them (colonies keep their type; city worlds); default: as generated. */
   planets?(star: StarSystem): Planet[];
+  /** A system's asteroid fields with what each holds now (drawn as belts); default: none. */
+  fields?(star: StarSystem): BeltField[];
 }
 
 /**
@@ -83,6 +98,8 @@ export class SystemLayer implements MapLayer {
   private heldId: string | null = null;
   /** Night lights need a check (a new system, or the colonies changed). */
   private lightsDirty = true;
+  /** The asteroid fields need a re-read (the shared world or the year changed). */
+  private fieldsDirty = false;
   private readonly starWorld = new THREE.Vector3();
   private lastTime = 0;
   private origin = { x: 0, z: 0 };
@@ -125,6 +142,11 @@ export class SystemLayer implements MapLayer {
   /** The colonies changed: re-check every planet's night lights. */
   refreshLights(): void {
     this.lightsDirty = true;
+  }
+
+  /** The shared world changed (fields mined or refilled): re-read what each belt holds. */
+  refreshFields(): void {
+    this.fieldsDirty = true;
   }
 
   /** Absolute galaxy position of a planet (for the camera to follow). */
@@ -188,6 +210,33 @@ export class SystemLayer implements MapLayer {
       p.label.element.classList.toggle('active', p.planet.id === this.selectedId);
       p.label.element.classList.toggle('hover', p.planet.id === this.hoverId);
     }
+    this.updateBelts(sys, view.camera, t, showLabels, labelFade);
+  }
+
+  private updateBelts(sys: BuiltSystem, camera: THREE.Camera, t: number, showLabels: boolean, labelFade: string): void {
+    if (this.fieldsDirty && sys.belts.length) {
+      const now = new Map((this.events.fields?.(sys.star) ?? []).map((f) => [f.field.id, f.left]));
+      for (const b of sys.belts) {
+        const left = now.get(b.belt.field.id);
+        if (left === undefined || left === b.left) continue;
+        b.left = left;
+        b.belt.setLeft(left);
+        setBeltLabel(b.label, b.belt.field, left);
+      }
+    }
+    this.fieldsDirty = false;
+    if (!sys.belts.length) return;
+    // Labels sit on each belt's near edge, a little to the right of the star (below it on screen),
+    // so they stack tidily whatever the camera's heading.
+    TMP.set(0, -1, 0).applyQuaternion(camera.quaternion).setY(0);
+    if (TMP.lengthSq() < 1e-8) TMP.set(0, 0, 1);
+    TMP.normalize().applyAxisAngle(UP, 0.5);
+    for (const b of sys.belts) {
+      b.belt.update(t);
+      b.belt.labelAt(TMP, b.label.position);
+      b.label.visible = showLabels;
+      b.label.element.style.opacity = labelFade;
+    }
   }
 
   private build(star: StarSystem): BuiltSystem {
@@ -204,6 +253,7 @@ export class SystemLayer implements MapLayer {
 
     const orbitMat = new THREE.LineBasicMaterial({ color: '#7fd3e6', transparent: true, opacity: 0.2, depthWrite: false });
     const planets: OrbitingPlanet[] = [];
+    const orbits: OrbitSlot[] = [];
     for (const planet of this.events.planets?.(star) ?? planetsOf(star, this.galaxy.params.seed)) {
       const orbit = firstOrbit + planet.index * 0.04 + rng.range(-0.005, 0.005);
       const ring = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(
@@ -225,12 +275,14 @@ export class SystemLayer implements MapLayer {
       const holder = new THREE.Object3D();
       holder.position.set(orbit, 0, 0);
       holder.add(mesh);
-      if (look.ringChance && new Rng(hashSeed(planet.id, 'ringroll')).chance(look.ringChance)) {
+      const ringed = !!look.ringChance && new Rng(hashSeed(planet.id, 'ringroll')).chance(look.ringChance);
+      if (ringed) {
         const ringMesh = new THREE.Mesh(new THREE.RingGeometry(1.35, 2.2, 96), createRingMaterial(look.palette[2], hashSeed(planet.id, 'ring')));
         ringMesh.scale.setScalar(radius);
         ringMesh.rotation.x = -Math.PI / 2 + rng.range(-0.5, 0.5);
         holder.add(ringMesh);
       }
+      orbits.push({ radius: orbit, extent: radius * (ringed ? 2.3 : 1.2) });
       const biome = BIOMES.find((b) => b.id === planet.biome);
       const lbl = label(`<b>${planet.name}</b><small>${biome?.name ?? planet.biome} · size ${planet.size}</small>`, 'system-label');
       lbl.position.set(0, 0, radius * 3);
@@ -241,7 +293,25 @@ export class SystemLayer implements MapLayer {
       planets.push({ planet, pivot, mesh, material, radius, phase: rng.range(0, Math.PI * 2), speed: ORBIT_RATE / Math.pow(orbit * 12, 1.5), label: lbl, spin: this.lastTime * SPIN });
     }
     this.lightsDirty = true;
-    return { star, root, visual, planets, starLabel };
+    const belts = this.buildBelts(star, root, visual, orbits, firstOrbit);
+    return { star, root, visual, planets, starLabel, belts };
+  }
+
+  /** Each asteroid field as a belt in a gap between planet orbits (see beltLayout). */
+  private buildBelts(star: StarSystem, root: THREE.Group, visual: StarVisual, orbits: OrbitSlot[], firstOrbit: number): DrawnBelt[] {
+    const fields = this.events.fields?.(star) ?? [];
+    if (!fields.length) return [];
+    const places = placeBelts(orbits, visual.clearance + ORBIT_CLEARANCE * 0.6, firstOrbit, fields.map((f) => f.field.id));
+    return fields.map(({ field, left }, i) => {
+      const belt = new AsteroidBelt(field, places[i], visual.light);
+      belt.setLeft(left);
+      root.add(belt.object3d);
+      const lbl = label('', 'system-label belt');
+      lbl.element.style.pointerEvents = 'none';
+      setBeltLabel(lbl, field, left);
+      root.add(lbl);
+      return { belt, label: lbl, left };
+    });
   }
 
   /**
@@ -268,6 +338,7 @@ export class SystemLayer implements MapLayer {
     if (!this.current) return;
     this.object3d.remove(this.current.root);
     this.current.visual.dispose();
+    for (const b of this.current.belts) b.belt.dispose();
     this.current.root.traverse((o) => {
       if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
         o.geometry.dispose();
@@ -287,6 +358,11 @@ export class SystemLayer implements MapLayer {
 export function planetRadius(planet: Planet): number {
   const look = PLANET_LOOKS[planet.biome] ?? PLANET_LOOKS.barren;
   return (0.0028 + planet.size * 0.0013) * (look.kind === 'gas' ? 1.7 : 1);
+}
+
+function setBeltLabel(lbl: CSS2DObject, field: AsteroidField, left: number): void {
+  const res = RESOURCES.find((r) => r.id === field.resource);
+  lbl.element.innerHTML = `<small style="color:${res?.color ?? '#ccc'};opacity:0.75;font-size:9.5px">${res?.name ?? field.resource} field · ${left.toLocaleString('en-US')} / ${field.capacity.toLocaleString('en-US')}</small>`;
 }
 
 function label(html: string, cls: string): CSS2DObject {

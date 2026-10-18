@@ -20,6 +20,7 @@ import { Planet } from '../core/galaxy/Planets';
 import { PlanetThumbnails } from '../render/planets/PlanetThumbnails';
 import { createThumbs } from '../render/thumbs/Thumbnails';
 import { setThumbs } from '../ui/thumbs';
+import { ResourceLedger } from '../ui/ResourceLedger';
 import { NebulaLayer } from '../render/map/NebulaLayer';
 import { LowResBackground } from '../render/map/LowResBackground';
 import { touchFirst } from '../ui/dom';
@@ -184,7 +185,8 @@ async function bootstrap(): Promise<void> {
   battle.onFrame = (f) => battleHud.render(f);
 
   const zoomCfg = map.controller.zoom.config;
-  const topBar = new TopBar(store, controller, identity, clock, controller.caps);
+  const ledger = new ResourceLedger(store, { forecast: () => controller.forecast(), caps: () => controller.caps() });
+  const topBar = new TopBar(store, controller, identity, clock, controller.caps, (r, el) => ledger.toggle(r, el));
   const hud = new Hud({ min: zoomCfg.minAltitude / 10, max: zoomCfg.maxAltitude }, (alt) => controller.zoomTo(alt), () => {
     const s = store.state;
     if (s.selected && s.selectedPlanet && s.selectedPlanet.biome !== 'gas') controller.land(s.selected, s.selectedPlanet);

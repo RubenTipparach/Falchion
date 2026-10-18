@@ -27,7 +27,7 @@ export class TopBar {
   private readonly empireBtn: HTMLButtonElement;
   private readonly nav: HTMLElement;
 
-  constructor(store: Store<GameState>, actions: GameActions, identity: PlayerIdentity, private readonly clock: WorldClock, private readonly caps: () => Partial<Record<Resource, number>>) {
+  constructor(store: Store<GameState>, actions: GameActions, identity: PlayerIdentity, private readonly clock: WorldClock, private readonly caps: () => Partial<Record<Resource, number>>, private readonly onResource?: (r: Resource, el: HTMLElement) => void) {
     const skip = import.meta.env.DEV ? h('button', { class: 'chip', title: 'Development only: advance one year now', onclick: () => actions.skipYear() }, '+1 yr') : '';
     this.clockEl.title = clock.source === 'server' ? 'World clock from the Falchion server: one year passes every minute for everyone' : 'Offline world clock (no server here): one year passes every minute';
     this.clockEl.append(this.ring, h('span', { class: 'year-meta' }, h('span', { class: 'year-src' }, clock.source === 'server' ? '● LIVE' : '○ LOCAL'), this.countdown), skip);
@@ -157,8 +157,11 @@ export class TopBar {
     this.stats.replaceChildren(...items.map(([label, r]) => {
       const cap = caps[r];
       const full = cap !== undefined && m[r] >= cap;
-      return h('div', { class: `stat ${full ? 'full' : ''}`, 'data-resource': r, 'data-value': m[r], title: cap !== undefined ? `${label}: ${fmt(m[r])} of ${fmt(cap)} storage${full ? ' (full: income is lost)' : ''}` : label, 'aria-label': `${label} ${fmt(m[r])}` },
+      // Click (or tap) a resource for its ledger: where it comes from and where it goes.
+      const el = h('button', { class: `stat ${full ? 'full' : ''}`, 'data-resource': r, 'data-value': m[r], title: `${cap !== undefined ? `${label}: ${fmt(m[r])} of ${fmt(cap)} storage${full ? ' (full: income is lost)' : ''}` : label}. Click for income and costs`, 'aria-label': `${label} ${fmt(m[r])}: income and costs` },
         resourceIcon(r, 18), h('span', { class: 'stat-value' }, fmt(m[r])));
+      el.addEventListener('click', () => this.onResource?.(r, el));
+      return el;
     }));
   }
 }

@@ -1,4 +1,4 @@
-import type { EconomyState, TurnReport } from '../core/economy/Economy';
+import type { EconomyState, Flow, TurnReport } from '../core/economy/Economy';
 import type { EmpireState } from '../core/empire/Empire';
 import type { EmpireIdentity } from '../core/empire/Identity';
 import type { EncounterResult } from '../core/encounters/types';
@@ -56,6 +56,8 @@ export interface GameState {
   readonly relations?: Relations;
   /** Raids on our worlds and fleets, battles at sea and our assaults, newest first (War Room › Battle log). */
   readonly battleLog?: readonly BattleLogEntry[];
+  /** One-off changes to the stores (purchases, sales, loot, plunder), newest first: the resource ledger. */
+  readonly flows?: readonly Flow[];
 }
 
 export interface Relations {

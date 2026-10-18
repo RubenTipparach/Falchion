@@ -1,4 +1,5 @@
 import { FOOD_PER_POP, growWorld, populationOf } from './Population';
+import { BIOMES } from '../../content/biomes';
 import { BIOME_SCIENCE, BIOME_YIELDS, CAPITAL_YIELDS, RESOURCES, Resource } from '../../content/resources';
 import type { BuildingDef } from '../../content/buildings';
 import type { ShipClassDef } from '../../content/shipClasses';
@@ -84,14 +85,7 @@ export function capsOf(e: Pick<EconomyState, 'colonies'>, t: EconomyTables): Par
 
 /** Credits per year to keep the fleet in service. */
 export function upkeepOf(e: Pick<EconomyState, 'roster' | 'policies'>, t: EconomyTables): number {
-  const conscription = e.policies.includes('conscription');
-  return t.classes.reduce((sum, c) => {
-    const n = e.roster[c.id] ?? 0;
-    if (!n) return sum;
-    const military = c.role === 'combat' || c.role === 'capital';
-    if (military && conscription) return sum;
-    return sum + n * (t.upkeepOf ? t.upkeepOf(c) : military ? 2 : 0);
-  }, 0);
+  return upkeepParts(e, t).reduce((sum, x) => sum + x.credits, 0);
 }
 
 /**
@@ -116,6 +110,54 @@ export interface TurnReport {
   readonly income: Partial<Record<Resource, number>>;
   readonly lines: readonly string[];
   readonly science: number;
+  /**
+   * Where the year's income came from and where its costs went, item by item, as the rules added
+   * them (change resource-ledger). Adjustments (stability, famine, a full store, an empty one) are
+   * items of their own, so a resource's items add up to its change in the store. Missing on
+   * reports from before the change.
+   */
+  readonly ledger?: readonly LedgerEntry[];
+}
+
+/** One item of the yearly ledger: `n` of resource `r` from `label`, under a heading `group`. */
+export interface LedgerEntry {
+  readonly r: Resource;
+  readonly n: number;
+  readonly group: string;
+  readonly label: string;
+}
+
+/** A colony's yearly output, part by part: its world, the capital's due, each building, its people. */
+export function colonyParts(c: Colony, t: EconomyTables): Array<{ r: Resource; n: number; label: string }> {
+  const out: Array<{ r: Resource; n: number; label: string }> = [];
+  const biome = BIOME_YIELDS[c.biome] ?? {};
+  const world = `${BIOMES.find((b) => b.id === c.biome)?.name ?? c.biome} world`;
+  for (const [r, n] of Object.entries(biome)) out.push({ r: r as Resource, n: n!, label: world });
+  if (c.capital) for (const [r, n] of Object.entries(CAPITAL_YIELDS)) out.push({ r: r as Resource, n: n!, label: 'Capital' });
+  for (const id of c.buildings ?? []) {
+    const b = t.buildings?.find((x) => x.id === id);
+    if (!b) continue;
+    for (const [r, n] of Object.entries(b.yields ?? {})) out.push({ r: r as Resource, n: n!, label: b.name });
+    if (b.mineralBoost) for (const [r, n] of Object.entries(biome)) if (MINERALS.has(r as Resource)) out.push({ r: r as Resource, n: n! * b.mineralBoost, label: `${b.name} (mineral boost)` });
+  }
+  const pop = populationOf(c);
+  out.push({ r: 'food', n: -FOOD_PER_POP * pop, label: `Population ${pop} eats` });
+  return out;
+}
+
+/** Fleet upkeep by ship class (credits a year). */
+export function upkeepParts(e: Pick<EconomyState, 'roster' | 'policies'>, t: EconomyTables): Array<{ classId: string; name: string; count: number; credits: number }> {
+  const conscription = e.policies.includes('conscription');
+  const out: Array<{ classId: string; name: string; count: number; credits: number }> = [];
+  for (const c of t.classes) {
+    const n = e.roster[c.id] ?? 0;
+    if (!n) continue;
+    const military = c.role === 'combat' || c.role === 'capital';
+    if (military && conscription) continue;
+    const credits = n * (t.upkeepOf ? t.upkeepOf(c) : military ? 2 : 0);
+    if (credits) out.push({ classId: c.id, name: c.name, count: n, credits });
+  }
+  return out;
 }
 
 /** Sum of a numeric research bonus, e.g. bonusOf(research, 'trade'). */
@@ -127,12 +169,21 @@ export function hasGrant(tree: TechTree, research: ResearchState, partId: string
   return tree.grantsOf(research).some((g) => g.kind === 'part' && g.id === partId);
 }
 
-/** Effects from government + policies + faith tenets. */
-export function activeEffects(e: EconomyState, t: EconomyTables): Effects[] {
+/** Effects from government + policies + faith tenets, each with what it comes from. */
+export function activeSources(e: EconomyState, t: EconomyTables): Array<{ name: string; effects: Effects }> {
   const gov = t.governments.find((g) => g.id === e.government);
   const pols = t.policies.filter((p) => e.policies.includes(p.id));
   const tenets = e.faith ? t.tenets.filter((x) => e.faith!.tenets.includes(x.id)) : [];
-  return [gov?.effects, ...pols.map((p) => p.effects), ...tenets.map((x) => x.effects)].filter((x): x is Effects => !!x);
+  return [
+    ...(gov ? [{ name: gov.name, effects: gov.effects }] : []),
+    ...pols.map((p) => ({ name: p.name, effects: p.effects })),
+    ...tenets.map((x) => ({ name: `Tenet: ${x.id.replace(/-/g, ' ')}`, effects: x.effects })),
+  ];
+}
+
+/** Effects from government + policies + faith tenets. */
+export function activeEffects(e: EconomyState, t: EconomyTables): Effects[] {
+  return activeSources(e, t).map((x) => x.effects);
 }
 
 const sumEff = (effs: Effects[], f: (e: Effects) => number | undefined) => effs.reduce((s, e) => s + (f(e) ?? 0), 0);
@@ -175,19 +226,9 @@ export function maxSpies(t: EconomyTables, research: ResearchState): number {
 /** Output of one colony per turn: biome yields plus its buildings. */
 export function colonyYield(c: Colony, t: EconomyTables): { income: Partial<Record<Resource, number>>; science: number } {
   const income: Partial<Record<Resource, number>> = {};
-  const add = (r: Resource, n: number) => (income[r] = (income[r] ?? 0) + n);
-  const biome = BIOME_YIELDS[c.biome] ?? {};
-  for (const [r, n] of Object.entries(biome)) add(r as Resource, n!);
-  if (c.capital) for (const [r, n] of Object.entries(CAPITAL_YIELDS)) add(r as Resource, n!);
+  for (const x of colonyParts(c, t)) income[x.r] = (income[x.r] ?? 0) + x.n;
   let science = BIOME_SCIENCE[c.biome] ?? 0;
-  for (const id of c.buildings ?? []) {
-    const b = t.buildings?.find((x) => x.id === id);
-    if (!b) continue;
-    for (const [r, n] of Object.entries(b.yields ?? {})) add(r as Resource, n!);
-    if (b.mineralBoost) for (const [r, n] of Object.entries(biome)) if (MINERALS.has(r as Resource)) add(r as Resource, n! * b.mineralBoost);
-    science += b.science ?? 0;
-  }
-  add('food', -FOOD_PER_POP * populationOf(c));
+  for (const id of c.buildings ?? []) science += t.buildings?.find((x) => x.id === id)?.science ?? 0;
   return { income, science };
 }
 
@@ -212,7 +253,13 @@ export const ASTEROID_RATE = 3;
 export function resolveTurn(e: EconomyState, research: ResearchState, turn: number, t: EconomyTables, presence?: Presence): { economy: EconomyState; research: ResearchState; report: TurnReport; mined: Record<string, number> } {
   const effs = activeEffects(e, t);
   const income: Partial<Record<Resource, number>> = {};
-  const add = (r: Resource, n: number) => (income[r] = (income[r] ?? 0) + n);
+  const ledger: LedgerEntry[] = [];
+  // Every item goes into the year's income and, named, into the ledger.
+  const add = (r: Resource, n: number, group = 'Other', label = group) => {
+    if (!n) return;
+    income[r] = (income[r] ?? 0) + n;
+    ledger.push({ r, n, group, label });
+  };
   const lines: string[] = [];
 
   const approval = factionApproval(e, t, research);
@@ -220,11 +267,11 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   const unrest = stability < 40 ? 0.8 : stability > 70 ? 1.1 : 1;
 
   // Colonies
-  for (const c of e.colonies) for (const [r, n] of Object.entries(colonyYield(c, t).income)) add(r as Resource, n!);
-  add('credits', bonusOf(t.tree, research, 'credits'));
-  add('influence', bonusOf(t.tree, research, 'influence'));
-  add('faith', bonusOf(t.tree, research, 'faith'));
-  add('crystals', bonusOf(t.tree, research, 'crystals'));
+  for (const c of e.colonies) for (const x of colonyParts(c, t)) add(x.r, x.n, c.name, x.label);
+  add('credits', bonusOf(t.tree, research, 'credits'), 'Research', 'Research bonuses');
+  add('influence', bonusOf(t.tree, research, 'influence'), 'Research', 'Research bonuses');
+  add('faith', bonusOf(t.tree, research, 'faith'), 'Research', 'Research bonuses');
+  add('crystals', bonusOf(t.tree, research, 'crystals'), 'Research', 'Research bonuses');
 
   // Mining ships
   const miningPct = sumEff(effs, (x) => x.miningPct);
@@ -243,11 +290,11 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
       const take = Math.min(left, Math.round(crew.count * perShip * (c.rate ?? 1) * ASTEROID_RATE * (1 + miningPct / 100)));
       pools[crew.pool!] = left - take;
       mined[crew.pool!] = (mined[crew.pool!] ?? 0) + take;
-      add(c.mines, take);
+      add(c.mines, take, 'Mining ships', `${c.name} ×${crew.count}`);
       continue;
     }
     if (!crew.deposits?.includes(c.mines)) { idleMiners += crew.count; continue; }
-    add(c.mines, Math.round(crew.count * perShip * (c.rate ?? 1) * (1 + miningPct / 100)));
+    add(c.mines, Math.round(crew.count * perShip * (c.rate ?? 1) * (1 + miningPct / 100)), 'Mining ships', `${c.name} ×${crew.count}`);
   }
   if (idleMiners) lines.push(pools
     ? `${idleMiners} mining ship${idleMiners === 1 ? '' : 's'} idle: no asteroid field of their kind where they are, or it is mined out`
@@ -255,7 +302,7 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   const reached = (empire: string) => !presence || presence.reached.includes(empire);
 
   // Government, policies, tenets
-  for (const x of effs) for (const [r, n] of Object.entries(x.income ?? {})) add(r as Resource, n!);
+  for (const x of activeSources(e, t)) for (const [r, n] of Object.entries(x.effects.income ?? {})) add(r as Resource, n!, 'Government & policies', x.name);
 
   // Religion
   let faith = e.faith;
@@ -267,13 +314,13 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
     for (const target of faith.missions.filter((m) => !reached(m))) lines.push(`Missionaries to ${target} idle: no ship in their space`);
     faith = { ...faith, adherents };
     const followers = Object.values(adherents).reduce((a, b) => a + b, 0);
-    add('faith', Math.round(followers / 10));
-    add('influence', Math.round(followers / 40));
+    add('faith', Math.round(followers / 10), 'Religion', `${faith.name} followers`);
+    add('influence', Math.round(followers / 40), 'Religion', `${faith.name} followers`);
     if (working.length) lines.push(`${faith.name} spread ${spread}% in ${working.join(', ')}`);
   }
 
   // Upkeep
-  add('credits', -upkeepOf(e, t));
+  for (const u of upkeepParts(e, t)) add('credits', -u.credits, 'Fleet upkeep', `${u.name} ×${u.count}`);
 
   // Famine: colonies that cannot eat produce less
   const famine = (e.stock.food ?? 0) + (income.food ?? 0) < 0;
@@ -281,7 +328,12 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   const factor = unrest * (famine ? 0.8 : 1);
 
   // Apply stability modifier to positive income
-  for (const r of Object.keys(income) as Resource[]) if (income[r]! > 0) income[r] = Math.round(income[r]! * factor);
+  for (const r of Object.keys(income) as Resource[]) {
+    if (income[r]! <= 0) continue;
+    const before = income[r]!;
+    income[r] = Math.round(before * factor);
+    if (income[r] !== before) ledger.push({ r, n: income[r]! - before, group: 'Adjustments', label: famine && unrest < 1 ? 'Famine and unrest' : famine ? 'Famine (−20%)' : unrest < 1 ? `Unrest (stability ${stability}%)` : `High stability (${stability}%)` });
+  }
   if (unrest < 1) lines.push(`Unrest: stability ${stability}% cut income by 20%`);
 
   // Storage: income stops at the cap (stock above it from loot is kept, not lost).
@@ -296,6 +348,9 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
       next = Math.max(stock[r.id], cap);
       full.push(r.name.toLowerCase());
     }
+    // The store can only take so much, and cannot go below empty: those are items too.
+    const lost = next - stock[r.id] - inc;
+    if (lost) ledger.push({ r: r.id, n: lost, group: 'Adjustments', label: lost < 0 ? 'Storage full: turned away' : 'Ran out: not paid' });
     stock[r.id] = next;
   }
   if (full.length) lines.push(`Storage full: ${full.join(', ')}. Spend it, or build Warehouses`);
@@ -326,7 +381,7 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   // and only what the stores cannot cover makes it shrink.
   const colonies = populationYear(e, t, income.food ?? 0, lines);
 
-  return { economy: { ...e, stock, faith, colonies }, research: res, report: { income, lines, science }, mined };
+  return { economy: { ...e, stock, faith, colonies }, research: res, report: { income, lines, science, ledger }, mined };
 }
 
 /**
@@ -360,3 +415,15 @@ export function pay(stock: Stockpile, cost: Partial<Record<Resource, number>>, d
   for (const [r, n] of Object.entries(cost)) out[r as Resource] -= Math.ceil(n! * (1 - discountPct / 100));
   return out;
 }
+
+/** A one-off change to the stores outside the yearly economy: a purchase, a sale, loot, plunder. */
+export interface Flow {
+  readonly turn: number;
+  readonly r: Resource;
+  readonly n: number;
+  /** What caused it, e.g. "Built a Lancer". */
+  readonly what: string;
+}
+
+/** How many recent flows a save keeps. */
+export const FLOW_LOG = 60;

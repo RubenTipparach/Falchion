@@ -6,7 +6,7 @@ import { BattleResult, CombatBonuses, Damage, menderRepair, repairDamage, resolv
 import { recordRound } from '../core/combat/BattleRecord';
 import { logBattle, tallyLost, tallyOf, type BattleLogEntry } from '../core/combat/BattleLog';
 import { ROLE_TRAIT } from '../core/ships/ClassDesign';
-import { bonusOf, canAfford, capsOf, Colony, EconomyTables, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf } from '../core/economy/Economy';
+import { bonusOf, canAfford, capsOf, Colony, EconomyTables, FLOW_LOG, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf, type Flow, type Stockpile, type TurnReport } from '../core/economy/Economy';
 import { cargoCapacity, FREIGHTER, saleValue, type Market } from '../core/economy/Trade';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
 import { addHaul, Collected, crateMaterials, Haul, planetCache } from '../core/encounters/PlanetCache';
@@ -556,6 +556,7 @@ export class EmpireSim {
     // Goods still aboard go back into the stockpile.
     const materials = gone.cargo ? { ...s.empire.materials, goods: s.empire.materials.goods + gone.cargo } : s.empire.materials;
     this.deps.store.update({ fleets: s.fleets.filter((x) => x.id !== fleetId), loadouts, empire: { ...s.empire, materials } });
+    this.noteFlow(s.empire.materials, `${f.name} docked: cargo unloaded`);
     this.dispatch(`${f.name} docks at ${s.home.name}`);
   }
 
@@ -706,6 +707,7 @@ export class EmpireSim {
       openedCrates: [...s.openedCrates, ...crates],
       collectedCaches: [...s.collectedCaches, ...caches.map((c) => c.planet.id)],
     });
+    this.noteFlow(s.empire.materials, `Collected at ${star.name}`);
     const text = Object.entries(haul).map(([r, n]) => `+${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`).join('  ');
     this.dispatch(`Collected from ${star.name}: ${text || 'cards'}${crates.length ? ` · ${crates.length} crate${crates.length > 1 ? 's' : ''} opened` : ''}`, 'good');
     return { haul, cards };
@@ -734,6 +736,7 @@ export class EmpireSim {
       openedCrates: crate ? [...s.openedCrates, planet.id] : s.openedCrates,
       collectedCaches: cache ? [...s.collectedCaches, planet.id] : s.collectedCaches,
     });
+    this.noteFlow(s.empire.materials, `Collected on ${planet.name}`);
     const text = Object.entries(haul).map(([r, n]) => `+${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`).join('  ');
     this.dispatch(`Collected from ${planet.name}: ${text || 'cards'}${crate ? ' · crate opened' : ''}`, 'good');
     return { haul, cards: crate?.cards ?? [] };
@@ -802,6 +805,7 @@ export class EmpireSim {
     const construction = enqueue(s.construction, { kind: 'ship', item: classId, site: yard.planetId }, buildYears(c), s.turn);
     const job = construction[construction.length - 1];
     this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, c.cost, discount) }, construction });
+    this.noteFlow(s.empire.materials, `Built a ${c.name}`);
     this.dispatch(`${c.name} laid down at ${yard.name}: ready in ${formatDuration(job.doneTurn - s.turn, CLOCK)}`);
   }
 
@@ -823,6 +827,23 @@ export class EmpireSim {
   }
 
   caps = () => capsOf(this.state.economy, this.deps.economy);
+
+  /**
+   * Next year's economy on the current state, without changing anything: the resource ledger's
+   * income and costs (change resource-ledger).
+   */
+  forecast = (): TurnReport => resolveTurn({ ...this.state.economy, stock: this.state.empire.materials }, this.state.empire.research, this.state.turn, this.deps.economy, this.presence()).report;
+
+  /** Record a one-off change to the stores since `before` (what caused it), newest first. */
+  protected noteFlow(before: Stockpile, what: string): void {
+    const after = this.state.empire.materials, turn = this.state.turn;
+    const add: Flow[] = [];
+    for (const r of RESOURCES) {
+      const n = (after[r.id] ?? 0) - (before[r.id] ?? 0);
+      if (n) add.push({ turn, r: r.id, n, what });
+    }
+    if (add.length) this.deps.store.update((st) => ({ flows: [...add, ...(st.flows ?? [])].slice(0, FLOW_LOG) }));
+  }
 
   jobs = (site?: string): Job[] => this.state.construction.filter((j) => !site || j.site === site);
 
@@ -852,6 +873,7 @@ export class EmpireSim {
     const cost = { credits: 60, metals: 40 };
     if (!canAfford(s.empire.materials, cost)) return this.dispatch('A supply depot costs 60 credits and 40 metals', 'bad');
     this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, cost) }, depots: [...s.depots, star.id] });
+    this.noteFlow(s.empire.materials, `Supply depot at ${star.name}`);
     this.adjustGroup(g.id, [{ classId: 'construction-tender', count: -1 }]);
     this.dispatch(`Supply depot built at ${star.name}: fleets there resupply and repair, slowly`, 'good');
     this.deps.report?.('depot', `built a supply depot at ${star.name}`, placeOf(star));
@@ -871,6 +893,7 @@ export class EmpireSim {
     const construction = enqueue(s.construction, { kind: 'building', item: b.id, site: planetId }, b.years, s.turn);
     const job = construction[construction.length - 1];
     this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, b.cost) }, construction });
+    this.noteFlow(s.empire.materials, `${b.name} on ${colony.name}`);
     this.dispatch(`${b.name} under construction on ${colony.name}: ready in ${formatDuration(job.doneTurn - s.turn, CLOCK)}`);
   }
 
@@ -1062,6 +1085,7 @@ export class EmpireSim {
     const cost = 30;
     if (s.empire.materials.influence < cost) return this.dispatch(`Changing government needs ${cost} influence`, 'bad');
     this.deps.store.update({ economy: { ...s.economy, government: id }, empire: { ...s.empire, materials: { ...s.empire.materials, influence: s.empire.materials.influence - cost } } });
+    this.noteFlow(s.empire.materials, `New government: ${this.deps.economy.governments.find((g) => g.id === id)?.name ?? id}`);
   }
 
   togglePolicy(id: string): void {
@@ -1124,6 +1148,7 @@ export class EmpireSim {
       empire: { ...s.empire, materials: { ...s.empire.materials, goods: s.empire.materials.goods - take } },
       loadouts: { ...s.loadouts, [fleetId]: { ...l, cargo: (l.cargo ?? 0) + take, cargoFrom: l.cargo ? l.cargoFrom : star.id } },
     });
+    this.noteFlow(s.empire.materials, `${this.fleetName(fleetId)} loaded goods at ${star.name}`);
     if (!quiet) this.dispatch(`${this.fleetName(fleetId)} loads ${take} trade goods at ${star.name}`);
     return take;
   }
@@ -1141,6 +1166,7 @@ export class EmpireSim {
       empire: { ...s.empire, materials: { ...s.empire.materials, credits: s.empire.materials.credits + credits } },
       loadouts: { ...s.loadouts, [fleetId]: { ...l, cargo: 0, cargoFrom: undefined } },
     });
+    this.noteFlow(s.empire.materials, `${this.fleetName(fleetId)} sold goods at ${market.name}`);
     if (market.npc) this.changeStanding(market.npc, Math.min(STANDING.tradeMax, Math.max(1, Math.floor(l.cargo * STANDING.perGoods))));
     if (!quiet) this.dispatch(this.saleNews(fleetId, l.cargo, market, credits), 'good');
     return credits;
@@ -1530,6 +1556,7 @@ export class EmpireSim {
     if (!known) return;
     if (!canAfford(s.empire.materials, STANDING.tributeCost)) return this.dispatch(`Tribute to the ${known.def.name} needs ${STANDING.tributeCost.credits} credits and ${STANDING.tributeCost.influence} influence`, 'bad');
     this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, STANDING.tributeCost) } });
+    this.noteFlow(s.empire.materials, `Tribute to the ${known.def.name}`);
     this.changeStanding(npcId, STANDING.tribute);
     this.dispatch(`Tribute sent to the ${known.def.name}: standing now ${this.standingWith(npcId)} (${tierOf(this.standingWith(npcId)).name})`, 'good');
   }
@@ -1665,7 +1692,9 @@ export class EmpireSim {
       for (const r of RAID_LOOT) taken[r] = Math.min(RAID_CAP, Math.floor((this.state.empire.materials[r] ?? 0) * RAID_SHARE));
       const materials = { ...this.state.empire.materials };
       for (const [r, n] of Object.entries(taken)) materials[r as Resource] -= n!;
+      const before = this.state.empire.materials;
       this.deps.store.update((st) => ({ empire: { ...st.empire, materials } }));
+      this.noteFlow(before, `${raiders} plundered ${place}`);
       const list = Object.entries(taken).filter(([, n]) => n! > 0).map(([r, n]) => `${n} ${RESOURCES.find((x) => x.id === r)?.name.toLowerCase()}`).join(', ');
       const text = `${raiders} plundered ${place}${list ? `: ${list} taken` : ''}. Station warships there to defend it.`;
       this.dispatch(text, 'bad');

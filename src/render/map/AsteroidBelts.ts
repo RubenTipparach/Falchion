@@ -207,8 +207,9 @@ export interface BeltField {
 
 export class AsteroidBelt {
   readonly object3d = new THREE.Group();
-  /** The belt's centre radius (ly). */
+  /** The belt's centre radius and half its width (ly). */
   readonly radius: number;
+  readonly halfWidth: number;
   readonly field: AsteroidField;
   private readonly rocks: THREE.InstancedMesh;
   private readonly tails: THREE.InstancedMesh | null = null;
@@ -337,6 +338,7 @@ export class AsteroidBelt {
     this.object3d.add(band);
 
     this.radius = place.radius;
+    this.halfWidth = place.halfWidth;
   }
 
   /** Where the belt's label goes (in the star's frame): on its near edge, along `toward` (unit, in the plane). */

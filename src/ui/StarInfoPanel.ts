@@ -7,6 +7,7 @@ import { BIOMES, CHOIR_BROADCASTS, settleable } from '../content/biomes';
 import { BIOME_SCIENCE, BIOME_YIELDS, RESOURCES } from '../content/resources';
 import { hasWarships } from '../content/logistics';
 import type { FleetGroup, FleetInfo, GameActions, GameQueries } from './GameActions';
+import type { FieldReport } from '../sim/EmpireSim';
 import type { FleetView } from '../render/map/FleetLayer';
 import { formatDuration } from '../core/time/WorldTime';
 import { CLOCK } from '../app/WorldClock';
@@ -49,7 +50,7 @@ export class StarInfoPanel {
 
   constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly describe: (s: StarSystem) => StarDetails, private readonly thumb: (p: Planet) => string, private readonly tables: EconomyTables) {
     store.subscribe((s, prev) => {
-      if (s.selected !== prev.selected || s.selectedPlanet !== prev.selectedPlanet || s.explored !== prev.explored || s.openedCrates !== prev.openedCrates || s.empire !== prev.empire || s.loadouts !== prev.loadouts || s.turn !== prev.turn || s.economy.colonies !== prev.economy.colonies || s.collectedCaches !== prev.collectedCaches || s.depots !== prev.depots || s.construction !== prev.construction || s.selectedFleet !== prev.selectedFleet || s.fleets !== prev.fleets) this.render(s);
+      if (s.selected !== prev.selected || s.selectedPlanet !== prev.selectedPlanet || s.selectedField !== prev.selectedField || s.explored !== prev.explored || s.openedCrates !== prev.openedCrates || s.empire !== prev.empire || s.loadouts !== prev.loadouts || s.turn !== prev.turn || s.economy.colonies !== prev.economy.colonies || s.collectedCaches !== prev.collectedCaches || s.depots !== prev.depots || s.construction !== prev.construction || s.selectedFleet !== prev.selectedFleet || s.fleets !== prev.fleets) this.render(s);
     });
   }
 
@@ -82,6 +83,8 @@ export class StarInfoPanel {
       if (this.closedPlanetId === s.selectedPlanet.id) return void this.el.classList.add('hidden');
       return this.renderPlanet(s, star, s.selectedPlanet);
     }
+    const field = s.selectedField ? this.q.fieldReport(star).find((f) => f.field.id === s.selectedField) : null;
+    if (field) return this.renderField(s, star, field);
     const d = this.describe(star);
     const isHome = star.id === s.home.id;
     const here = this.q.groupsAt(star).filter((g) => g.id !== 'dock' || isHome);
@@ -122,6 +125,43 @@ export class StarInfoPanel {
     );
   }
 
+  /**
+   * An asteroid field's card: what it holds and when it is full again, the mining ships working it
+   * and what they take a year, and sending idle miners of its kind from the dock.
+   */
+  private renderField(s: GameState, star: StarSystem, f: FieldReport): void {
+    const { field, left, fullIn } = f;
+    const res = RESOURCES.find((r) => r.id === field.resource)!;
+    const isHome = star.id === s.home.id;
+    // Miners of this resource working here (at home that includes the dock's).
+    const here = this.q.groupsAt(star).flatMap((g) => g.ships).filter((x) => minesOf(x.classId) === field.resource);
+    const take = here.reduce((n, x) => n + x.count * this.q.minePerYear(x.classId), 0);
+    const idle = isHome ? [] : this.q.docked().filter((x) => minesOf(x.classId) === field.resource && x.count > 0);
+    const pct = Math.round((100 * left) / field.capacity);
+    const kinds = SHIP_CLASSES.filter((c) => c.mines === field.resource).map((c) => c.name).join(', ');
+    this.el.append(
+      h('header', {},
+        resourceIcon(field.resource, 22),
+        h('div', {}, h('span', { class: 'eyebrow' }, `${star.name} · asteroid field`), h('h3', {}, `${res.name} field`)),
+        h('button', { class: 'icon-btn', 'aria-label': 'Close the field card', onclick: () => this.actions.focusField(null, null) }, icon('close'))),
+      h('div', { class: 'field-bar big' }, h('i', { style: `width:${pct}%; background:${res.color}` })),
+      h('dl', {},
+        h('dt', {}, 'Holds'), h('dd', {}, `${fmt(left)} of ${fmt(field.capacity)} ${res.name.toLowerCase()}`),
+        h('dt', {}, 'Refills'), h('dd', {}, fullIn ? `full in ${formatDuration(fullIn, CLOCK)}` : 'Full'),
+        h('dt', {}, 'Mining here'), h('dd', {}, here.length ? `${shipsText(here)} · ${fmt(take)} / yr` : 'No miners'),
+        h('dt', {}, 'Mined by'), h('dd', {}, kinds || '—')),
+      take > 0 && left > 0 ? h('p', { class: 'small muted' }, `At this rate the field lasts about ${formatDuration(Math.ceil(left / take), CLOCK)} (it refills over a day).`) : '',
+      isHome ? h('p', { class: 'small muted' }, 'Mining ships at your home dock work your home system\'s fields every year.') : '',
+      h('div', { class: 'actions' },
+        !isHome ? h('button', {
+          class: 'btn primary', disabled: !idle.length,
+          title: idle.length ? `Send ${shipsText(idle)} from the dock to mine here` : `No idle ${res.name.toLowerCase()} miners at the dock: build a ${kinds.split(', ')[0] ?? 'mining ship'} in the Shipyard`,
+          onclick: () => this.actions.formFleet(idle, star, `${res.name} miners`),
+        }, icon('fleet'), idle.length ? ` Send miners (${idle.reduce((n, x) => n + x.count, 0)})` : ' No idle miners') : '',
+        h('button', { class: 'btn', onclick: () => this.actions.focusField(null, null) }, 'Back to system')),
+    );
+  }
+
   /** Asteroid fields: what mining ships here can mine, how much is left, and when it refills. */
   private fieldsView(star: StarSystem): HTMLElement | string {
     const fields = this.q.fieldReport(star);
@@ -130,7 +170,7 @@ export class StarInfoPanel {
       ...fields.map(({ field, left, fullIn }) => {
         const name = RESOURCES.find((r) => r.id === field.resource)?.name ?? field.resource;
         const pct = Math.round((100 * left) / field.capacity);
-        return h('div', { class: 'field-row', title: `${name} field: ${fmt(left)} of ${fmt(field.capacity)} left` },
+        return h('button', { class: 'field-row', title: `${name} field: ${fmt(left)} of ${fmt(field.capacity)} left. Click for details`, onclick: () => this.actions.focusField(star, field.id) },
           resourceIcon(field.resource, 14),
           h('span', { class: 'field-name' }, name),
           h('span', { class: 'field-bar' }, h('i', { style: `width:${pct}%; background:${RESOURCES.find((r) => r.id === field.resource)?.color ?? '#ccc'}` })),

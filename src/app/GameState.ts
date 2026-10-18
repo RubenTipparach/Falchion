@@ -30,6 +30,8 @@ export interface GameState {
   readonly selectedFleet: string | null;
   /** Planet the camera is following in system view. */
   readonly selectedPlanet: Planet | null;
+  /** The asteroid field whose card is open (view state: not saved). */
+  readonly selectedField?: string | null;
   readonly explored: Readonly<Record<string, EncounterResult>>;
   /** Planet ids whose loot crate has been opened. */
   readonly openedCrates: readonly string[];

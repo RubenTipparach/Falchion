@@ -115,6 +115,10 @@ export interface GameQueries {
   jobs(site?: string): Job[];
   /** A system's asteroid fields: what each holds now and when it is full again. */
   fieldReport(star: StarSystem): FieldReport[];
+  /** Units a year one mining ship of a class takes from a field of its resource. */
+  minePerYear(classId: string): number;
+  /** Ships at the home dock, not in any fleet. */
+  docked(): Squadron[];
   /** Worlds that buy trade goods. */
   markets(): Market[];
   marketAt(star: StarSystem): Market | null;
@@ -173,6 +177,8 @@ export interface GameActions {
   select(star: StarSystem | null): void;
   /** Fly into a system and follow one of its planets (null = back to the system). */
   focusPlanet(star: StarSystem, planet: Planet | null): void;
+  /** Open an asteroid field's card (null closes it). */
+  focusField(star: StarSystem | null, fieldId: string | null): void;
   /**
    * Descend to a rocky planet's surface: its capital or main city, or `at` one of its cities or
    * buildings (a camera move, not an order).

@@ -250,6 +250,15 @@ export function tradePctOf(e: EconomyState, t: EconomyTables, research: Research
 /** Asteroids give this many times the old planet rate per mining ship. */
 export const ASTEROID_RATE = 3;
 
+/** What one mining ship of a class takes from an asteroid field in a year (as resolveTurn mines). */
+export function miningYield(e: EconomyState, t: EconomyTables, research: ResearchState, classId: string): number {
+  const c = t.classes.find((x) => x.id === classId);
+  if (!c?.mines) return 0;
+  const perShip = 3 + bonusOf(t.tree, research, 'mining');
+  const miningPct = sumEff(activeEffects(e, t), (x) => x.miningPct);
+  return Math.round(perShip * (c.rate ?? 1) * ASTEROID_RATE * (1 + miningPct / 100));
+}
+
 export function resolveTurn(e: EconomyState, research: ResearchState, turn: number, t: EconomyTables, presence?: Presence): { economy: EconomyState; research: ResearchState; report: TurnReport; mined: Record<string, number> } {
   const effs = activeEffects(e, t);
   const income: Partial<Record<Resource, number>> = {};

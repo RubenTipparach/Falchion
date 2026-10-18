@@ -6,7 +6,7 @@ import { BattleResult, CombatBonuses, Damage, menderRepair, repairDamage, resolv
 import { recordRound } from '../core/combat/BattleRecord';
 import { logBattle, tallyLost, tallyOf, type BattleLogEntry } from '../core/combat/BattleLog';
 import { ROLE_TRAIT } from '../core/ships/ClassDesign';
-import { bonusOf, canAfford, capsOf, Colony, EconomyTables, FLOW_LOG, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf, type Flow, type Stockpile, type TurnReport } from '../core/economy/Economy';
+import { bonusOf, canAfford, capsOf, Colony, EconomyTables, FLOW_LOG, miningYield, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf, type Flow, type Stockpile, type TurnReport } from '../core/economy/Economy';
 import { cargoCapacity, FREIGHTER, saleValue, type Market } from '../core/economy/Trade';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
 import { addHaul, Collected, crateMaterials, Haul, planetCache } from '../core/encounters/PlanetCache';
@@ -386,6 +386,9 @@ export class EmpireSim {
     [...(star.id === this.state.home.id ? homeBelt(star) : []), ...fieldsOf(star, this.deps.galaxy.params.seed)];
 
   /** Each field of a system with what it holds now and the years until it is full again. */
+  /** Units a year one mining ship of a class takes from a field of its resource. */
+  minePerYear = (classId: string): number => miningYield({ ...this.state.economy, stock: this.state.empire.materials }, this.deps.economy, this.state.empire.research, classId);
+
   fieldReport = (star: StarSystem): FieldReport[] => {
     const w = this.sharedWorld(), year = this.state.turn;
     return this.asteroidsAt(star).map((field) => ({ field, left: fieldLeft(field, w.asteroids[field.id], year), fullIn: yearsToFull(field, w.asteroids[field.id], year) }));

@@ -1,3 +1,4 @@
+import { RESOURCES } from '../content/resources';
 import { BIOMES } from '../content/biomes';
 import * as THREE from 'three';
 import { specOf } from '../content/logistics';
@@ -389,7 +390,14 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     }
   }
 
+  /** Open an asteroid field's card (null closes it). */
+  focusField(star: StarSystem | null, fieldId: string | null): void {
+    if (star && this.state.selected?.id !== star.id) this.select(star);
+    this.deps.store.update({ selectedField: fieldId, ...(fieldId ? { selectedPlanet: null } : {}) });
+  }
+
   focusPlanet(star: StarSystem, planet: Planet | null): void {
+    if (this.state.selectedField) this.deps.store.update({ selectedField: null });
     if (this.state.selected?.id !== star.id) this.select(star);
     if (planet) this.onFocusPlanet?.(planet);
     const cam = this.view.map.controller;
@@ -589,6 +597,9 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
       const planet = this.view.system.pick(ray);
       const star = this.view.system.system;
       if (planet && star) return this.focusPlanet(star, planet);
+      const field = star ? this.view.system.pickField(ray) : null;
+      if (field && star) return this.focusField(star, field.id);
+      if (this.state.selectedField) return this.focusField(null, null);
       if (this.state.selectedPlanet) return this.clearPlanetFocus();
     }
     const h = worldToHex(world.x, world.z);
@@ -658,6 +669,15 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
       this.view.map.canvas.style.cursor = planet ? 'pointer' : '';
       if (planet) {
         this.view.hud.setHover(`${planet.name}  ·  ${BIOMES.find((b) => b.id === planet.biome)?.name ?? planet.biome}  ·  size ${planet.size}  ·  click to focus`);
+        return;
+      }
+      const star = this.view.system.system;
+      const field = star ? this.view.system.pickField(ray) : null;
+      if (field && star) {
+        const f = this.fieldReport(star).find((x) => x.field.id === field.id);
+        const name = RESOURCES.find((r) => r.id === field.resource)?.name ?? field.resource;
+        this.view.map.canvas.style.cursor = 'pointer';
+        this.view.hud.setHover(`${name} asteroid field  ·  ${f ? `${Math.round(f.left).toLocaleString('en-US')} / ${field.capacity.toLocaleString('en-US')}` : ''}  ·  click for details`);
         return;
       }
     } else this.view.map.canvas.style.cursor = '';

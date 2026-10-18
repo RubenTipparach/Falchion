@@ -126,6 +126,29 @@ export class SystemLayer implements MapLayer {
     return best?.p.planet ?? null;
   }
 
+  /**
+   * The asteroid field under a ray, if the system view is showing: where the ray meets the system's
+   * plane, within a belt's width (with some slack, since belts are thin on screen).
+   */
+  pickField(ray: THREE.Raycaster): AsteroidField | null {
+    if (!this.current || !this.object3d.visible || !this.current.belts.length) return null;
+    const root = this.current.root;
+    root.updateWorldMatrix(true, false);
+    const local = ray.ray.clone().applyMatrix4(new THREE.Matrix4().copy(root.matrixWorld).invert());
+    if (Math.abs(local.direction.y) < 1e-6) return null;
+    const t = -local.origin.y / local.direction.y;
+    if (t <= 0) return null;
+    const hit = local.origin.clone().addScaledVector(local.direction, t);
+    const r = Math.hypot(hit.x, hit.z);
+    const slack = t * local.direction.length() * 0.012;
+    let best: { field: AsteroidField; d: number } | null = null;
+    for (const { belt } of this.current.belts) {
+      const d = Math.abs(r - belt.radius);
+      if (d <= belt.halfWidth * 1.3 + slack && (!best || d < best.d)) best = { field: belt.field, d };
+    }
+    return best?.field ?? null;
+  }
+
   setHover(planetId: string | null): void {
     this.hoverId = planetId;
   }

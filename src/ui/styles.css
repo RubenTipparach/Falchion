@@ -992,3 +992,8 @@ img.thumb:not(.ready) { animation: thumb-wait 1.2s ease-in-out infinite alternat
 
 .flow-note { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
 .flow-note a { color: var(--chart); }
+
+/* Asteroid field rows open the field's card; the card's fill bar. */
+button.field-row { width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 4px; }
+button.field-row:hover { background: var(--raise); }
+.field-bar.big { display: block; height: 6px; margin: 4px 0 10px; }

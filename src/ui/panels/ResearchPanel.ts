@@ -9,6 +9,7 @@ import { SHIP_CLASSES } from '../../content/shipClasses';
 import { Drawer } from '../Drawer';
 import type { GameActions } from '../GameActions';
 import { clear, h } from '../dom';
+import { thumb } from '../thumbs';
 
 const SLOT = 104; // px per half-column
 const NODE_W = 94;
@@ -185,6 +186,7 @@ export class ResearchPanel extends Drawer {
         title: `${node.name} — ${STATUS_LABEL[status]}`,
         onclick: () => { this.selected = node.id; this.render(); },
       },
+      thumb('research', node.id, 40),
       h('span', { class: 'tname' }, node.crossover ? '⇄ ' : node.exclusiveGroup ? '◆ ' : node.analogOf ? '≈ ' : '', node.name),
       h('span', { class: 'tbar' }, h('i', { style: `width:${Math.round(this.tree.progress(state, node.id) * 100)}%` })),
       h('span', { class: 'tshards' },
@@ -205,6 +207,7 @@ export class ResearchPanel extends Drawer {
     clear(this.detail);
     this.detail.append(
       h('div', { class: 'td-head' },
+        thumb('research', node.id, 72),
         h('h3', { style: `color:${branch.color}` }, node.name),
         h('span', { class: `pill ${status}` }, STATUS_LABEL[status]),
         h('span', { class: 'muted small' }, `${this.domains.find((d) => d.id === node.domain)!.name} · ${node.crossover ? node.crossover.map((b) => this.branches.find((x) => x.id === b)!.name).join(' ⇄ ') : branch.name} · Tier ${node.tier}`)),

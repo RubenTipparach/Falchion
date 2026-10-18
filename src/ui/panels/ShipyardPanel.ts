@@ -17,6 +17,7 @@ import { formatDuration } from '../../core/time/WorldTime';
 import { CLOCK } from '../../app/WorldClock';
 import { clear, fmt, h } from '../dom';
 import { icon, resourceIcon } from '../icons';
+import { thumb } from '../thumbs';
 
 const PALETTES: Array<[string, string, string]> = [
   ['#b8c4d6', '#3a4a63', '#4fd1ff'], ['#e8e2d0', '#7a2e2e', '#ffb347'], ['#2b2f3a', '#11131a', '#ff3b6b'],
@@ -142,8 +143,8 @@ export class ShipyardPanel extends Drawer {
           style: `--doc:${DOCTRINES[c.doctrine].color}`,
           onclick: () => this.actions.selectClass(c.id),
         },
-        h('span', { class: 'doc-dot' }),
-        h('span', { class: 'cname' }, c.name),
+        thumb('ship', c.id, 64),
+        h('span', { class: 'cname' }, h('span', { class: 'doc-dot' }), c.name),
         h('span', { class: 'ccount' }, unlocked ? (n ? `×${n}` : '') : icon('lock'))));
       }
     }

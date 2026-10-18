@@ -18,6 +18,8 @@ import { BUILDINGS, STORAGE } from '../content/buildings';
 import { upkeepOf } from '../content/logistics';
 import { Planet } from '../core/galaxy/Planets';
 import { PlanetThumbnails } from '../render/planets/PlanetThumbnails';
+import { createThumbs } from '../render/thumbs/Thumbnails';
+import { setThumbs } from '../ui/thumbs';
 import { NebulaLayer } from '../render/map/NebulaLayer';
 import { LowResBackground } from '../render/map/LowResBackground';
 import { touchFirst } from '../ui/dom';
@@ -187,6 +189,8 @@ async function bootstrap(): Promise<void> {
     if (s.selected && s.selectedPlanet && s.selectedPlanet.biome !== 'gas') controller.land(s.selected, s.selectedPlanet);
     else hud.setHover('Focus a rocky planet first, then land on it');
   });
+  // Rendered thumbnails for ships, buildings, resources, encounters and research (one studio).
+  setThumbs(createThumbs({ factory, design: (classId) => controller.effectiveDesign(classId) }));
   const thumbs = new PlanetThumbnails(80);
   const thumb = (p: Planet) => thumbs.url(p);
   const starInfo = new StarInfoPanel(store, controller, controller, controller.describe, thumb, economyTables);

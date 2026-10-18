@@ -15,11 +15,12 @@ import { Drawer } from '../Drawer';
 import type { FactionView, GameActions, GameQueries } from '../GameActions';
 import type { DiplomacyView } from '../../sim/EmpireSim';
 import { CONTACT_RANGE, type DiplomaticAction } from '../../core/diplomacy/Diplomacy';
-import { icon, resourceIcon } from '../icons';
+import { icon } from '../icons';
 import { BIOMES } from '../../content/biomes';
 import { slotsOf } from '../../content/buildings';
 import type { Planet } from '../../core/galaxy/Planets';
 import { clear, fmt, h } from '../dom';
+import { thumb } from '../thumbs';
 
 type Tab = 'overview' | 'colonies' | 'trade' | 'relations' | 'politics' | 'religion' | 'intel';
 const TABS: Array<[Tab, string]> = [['overview', 'Overview'], ['colonies', 'Colonies'], ['trade', 'Trade'], ['relations', 'Relations'], ['politics', 'Politics'], ['religion', 'Religion'], ['intel', 'Espionage']];
@@ -97,7 +98,7 @@ export class EmpirePanel extends Drawer {
     const caps = this.q.caps();
     return [
       h('div', { class: 'stock-grid' }, ...RESOURCES.map((res) => h('div', { class: 'stock' },
-        resourceIcon(res.id),
+        thumb('resource', res.id, 40),
         h('span', { class: 'stock-name' }, res.name),
         h('b', { class: `mono ${caps[res.id] !== undefined && s.empire.materials[res.id] >= caps[res.id]! ? 'red' : ''}`, title: caps[res.id] !== undefined ? `Storage ${fmt(caps[res.id]!)}` : '' }, fmt(s.empire.materials[res.id]), caps[res.id] !== undefined ? h('span', { class: 'muted small' }, ` / ${fmt(caps[res.id]!)}`) : ''),
         r && r.income[res.id] ? h('span', { class: `delta ${r.income[res.id]! > 0 ? 'up' : 'down'}` }, `${r.income[res.id]! > 0 ? '+' : ''}${r.income[res.id]}`) : h('span', { class: 'delta' }, ''),

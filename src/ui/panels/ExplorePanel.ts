@@ -16,6 +16,7 @@ import { locateButton, storesView } from '../widgets';
 import { clear, fmt, h } from '../dom';
 import { collectWithFx } from '../collectFx';
 import { icon, IconName } from '../icons';
+import { thumb } from '../thumbs';
 
 
 
@@ -84,7 +85,7 @@ export class ExplorePanel extends Drawer {
       const kind = ENCOUNTER_KINDS.find((k) => k.id === result.kind)!;
       card.append(
         h('div', { class: `encounter ${result.success ? 'ok' : 'bad'}` },
-          h('div', { class: 'enc-kind' }, icon(kind.id as IconName), ' ', kind.name, h('span', { class: 'muted small' }, ` · ${Math.round(result.successChance * 100)}% chance`)),
+          h('div', { class: 'enc-kind' }, thumb('event', kind.id, 44), ' ', kind.name, h('span', { class: 'muted small' }, ` · ${Math.round(result.successChance * 100)}% chance`)),
           h('p', {}, result.narrative),
           result.success ? h('p', { class: 'green' }, 'Success!') : h('p', { class: 'red' }, `Failure — ${result.cost?.description} (−${result.cost?.fleetPower} fleet power)`)));
       if (result.crate) card.append(this.crateView(p.id, result.crate.tier, result.crate.cards));
@@ -115,7 +116,7 @@ export class ExplorePanel extends Drawer {
       return h('div', { class: `crate ${tier} closed` }, icon('crate'), `${tier} loot crate (${cards.length} cards) · Collect to open`);
     }
     return h('div', { class: 'cards' }, ...cards.map((c, i) => h('div', { class: `card ${c.rarity}`, style: `animation-delay:${i * 90}ms` },
-      h('span', { class: 'card-rarity' }, c.rarity), h('span', { class: 'card-icon' }, icon(cardIcon(c))), h('span', { class: 'card-text' }, this.cardText(c)))));
+      h('span', { class: 'card-rarity' }, c.rarity), h('span', { class: 'card-icon' }, cardThumb(c) ?? icon(cardIcon(c))), h('span', { class: 'card-text' }, this.cardText(c)))));
   }
 
   private cardText(c: Card): string {
@@ -133,6 +134,13 @@ export class ExplorePanel extends Drawer {
       h('p', { class: 'small' }, h('b', {}, 'Ship blueprints: '), e.chassis.length ? e.chassis.map((id) => SHIP_CLASSES.find((x) => x.id === id)?.name ?? id).join(', ') : '—'),
       h('p', { class: 'small' }, h('b', {}, 'Parts: '), e.parts.length ? e.parts.join(', ') : '—'));
   }
+}
+
+/** A rendered picture for a card that has one: the material, the ship class, the part. */
+function cardThumb(c: Card): HTMLElement | null {
+  if (c.type === 'materials') return thumb('resource', c.material, 40);
+  if (c.type === 'chassis') return thumb('ship', c.id, 40);
+  return null;
 }
 
 function cardIcon(c: Card): IconName {

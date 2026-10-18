@@ -44,3 +44,5 @@ Spec first: use `/opsx:propose` → `/opsx:apply` → `/opsx:archive`. Specs liv
   `testing-practices` skills before designing or reviewing code.
 - Load `procedural-geometry` before adding or changing ship styles, traits, parts or any
   procedural mesh: solid parts must face outward (a test checks every generated ship).
+- Load `thumbnails` before adding or changing a thumbnail prop or kind (`src/render/thumbs`); look at
+  the contact sheet (`npm run thumbs -- --split`) before shipping.

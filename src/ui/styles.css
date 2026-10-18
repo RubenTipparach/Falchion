@@ -179,7 +179,7 @@ ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .yard { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 16px; min-height: 0; }
 .class-list { display: flex; flex-direction: column; gap: 2px; overflow: auto; max-height: calc(100vh - 170px); padding-right: 4px; }
 .class-list h4:first-child { margin-top: 0; }
-.class-btn { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; gap: 4px; text-align: left; padding: 6px 8px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: 13px; }
+.class-btn { display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: 4px; text-align: left; padding: 6px 8px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: 13px; }
 .class-btn:hover { background: var(--raise); }
 .class-btn.active { border-color: var(--line-strong); background: rgba(127, 211, 230, 0.08); }
 .class-btn.locked { color: var(--muted); }
@@ -280,7 +280,7 @@ input[type='range'] { accent-color: var(--brass); width: 100%; min-width: 0; }
 
 /* Empire */
 .stock-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
-.stock { display: grid; grid-template-columns: 12px 1fr auto auto; grid-template-rows: auto auto; align-items: center; gap: 2px 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: rgba(12, 19, 38, 0.6); }
+.stock { display: grid; grid-template-columns: 36px 1fr auto auto; grid-template-rows: auto auto; align-items: center; gap: 2px 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: rgba(12, 19, 38, 0.6); }
 .swatch-dot { width: 10px; height: 10px; border-radius: 2px; }
 .stock-name { font-weight: 600; font-size: 13px; }
 .stock small { grid-column: 2 / -1; color: var(--muted); font-size: 11px; }
@@ -914,3 +914,22 @@ button.chat-mention:hover { filter: brightness(1.25); }
 }
 /* While a battle is watched, the map's own panels step aside (the top bar and drawers stay). */
 body.battle-open .star-card, body.battle-open .dispatches, body.battle-open .hud, body.battle-open .ladder, body.battle-open .contact-banner { display: none !important; }
+
+/* Rendered thumbnails (src/render/thumbs): transparent pictures on a dark vignette tile. */
+.thumb { display: inline-block; flex: none; vertical-align: middle; border-radius: 6px; background: radial-gradient(circle at 50% 40%, rgba(64, 92, 135, 0.45), rgba(10, 15, 26, 0.6) 72%); object-fit: contain; }
+img.thumb:not(.ready) { animation: thumb-wait 1.2s ease-in-out infinite alternate; }
+@keyframes thumb-wait { from { opacity: 0.35; } to { opacity: 0.7; } }
+.stock .thumb { grid-row: 1 / span 2; align-self: center; width: 36px; height: 36px; }
+.tnode .thumb { position: absolute; right: 2px; bottom: 2px; opacity: 0.55; background: none; pointer-events: none; }
+.tnode .tname, .tnode .tbar, .tnode .tshards { position: relative; }
+.tnode.researched .thumb, .tnode.researchable .thumb, .tnode.selected .thumb { opacity: 0.85; }
+.class-btn .thumb { background: none; width: 64px; height: 32px; object-fit: cover; }
+.class-btn .cname { display: flex; align-items: center; gap: 4px; }
+.building { display: inline-flex; align-items: center; gap: 5px; }
+.building .thumb { border-radius: 4px; }
+.build-menu button { display: grid; grid-template-columns: 30px 1fr; align-items: center; column-gap: 6px; }
+.build-menu button small { grid-column: 2; }
+.build-menu button > svg, .build-menu button > .thumb { grid-row: 1 / span 2; }
+.enc-kind .thumb { width: 44px; height: 44px; }
+.card-icon .thumb { background: none; }
+.td-head .thumb { border: 1px solid var(--line); }

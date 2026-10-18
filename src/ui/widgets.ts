@@ -11,6 +11,7 @@ import type { FleetGroup } from './GameActions';
 import { fmt, h } from './dom';
 import { icon, resourceIcon } from './icons';
 import type { Card, LootCrate } from '../core/encounters/types';
+import { thumb } from './thumbs';
 
 const nameOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)?.name ?? id;
 
@@ -64,7 +65,7 @@ export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>,
     populationView(c, y.income.food ?? 0),
     h('div', { class: 'small' }, h('b', {}, 'Output '), out.join('  ') || '—', h('span', { class: 'muted' }, ' / yr')),
     h('div', { class: 'buildings' },
-      ...have.map((id) => h('span', { class: 'building', title: BUILDINGS.find((b) => b.id === id)?.blurb ?? '' }, BUILDINGS.find((b) => b.id === id)?.name ?? id)),
+      ...have.map((id) => h('span', { class: 'building', title: BUILDINGS.find((b) => b.id === id)?.blurb ?? '' }, thumb('building', id, 22), BUILDINGS.find((b) => b.id === id)?.name ?? id)),
       ...pending.map((j) => h('span', { class: 'building pending', title: j.startTurn > turn ? 'Queued' : 'Under construction' }, `⏳ ${BUILDINGS.find((b) => b.id === j.item)?.name ?? j.item} · ${formatDuration(j.doneTurn - turn, CLOCK)}`)),
       ...Array.from({ length: Math.max(0, free) }, () => h('span', { class: 'building empty' }, 'Empty slot'))),
     free > 0 ? h('div', { class: 'build-menu' }, ...BUILDINGS.filter((b) => !(b.unique && (have.includes(b.id) || pending.some((j) => j.item === b.id)))).map((b) =>
@@ -72,7 +73,7 @@ export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>,
         // Locked: the button leads to the research it needs.
         ? h('button', { class: 'btn locked-build', title: `Needs research: ${gates.nodeName(b.unlock)}. Open it in the research tree.`, onclick: () => gates.openResearch(b.unlock!) },
           icon('lock'), ` ${b.name}`, h('small', {}, `Research ${gates.nodeName(b.unlock)} → · ${b.blurb}`))
-        : h('button', { class: 'btn', disabled: !affordable(b), title: b.blurb, onclick: () => build(b.id) }, icon('build'), ` ${b.name}`, h('small', {}, `${costText(b)} · ${formatDuration(b.years, CLOCK)} · ${b.blurb}`)))) : h('p', { class: 'small muted' }, 'All building slots used.'));
+        : h('button', { class: 'btn', disabled: !affordable(b), title: b.blurb, onclick: () => build(b.id) }, thumb('building', b.id, 30), ` ${b.name}`, h('small', {}, `${costText(b)} · ${formatDuration(b.years, CLOCK)} · ${b.blurb}`)))) : h('p', { class: 'small muted' }, 'All building slots used.'));
 }
 
 /** A colony's population, its own food balance and how close it is to growing (or shrinking). */

@@ -308,7 +308,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     const fleets: FleetView[] = known.flatMap(({ def, state }) => state.fleets.map((f): FleetView => ({
       id: `npc:${f.id}`, name: f.name, owner: `alien:${def.name}`, color: def.color,
       movement: planMovement(f.from, f.to, f.depart, 1),
-      design: { ...DEFAULT_DESIGN, name: def.name, style: def.archetype.style, seed: hashSeed(f.id) % 1000, colors: { ...def.archetype.hull }, weapons: 3 },
+      design: { ...DEFAULT_DESIGN, name: def.name, style: def.archetype.style, seed: hashSeed(f.id) % 1000, colors: { ...def.archetype.hull }, livery: def.archetype.livery, weapons: 3 },
       status: f.mission === 'raid' ? 'Raiding' : f.mission === 'return' ? 'Returning home' : `${f.ships.reduce((n, x) => n + x.count, 0)} warships`,
     })));
     const key = JSON.stringify([claims, fleets.map((f) => [f.id, f.movement, f.status])]);

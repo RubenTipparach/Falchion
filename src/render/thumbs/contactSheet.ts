@@ -10,6 +10,9 @@ import { createDefaultShipFactory } from '../ships/defaultRegistries';
 import { HULL_VARIANTS, thumbSubject, type ThumbContext, type ThumbKind } from './subjects';
 import { ThumbStudio } from './ThumbStudio';
 import { preloadHullTextures } from '../ships/hullTextures';
+import { LIVERIES, SHIP_PALETTES } from '../../content/liveries';
+
+const STYLES = ['technological', 'utilitarian', 'organic', 'geometric', 'classic'];
 
 /**
  * Every thumbnail in one page (tools/thumbs/sheet.html), for `npm run thumbs` to capture and a
@@ -37,7 +40,12 @@ export async function contactSheet(root: HTMLElement): Promise<void> {
     ['ship', 'Ships', SHIP_CLASSES],
     ['research', 'Research', TECH_NODES.filter((n) => !domains || domains.includes(n.domain))],
     ['planet', 'Planets', BIOMES],
-    ['hull', 'Generated hulls', ['technological', 'utilitarian', 'organic', 'geometric', 'classic'].flatMap((st) => HULL_VARIANTS.map((v, i) => ({ id: `${st}~${i}`, name: `${st} ${v.length}×${v.bulk} e${v.engines} w${v.weapons}` })))],
+    ['hull', 'Generated hulls', STYLES.flatMap((st) => HULL_VARIANTS.map((v, i) => ({ id: `${st}~${i}`, name: `${st} ${v.length}×${v.bulk} e${v.engines} w${v.weapons}` })))],
+    // Every style in every livery, each cell a different palette and size (change ship-liveries).
+    ['livery', 'Liveries', STYLES.flatMap((st, si) => LIVERIES.map((l, li) => {
+      const p = (si * 5 + li * 7) % SHIP_PALETTES.length, v = 2 + ((si + li) % 5);
+      return { id: `${st}~${v}~${l.id}~${p}`, name: `${st} · ${l.name}` };
+    }))],
   ];
   for (const [kind, title, items] of rows) {
     if (only && !only.includes(kind)) continue;

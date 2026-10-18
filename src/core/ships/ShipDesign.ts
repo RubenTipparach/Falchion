@@ -1,3 +1,5 @@
+import { LIVERIES } from '../../content/liveries';
+
 /** Plain-data ship design. The 3D model is regenerated from this; only this is stored or sent. */
 export interface ShipColors {
   readonly primary: string;
@@ -20,6 +22,8 @@ export interface ShipDesign {
   readonly traits: readonly string[];
   /** Other researched styles mixed in: their signature pieces on this style's hull. */
   readonly blend?: readonly string[];
+  /** Paint scheme (`src/content/liveries.ts`); none is Plain. */
+  readonly livery?: string;
 }
 
 /** How many other styles one design can mix in. */
@@ -57,16 +61,19 @@ export function normalizeDesign(d: ShipDesign): ShipDesign {
     weapons: Math.round(clamp(d.weapons, DESIGN_LIMITS.weapons)),
     traits: [...new Set(d.traits)].sort(),
     blend: [...new Set(d.blend ?? [])].filter((b) => b !== d.style).slice(0, MAX_BLEND),
+    // Plain (or an unknown id) is no livery, so designs made before liveries are unchanged.
+    livery: d.livery && d.livery !== 'plain' && LIVERIES.some((l) => l.id === d.livery) ? d.livery : undefined,
   };
 }
 
-type Packed = [string, string, number, number, number, string, string, string, number, number, string[], string[]?];
+type Packed = [string, string, number, number, number, string, string, string, number, number, string[], string[]?, string?];
 
 /** Compact, URL-safe share code. */
 export function encodeDesign(d: ShipDesign): string {
   const n = normalizeDesign(d);
   const packed: Packed = [n.name, n.style, n.seed, n.length, n.bulk, n.colors.primary, n.colors.secondary, n.colors.accent, n.engines, n.weapons, [...n.traits]];
-  if (n.blend?.length) packed.push([...n.blend]);
+  if (n.blend?.length || n.livery) packed.push([...(n.blend ?? [])]);
+  if (n.livery) packed.push(n.livery);
   const bytes = new TextEncoder().encode(JSON.stringify(packed));
   let bin = '';
   bytes.forEach((b) => (bin += String.fromCharCode(b)));
@@ -78,10 +85,11 @@ export function decodeDesign(code: string): ShipDesign {
   const bin = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
   const json = new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
   const p = JSON.parse(json) as Packed;
-  if (!Array.isArray(p) || (p.length !== 11 && p.length !== 12)) throw new Error('Invalid ship design code');
+  if (!Array.isArray(p) || p.length < 11 || p.length > 13) throw new Error('Invalid ship design code');
   return normalizeDesign({
     name: p[0], style: p[1], seed: p[2], length: p[3], bulk: p[4],
     colors: { primary: p[5], secondary: p[6], accent: p[7] }, engines: p[8], weapons: p[9], traits: p[10],
     blend: Array.isArray(p[11]) ? p[11].map(String) : [],
+    livery: typeof p[12] === 'string' ? p[12] : undefined,
   });
 }

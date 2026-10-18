@@ -107,6 +107,7 @@ const design: ArgCodec<ShipDesign> = {
       length: num(d.length), bulk: num(d.bulk), engines: num(d.engines), weapons: num(d.weapons),
       colors: { primary: col(d.colors.primary), secondary: col(d.colors.secondary), accent: col(d.colors.accent) },
       traits: ids(d.traits, 32), blend: ids(d.blend ?? [], 4),
+      livery: d.livery === undefined ? undefined : typeof d.livery === 'string' && ID.test(d.livery) ? d.livery : fail('bad design'),
     });
   },
 };

@@ -66,6 +66,8 @@ describe('player commands run on the server exactly as in the browser', () => {
     both('setOrders', ['survey-1', { autoExplore: true, autoReturn: false }]);
     both('setFocus', ['o-grown-hulls']);
     both('setDesign', [{ ...state.designs.prospector, seed: 99, length: 1.3 }]);
+    const painted = both('setDesign', [{ ...state.designs.prospector, livery: 'stripes' }]);
+    expect((painted.save.designs as Record<string, { livery?: string }>).prospector.livery).toBe('stripes');
     both('buildShip', ['prospector', undefined]);
     expect(target).toBeTruthy();
   });
@@ -80,6 +82,7 @@ describe('player commands run on the server exactly as in the browser', () => {
       { name: 'explore', args: ['nope/1'] },
       { name: 'formFleet', args: [[{ classId: 'death-star', count: 1 }], '1,1'] },
       { name: 'setDesign', args: [{ colors: { primary: 'red' } }] },
+      { name: 'setDesign', args: [{ ...fresh().designs.prospector, livery: 42 }] },
       { name: 'toString', args: [] },
     ]) {
       const r = applyCommand(save, PLAYER, T, bad)!;

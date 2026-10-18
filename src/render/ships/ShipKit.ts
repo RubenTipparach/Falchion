@@ -3,6 +3,7 @@ import { makeOutward } from '../geometry/orientation';
 import { Rng, hashSeed } from '../../core/rng/Rng';
 import type { ShipDesign } from '../../core/ships/ShipDesign';
 import { applyHullTexture, hullTextureFor } from './hullTextures';
+import { liveryIndex } from '../../content/liveries';
 
 export type PartType = 'hull' | 'engine' | 'weapon' | 'wing' | 'detail' | 'trait';
 
@@ -58,7 +59,8 @@ export class ShipKit {
       gold: this.own(new THREE.MeshStandardMaterial({ color: '#d4af37', metalness: 0.9, roughness: 0.25 })),
     };
     // Plating: the style's on the hull, machinery on the detail; their lights glow in the accent.
-    applyHullTexture(this.mat.hull, hullTextureFor(design.style), design.colors.accent);
+    applyHullTexture(this.mat.hull, hullTextureFor(design.style), design.colors.accent, undefined,
+      { index: liveryIndex(design.livery), paint: design.colors.secondary, trim: design.colors.accent });
     applyHullTexture(this.mat.detail, 'machinery', design.colors.accent, 0.6);
   }
 

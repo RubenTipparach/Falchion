@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DEFAULT_LIVERY, LIVERIES, SHIP_PALETTES } from '../../content/liveries';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { GameState } from '../../app/GameState';
 import type { Store } from '../../app/Store';
@@ -21,10 +22,6 @@ import { thumb } from '../thumbs';
 import { COMMERCE, COMPANY_KINDS } from '../../content/commerce';
 import { companyKindOf } from '../../core/economy/Companies';
 
-const PALETTES: Array<[string, string, string]> = [
-  ['#b8c4d6', '#3a4a63', '#4fd1ff'], ['#e8e2d0', '#7a2e2e', '#ffb347'], ['#2b2f3a', '#11131a', '#ff3b6b'],
-  ['#9fd8b0', '#2f5d48', '#d6ff6b'], ['#f2f2f2', '#c9a227', '#7ad7ff'], ['#7b5ea7', '#2a1e3d', '#ff9bf0'],
-];
 
 const ROLE_ORDER: Array<[ShipRole, string]> = [['mining', 'Mining'], ['logistics', 'Logistics'], ['combat', 'Combat'], ['capital', 'Capital ships']];
 
@@ -285,8 +282,13 @@ export class ShipyardPanel extends Drawer {
         slider('Length', 'length', 0.05), slider('Bulk', 'bulk', 0.05), slider('Engines', 'engines', 1), slider('Weapons', 'weapons', 1)),
       h('div', { class: 'ctl-group' }, h('h4', {}, 'Colours'),
         h('div', { class: 'row' }, color('Primary', 'primary'), color('Secondary', 'secondary'), color('Accent', 'accent')),
-        h('div', { class: 'palettes' }, ...PALETTES.map(([p, s, a]) =>
-          h('button', { class: 'palette', 'aria-label': 'Apply palette', style: `background:linear-gradient(90deg,${p} 0 50%,${s} 50% 80%,${a} 80%)`, onclick: () => this.set({ colors: { primary: p, secondary: s, accent: a } }) })))),
+        h('div', { class: 'palettes' }, ...SHIP_PALETTES.map(([p, s, a]) =>
+          h('button', { class: 'palette', 'aria-label': 'Apply palette', style: `background:linear-gradient(90deg,${p} 0 50%,${s} 50% 80%,${a} 80%)`, onclick: () => this.set({ colors: { primary: p, secondary: s, accent: a } }) }))),
+        h('h4', { class: 'sub' }, 'Livery'),
+        h('div', { class: 'traits liveries' }, ...LIVERIES.map((l) => {
+          const on = (d.livery ?? DEFAULT_LIVERY) === l.id;
+          return h('button', { class: `trait ${on ? 'on' : 'off'}`, 'aria-pressed': String(on), title: `${l.blurb} Paint: secondary colour; trim: accent.`, onclick: () => this.set({ livery: l.id }) }, l.name);
+        }))),
       h('div', { class: 'ctl-group' }, h('h4', {}, 'Research traits'), h('div', { class: 'traits' }, ...traitChips)),
       h('div', { class: 'ctl-group' }, h('h4', {}, 'Share code'),
         h('div', { class: 'row' }, code,

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { SHIP_PALETTES } from '../../content/liveries';
 import { BRANCHES, TECH_NODES } from '../../content/techTree';
 import type { TechNode } from '../../core/research/types';
 import { PLANET_LOOKS } from '../../content/planetLooks';
@@ -14,7 +15,7 @@ import { SHIP_ART } from './ships';
 import { DOMAIN_PROPS, EVENT_PROPS, PART_PROPS, RESOURCE_PROPS, STAT_PROPS } from './props';
 import { mat, prism, Prop } from './propKit';
 
-export type ThumbKind = 'ship' | 'building' | 'resource' | 'event' | 'research' | 'planet' | 'hull';
+export type ThumbKind = 'ship' | 'building' | 'resource' | 'event' | 'research' | 'planet' | 'hull' | 'livery';
 
 /** What a thumbnail shows: a cache key (changes when the picture would) and how to build it. */
 export interface ThumbSubject {
@@ -53,6 +54,15 @@ export const THUMB_SUBJECTS: Readonly<Record<ThumbKind, SubjectFn>> = {
     const [style, v] = id.split('~');
     const variant = HULL_VARIANTS[Number(v)];
     return variant ? shipSubject(`hull:${id}`, normalizeDesign({ ...ctx.design('lancer'), ...variant, style, blend: [], traits: [] }), ctx) : null;
+  },
+  // A livery showcase (`<style>~<variant>~<livery>~<palette>`): a generated hull of that style in
+  // one of SHIP_PALETTES, painted in the livery (change ship-liveries).
+  livery: (id, ctx) => {
+    const [style, v, livery, p] = id.split('~');
+    const variant = HULL_VARIANTS[Number(v)], palette = SHIP_PALETTES[Number(p)];
+    if (!variant || !palette) return null;
+    const [primary, secondary, accent] = palette;
+    return shipSubject(`livery:${id}`, normalizeDesign({ ...ctx.design('lancer'), ...variant, style, blend: [], traits: [], livery, colors: { primary, secondary, accent } }), ctx);
   },
   // A planet type (biome id): a world of that type in the system view's shader.
   planet: (id) => (PLANET_LOOKS[id] ? { key: `planet:${id}`, build: () => framedPlanet(planet(id, `planet:${id}`)) } : null),

@@ -74,8 +74,9 @@ export class SurfaceTerrain {
       uPatchOn: { value: 0 }, uPC: { value: new THREE.Vector3(0, 0, 1) }, uPT1: { value: new THREE.Vector3(1, 0, 0) }, uPT2: { value: new THREE.Vector3(0, 1, 0) },
       uPSize: { value: 0.3 }, uOct: { value: BASE_OCT }, uEps: { value: 0.004 },
       uBaseN: { value: quality.baseCells }, uLightMap: { value: lights ?? NO_LIGHTS },
+      uSeaGlow: { value: c(look.seaGlow ?? '#000000') },
     };
-    const defines = quality.lite ? { LITE: 1 } : {};
+    const defines: Record<string, number> = { ...(quality.lite ? { LITE: 1 } : {}), ...(look.seaGlow ? { SEA_GLOW: 1 } : {}) };
     // Transparent only so the globe can crossfade over planet view; it writes depth as an opaque mesh would.
     this.baseMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: BASE_VERT, fragmentShader: TERRAIN_FRAG, defines: { ...defines, IS_BASE: 1 }, transparent: true });
     this.patchMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: PATCH_VERT, fragmentShader: TERRAIN_FRAG, defines, transparent: true, side: THREE.DoubleSide });

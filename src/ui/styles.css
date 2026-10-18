@@ -954,3 +954,8 @@ img.thumb:not(.ready) { animation: thumb-wait 1.2s ease-in-out infinite alternat
   .city-list { width: min(240px, calc(100vw - 16px)); max-height: 40vh; }
   .building .icon-btn.locate { width: 32px; height: 32px; min-width: 32px; min-height: 32px; }
 }
+
+/* ── Planet types (change worlds-and-stars) ── */
+.planet-blurb { margin: 6px 0 2px; }
+.choir-broadcast { margin: 8px 0; padding: 8px 10px; border-left: 2px solid #d8c4ff; background: rgba(216, 196, 255, 0.07); border-radius: 0 6px 6px 0; }
+.choir-broadcast p { margin: 2px 0 4px; font: 600 12px/1.35 var(--font-mono); letter-spacing: 0.04em; color: #e6dcff; }

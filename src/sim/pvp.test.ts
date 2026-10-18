@@ -20,7 +20,8 @@ import type { EmpireSim } from './EmpireSim';
 const galaxy = new GalaxyModel();
 const tree = new TechTree(TECH_NODES, SHARD_SOURCES);
 const T = 5_000;
-const HERE: Hex = { q: 0, r: 0 };
+// An empty hex next to the galactic centre (the centre itself holds the supermassive black hole).
+const HERE: Hex = { q: 1, r: 0 };
 const A = '111111111111111111';
 const B = '222222222222222222';
 

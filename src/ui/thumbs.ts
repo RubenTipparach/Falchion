@@ -18,5 +18,5 @@ export const setThumbs = (fn: ThumbFn): void => {
   impl = fn;
 };
 
-/** A rendered picture of a ship class, building, resource, encounter kind or research node. */
+/** A rendered picture of a ship class, building, resource, encounter kind, research node or planet type. */
 export const thumb = (kind: ThumbKind, id: string, size = 32): HTMLElement => impl(kind, id, size);

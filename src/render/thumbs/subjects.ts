@@ -14,7 +14,7 @@ import { SHIP_ART } from './ships';
 import { DOMAIN_PROPS, EVENT_PROPS, PART_PROPS, RESOURCE_PROPS, STAT_PROPS } from './props';
 import { mat, prism, Prop } from './propKit';
 
-export type ThumbKind = 'ship' | 'building' | 'resource' | 'event' | 'research';
+export type ThumbKind = 'ship' | 'building' | 'resource' | 'event' | 'research' | 'planet';
 
 /** What a thumbnail shows: a cache key (changes when the picture would) and how to build it. */
 export interface ThumbSubject {
@@ -48,6 +48,8 @@ export const THUMB_SUBJECTS: Readonly<Record<ThumbKind, SubjectFn>> = {
     return b ? { key: `event:${id}`, build: b } : null;
   },
   research: (id, ctx) => researchSubject(id, ctx),
+  // A planet type (biome id): a world of that type in the system view's shader.
+  planet: (id) => (PLANET_LOOKS[id] ? { key: `planet:${id}`, build: () => framedPlanet(planet(id, `planet:${id}`)) } : null),
 };
 
 /** A thumbnail subject, or null for an id the kind does not know. */
@@ -180,9 +182,22 @@ function buildingObject(m: BuildingModel): THREE.Group {
 function planet(biome: string, seed: string): THREE.Mesh {
   const look = PLANET_LOOKS[biome] ?? PLANET_LOOKS.barren;
   const material = createPlanetMaterial(look, hashSeed(seed, 'surface'));
-  material.uniforms.uStarPos.value.set(-6, 4, 2);
+  // A tidally locked world faces its star: from the same side, but more from the front, so its sea shows.
+  if (look.locked !== undefined) material.uniforms.uStarPos.value.set(-3, 2, 6);
+  else material.uniforms.uStarPos.value.set(-6, 4, 2);
   material.uniforms.uTime.value = 5;
   const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.5, 48, 32), material);
   sphere.position.y = 0.5;
+  return sphere;
+}
+
+/**
+ * A planet alone fills its tile: the studio frames a model by its bounding box's corners, and a
+ * sphere's box is much wider than the sphere seen from the studio's three-quarter view, so the box
+ * is shrunk to one whose corners frame the sphere itself.
+ */
+function framedPlanet(sphere: THREE.Mesh): THREE.Mesh {
+  const k = 0.5 * 0.7;
+  sphere.geometry.boundingBox = new THREE.Box3(new THREE.Vector3(-k, -k, -k), new THREE.Vector3(k, k, k));
   return sphere;
 }

@@ -2,17 +2,18 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { BIOMES } from '../../content/biomes';
 import { PLANET_LOOKS } from '../../content/planetLooks';
-import { GalaxyModel, SPECTRAL_COLORS, SpectralClass, StarSystem } from '../../core/galaxy/GalaxyModel';
+import { describeStar } from '../../content/stars';
+import { GalaxyModel, StarSystem } from '../../core/galaxy/GalaxyModel';
 import { planetsOf, Planet } from '../../core/galaxy/Planets';
 import { worldToHex } from '../../core/hex/Hex';
 import { Rng, hashSeed } from '../../core/rng/Rng';
 import type { SettlementInput } from '../../core/surface/SurfaceLayout';
-import { createPlanetMaterial, createRingMaterial, createStarMaterial, setPlanetLights } from '../planets/PlanetMaterial';
+import { createPlanetMaterial, createRingMaterial, setPlanetLights } from '../planets/PlanetMaterial';
 import { hasPlanetLightMap, planetLightMap } from '../planets/planetLayouts';
+import { createStarVisual, StarVisual } from '../stars/StarVisuals';
 import type { MapLayer, ViewState } from './MapLayer';
 import { fade } from './ZoomModel';
 
-const STAR_SCALE: Record<SpectralClass, number> = { O: 1.8, B: 1.5, A: 1.25, F: 1.1, G: 1, K: 0.9, M: 0.75 };
 /** Show the system below this visible width (ly). */
 export const SYSTEM_VIEW_WIDTH = 9;
 const LABELS_BELOW = 3;
@@ -23,6 +24,10 @@ const LABELS_BELOW = 3;
 const SPIN = 0.015;
 /** Orbital speed scale: radians per second for an orbit of 1/12 ly (further out is slower). */
 const ORBIT_RATE = 0.01;
+/** The innermost planet orbit (ly); companions or a disc that reach further push the planets out. */
+const FIRST_ORBIT = 0.06;
+/** Gap kept between the star's outermost part and the innermost planet orbit. */
+const ORBIT_CLEARANCE = 0.025;
 const TMP = new THREE.Vector3();
 
 interface OrbitingPlanet {
@@ -43,8 +48,7 @@ interface OrbitingPlanet {
 interface BuiltSystem {
   readonly star: StarSystem;
   readonly root: THREE.Group;
-  readonly starMaterial: THREE.ShaderMaterial;
-  readonly corona: THREE.Sprite;
+  readonly visual: StarVisual;
   readonly planets: OrbitingPlanet[];
   readonly starLabel: CSS2DObject;
 }
@@ -62,6 +66,8 @@ export interface SystemEvents {
   /** What stands on a planet (from the game state), for its night lights; null when nobody holds it. */
   colonyOf(planet: Planet): SettlementInput | null;
   onPlanetClick(star: StarSystem, planet: Planet): void;
+  /** A system's planets as the game sees them (colonies keep their type; city worlds); default: as generated. */
+  planets?(star: StarSystem): Planet[];
 }
 
 /**
@@ -71,7 +77,6 @@ export interface SystemEvents {
 export class SystemLayer implements MapLayer {
   readonly object3d = new THREE.Group();
   private current: BuiltSystem | null = null;
-  private readonly coronaTexture = radialTexture();
   private selectedId: string | null = null;
   private hoverId: string | null = null;
   /** A planet a close-up draws instead (the surface view): hidden here. */
@@ -167,8 +172,7 @@ export class SystemLayer implements MapLayer {
     // Star position for planet shading (made camera-relative as each planet is drawn, see build).
     sys.root.getWorldPosition(this.starWorld);
     this.updateLights(sys);
-    sys.starMaterial.uniforms.uTime.value = t;
-    sys.corona.material.opacity = 0.75 + 0.08 * Math.sin(t * 1.3);
+    sys.visual.update(t);
     const showLabels = view.visibleWidth < LABELS_BELOW && view.visibleWidth > 0.2;
     const labelFade = String(fade(view.visibleWidth, LABELS_BELOW * 0.6, LABELS_BELOW));
     sys.starLabel.visible = showLabels;
@@ -190,22 +194,18 @@ export class SystemLayer implements MapLayer {
     const root = new THREE.Group();
     root.position.set(star.position.x, 0.002, star.position.z);
     const rng = new Rng(hashSeed(this.galaxy.params.seed, 'system', star.id));
-    const color = SPECTRAL_COLORS[star.spectral];
-    const starR = 0.014 * STAR_SCALE[star.spectral];
-
-    const starMaterial = createStarMaterial(color, hashSeed(star.id, 'star'));
-    root.add(new THREE.Mesh(new THREE.SphereGeometry(starR, 48, 32), starMaterial));
-    const corona = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.coronaTexture, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-    corona.scale.setScalar(starR * 9);
-    root.add(corona);
-    const starLabel = label(`<b>${star.name}</b><small>Class ${star.spectral} star</small>`, 'system-label star');
-    starLabel.position.set(0, 0, -starR * 2.4);
+    // The star by kind (dwarfs, giants, remnants, black holes) with any companions.
+    const visual = createStarVisual(star);
+    root.add(visual.object3d);
+    const starLabel = label(`<b>${star.name}</b><small>${describeStar(star)}</small>`, 'system-label star');
+    starLabel.position.set(0, 0, -visual.labelOffset);
     root.add(starLabel);
+    const firstOrbit = Math.max(FIRST_ORBIT, visual.clearance + ORBIT_CLEARANCE);
 
     const orbitMat = new THREE.LineBasicMaterial({ color: '#7fd3e6', transparent: true, opacity: 0.2, depthWrite: false });
     const planets: OrbitingPlanet[] = [];
-    for (const planet of planetsOf(star, this.galaxy.params.seed)) {
-      const orbit = 0.06 + planet.index * 0.04 + rng.range(-0.005, 0.005);
+    for (const planet of this.events.planets?.(star) ?? planetsOf(star, this.galaxy.params.seed)) {
+      const orbit = firstOrbit + planet.index * 0.04 + rng.range(-0.005, 0.005);
       const ring = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(
         Array.from({ length: 160 }, (_, i) => new THREE.Vector3(Math.cos((i / 160) * Math.PI * 2) * orbit, 0, Math.sin((i / 160) * Math.PI * 2) * orbit))), orbitMat);
       root.add(ring);
@@ -213,7 +213,7 @@ export class SystemLayer implements MapLayer {
       const look = PLANET_LOOKS[planet.biome] ?? PLANET_LOOKS.barren;
       const radius = planetRadius(planet);
       const material = createPlanetMaterial(look, hashSeed(planet.id, 'surface'));
-      material.uniforms.uStarColor.value.set(color).lerp(new THREE.Color('#ffffff'), 0.6);
+      material.uniforms.uStarColor.value.copy(visual.light);
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 64, 40), material);
       // Shading is camera-relative: the star in the view space of whichever camera draws the planet
       // (a close-up may move the map camera after the layers have updated).
@@ -241,7 +241,7 @@ export class SystemLayer implements MapLayer {
       planets.push({ planet, pivot, mesh, material, radius, phase: rng.range(0, Math.PI * 2), speed: ORBIT_RATE / Math.pow(orbit * 12, 1.5), label: lbl, spin: this.lastTime * SPIN });
     }
     this.lightsDirty = true;
-    return { star, root, starMaterial, corona, planets, starLabel };
+    return { star, root, visual, planets, starLabel };
   }
 
   /**
@@ -267,6 +267,7 @@ export class SystemLayer implements MapLayer {
   private clear(): void {
     if (!this.current) return;
     this.object3d.remove(this.current.root);
+    this.current.visual.dispose();
     this.current.root.traverse((o) => {
       if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
         o.geometry.dispose();
@@ -279,7 +280,6 @@ export class SystemLayer implements MapLayer {
 
   dispose(): void {
     this.clear();
-    this.coronaTexture.dispose();
   }
 }
 
@@ -294,19 +294,4 @@ function label(html: string, cls: string): CSS2DObject {
   el.className = cls;
   el.innerHTML = html;
   return new CSS2DObject(el);
-}
-
-function radialTexture(): THREE.Texture {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.12, 'rgba(255,255,255,0.8)');
-  g.addColorStop(0.3, 'rgba(255,255,255,0.25)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  return new THREE.CanvasTexture(canvas);
 }

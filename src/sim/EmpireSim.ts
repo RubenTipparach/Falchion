@@ -21,6 +21,8 @@ import { minedBy, nearestMine, stockFor } from '../core/fleet/AutoMine';
 import { fieldLeft, fieldsOf, homeBelt, yearsToFull, type AsteroidField } from '../core/galaxy/Asteroids';
 import { applyEffects, EMPTY_WORLD, type SharedEffect, type SharedWorld } from '../core/world/SharedWorld';
 import { actionsFor, allied, applyDiplomacy, atWar, haveMet, newsOf, pairKey, relationOf, type DiplomaticAction, type Relation } from '../core/diplomacy/Diplomacy';
+import { BIOMES, settleable } from '../content/biomes';
+import { cityWorldIn } from '../core/npc/CityWorlds';
 import { DISCOVERY_RANGE, gridNpcsNear, HOME_TERRITORY, initialNpcState, nearNpc, npcById, spawnNpcs, territoryOf, worldDefense, type NpcDef } from '../core/npc/NpcCatalog';
 import { stepNpcs, type RaidTargets } from '../core/npc/NpcSim';
 import type { NpcRaid, NpcState } from '../core/npc/types';
@@ -28,7 +30,7 @@ import { marketFactor, STANDING, standingOf, tierOf } from '../core/npc/Reputati
 import { due, enqueue, Job } from '../core/construction/Construction';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
-import { planetsOf, Planet } from '../core/galaxy/Planets';
+import { planetsOf, Planet, withBiome } from '../core/galaxy/Planets';
 import { Hex, hexDistance, hexEquals, hexToWorld, Point2, worldToHex } from '../core/hex/Hex';
 import { hashSeed } from '../core/rng/Rng';
 import type { TechTree } from '../core/research/TechTree';
@@ -235,7 +237,20 @@ export class EmpireSim {
     return normalizeDesign({ ...d, style, blend, traits });
   };
 
-  planets = (star: StarSystem): Planet[] => planetsOf(star, this.deps.galaxy.params.seed);
+  private readonly cityWorlds = new Map<string, string | null>();
+
+  /**
+   * A system's planets as this empire sees them: its colonies keep the type they were settled as
+   * (planets refined by a later change stay what they were), and an advanced civilisation's
+   * capital is a city world.
+   */
+  planets = (star: StarSystem): Planet[] => {
+    const raw = planetsOf(star, this.deps.galaxy.params.seed);
+    if (!this.cityWorlds.has(star.id)) this.cityWorlds.set(star.id, cityWorldIn(this.deps.galaxy, star, raw));
+    const city = this.cityWorlds.get(star.id);
+    const colonies = this.state.economy.colonies;
+    return raw.map((p) => withBiome(p, colonies.find((c) => c.planetId === p.id)?.biome ?? (p.id === city ? 'ecumenopolis' : undefined)));
+  };
 
   describe = (star: StarSystem): StarDetails => {
     const dist = hexDistance(this.deps.world.home.hex, star.hex);
@@ -818,6 +833,7 @@ export class EmpireSim {
     const star = this.starOfPlanet(planet);
     if (!star || this.colonyAt(planet.id)) return;
     if (!s.explored[planet.id]) return this.dispatch(`Survey ${planet.name} before settling it`, 'bad');
+    if (!settleable(planet.biome)) return this.dispatch(`${planet.name} cannot be settled: ${BIOMES.find((b) => b.id === planet.biome)?.settle === 'conquest' ? 'it can only be taken' : 'nothing can live on it'}`, 'bad');
     const g = this.groupsAt(star).find((x) => countOf(x.ships, 'colony-ark') > 0);
     if (!g) return this.dispatch(`Settling ${planet.name} needs a Colony Ark on station in ${star.name}`, 'bad');
     this.adjustGroup(g.id, [{ classId: 'colony-ark', count: -1 }]);

@@ -1,5 +1,5 @@
 import { FOOD_PER_POP, growWorld, populationOf } from './Population';
-import { BIOME_YIELDS, CAPITAL_YIELDS, RESOURCES, Resource } from '../../content/resources';
+import { BIOME_SCIENCE, BIOME_YIELDS, CAPITAL_YIELDS, RESOURCES, Resource } from '../../content/resources';
 import type { BuildingDef } from '../../content/buildings';
 import type { ShipClassDef } from '../../content/shipClasses';
 import type { Effects, FactionId, GovernmentDef, PolicyDef } from '../../content/society';
@@ -179,7 +179,7 @@ export function colonyYield(c: Colony, t: EconomyTables): { income: Partial<Reco
   const biome = BIOME_YIELDS[c.biome] ?? {};
   for (const [r, n] of Object.entries(biome)) add(r as Resource, n!);
   if (c.capital) for (const [r, n] of Object.entries(CAPITAL_YIELDS)) add(r as Resource, n!);
-  let science = 0;
+  let science = BIOME_SCIENCE[c.biome] ?? 0;
   for (const id of c.buildings ?? []) {
     const b = t.buildings?.find((x) => x.id === id);
     if (!b) continue;

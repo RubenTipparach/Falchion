@@ -17,6 +17,7 @@ import { clear, fmt, h } from '../dom';
 import { collectWithFx } from '../collectFx';
 import { icon, IconName } from '../icons';
 import { thumb } from '../thumbs';
+import { settleable } from '../../content/biomes';
 
 
 
@@ -89,7 +90,7 @@ export class ExplorePanel extends Drawer {
           h('p', {}, result.narrative),
           result.success ? h('p', { class: 'green' }, 'Success!') : h('p', { class: 'red' }, `Failure — ${result.cost?.description} (−${result.cost?.fleetPower} fleet power)`)));
       if (result.crate) card.append(this.crateView(p.id, result.crate.tier, result.crate.cards));
-      if (!colony && p.biome !== 'gas') {
+      if (!colony && settleable(p.biome)) {
         card.append(h('div', { class: 'row' }, h('button', { class: 'btn', disabled: !ark, title: ark ? 'Uses one Colony Ark' : 'Needs a Colony Ark on station here', onclick: () => this.actions.settle(p) }, icon('build'), ark ? ' Settle colony' : ' Settle (needs a Colony Ark here)')));
       }
     }

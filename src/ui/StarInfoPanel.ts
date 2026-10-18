@@ -1,10 +1,10 @@
 import type { GameState } from '../app/GameState';
 import type { Store } from '../app/Store';
 import type { StarSystem } from '../core/galaxy/GalaxyModel';
-import { SPECTRAL_COLORS } from '../core/galaxy/GalaxyModel';
+import { kindOf, SPECTRAL_COLORS } from '../core/galaxy/GalaxyModel';
 import type { Planet } from '../core/galaxy/Planets';
-import { BIOMES } from '../content/biomes';
-import { BIOME_YIELDS, RESOURCES } from '../content/resources';
+import { BIOMES, CHOIR_BROADCASTS, settleable } from '../content/biomes';
+import { BIOME_SCIENCE, BIOME_YIELDS, RESOURCES } from '../content/resources';
 import { hasWarships } from '../content/logistics';
 import type { FleetGroup, FleetInfo, GameActions, GameQueries } from './GameActions';
 import type { FleetView } from '../render/map/FleetLayer';
@@ -21,6 +21,8 @@ import { clear, fmt, h, touchFirst } from './dom';
 import { icon, resourceIcon } from './icons';
 import { FREIGHTER } from '../core/economy/Trade';
 import { populationOf } from '../core/economy/Population';
+import { describeStar, STAR_KINDS } from '../content/stars';
+import { broadcastOf } from '../core/galaxy/Planets';
 
 const minesOf = (classId: string) => SHIP_CLASSES.find((c) => c.id === classId)?.mines;
 
@@ -88,9 +90,9 @@ export class StarInfoPanel {
     const tender = !friendly && here.some((g) => countOf(g.ships, 'construction-tender') > 0);
     this.el.append(
       h('header', {},
-        h('span', { class: 'star-dot', style: `background:${SPECTRAL_COLORS[star.spectral]}` }),
+        h('span', { class: 'star-dot', style: `background:${STAR_KINDS[kindOf(star)].color ?? SPECTRAL_COLORS[star.spectral]}` }),
         h('div', {}, h('span', { class: 'eyebrow' }, isHome ? 'Home system' : 'Star system'), h('h3', {}, star.name),
-          h('p', { class: 'muted' }, `Class ${star.spectral} · ${star.planetCount} planets${d.owner ? ` · ${d.owner}` : ''}`)),
+          h('p', { class: 'muted', title: STAR_KINDS[kindOf(star)].blurb }, `${describeStar(star)} · ${star.planetCount} planets${d.owner ? ` · ${d.owner}` : ''}`)),
         this.shareButton(star, null),
         h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => this.actions.select(null) }, icon('close'))),
       h('dl', {},
@@ -151,6 +153,8 @@ export class StarInfoPanel {
     const biome = BIOMES.find((b) => b.id === p.biome);
     const done = s.explored[p.id];
     const yields = Object.entries(BIOME_YIELDS[p.biome] ?? {});
+    const science = BIOME_SCIENCE[p.biome] ?? 0;
+    const canSettle = settleable(p.biome);
     const crateWaiting = !!done?.crate && !s.openedCrates.includes(p.id);
     const colony = this.q.colonyAt(p.id);
     const here = this.q.groupsAt(star);
@@ -167,8 +171,12 @@ export class StarInfoPanel {
         // Closing the card keeps the view: the camera stays on the planet (or its surface).
         h('button', { class: 'icon-btn', 'aria-label': 'Close the planet card', title: 'Close (the view stays on the planet)', onclick: () => this.closePlanet(p) }, icon('close'))),
       portrait,
+      biome ? h('p', { class: 'small muted planet-blurb' }, biome.blurb) : '',
+      p.biome === 'choir' ? h('blockquote', { class: 'choir-broadcast', title: 'The machines repeat it, over and over' },
+        h('span', { class: 'eyebrow' }, 'Broadcast'), h('p', {}, `“${broadcastOf(p, CHOIR_BROADCASTS)}”`),
+        h('small', { class: 'muted' }, 'It does not quite match your instructions.')) : '',
       h('dl', {},
-        !colony ? h('dt', {}, 'If colonised') : '', !colony ? h('dd', {}, yields.length ? yields.map(([r, n]) => `+${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`).join('  ') + ' / yr' : '—') : '',
+        !colony ? h('dt', {}, 'If colonised') : '', !colony ? h('dd', {}, !canSettle ? (biome?.settle === 'conquest' ? 'Only by conquest' : 'Cannot be settled') : yields.length || science ? [...yields.map(([r, n]) => `${n! > 0 ? '+' : ''}${n} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`), ...(science ? [`+${science} SCI`] : [])].join('  ') + ' / yr' : '—') : '',
         h('dt', {}, 'Survey'), h('dd', {}, colony ? 'Settled' : done ? `${done.kind} · ${done.success ? 'success' : 'failed'}` : 'Unexplored'),
         ...(colony ? (() => {
           const pop = populationOf(colony);
@@ -184,7 +192,7 @@ export class StarInfoPanel {
       h('div', { class: 'actions' },
         !done && !colony ? h('button', { class: 'btn primary', disabled: !canExplore, onclick: () => this.actions.explore(p) }, icon('explore'), ` Explore · ${cost} supply`) : '',
         cache || crateWaiting ? h('button', { class: 'btn primary collect', title: 'Gather what this world holds', onclick: () => collectWithFx(portrait, () => this.actions.collectPlanet(p)) }, icon('crate'), ' Collect') : '',
-        done && !colony && p.biome !== 'gas' ? h('button', { class: 'btn', disabled: !ark, title: ark ? 'Uses one Colony Ark' : 'Needs a Colony Ark on station here', onclick: () => this.actions.settle(p) }, icon('build'), ' Settle') : '',
+        done && !colony && canSettle ? h('button', { class: 'btn', disabled: !ark, title: ark ? 'Uses one Colony Ark' : 'Needs a Colony Ark on station here', onclick: () => this.actions.settle(p) }, icon('build'), ' Settle') : '',
         p.biome !== 'gas' ? h('button', { class: 'btn land', title: colony ? `Descend to ${colony.name.replace(/ \(capital\)$/, '')}` : 'Descend to the surface', onclick: () => this.actions.land(star, p) }, icon('land'), ' Land') : '',
         h('button', { class: 'btn', onclick: () => this.actions.focusPlanet(star, null) }, 'Back to system')),
     );

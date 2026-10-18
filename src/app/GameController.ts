@@ -1,3 +1,4 @@
+import { BIOMES } from '../content/biomes';
 import * as THREE from 'three';
 import { specOf } from '../content/logistics';
 import { arrivalTurn, hexAt, planMovement } from '../core/fleet/Fleet';
@@ -656,7 +657,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
       this.view.system.setHover(planet?.id ?? null);
       this.view.map.canvas.style.cursor = planet ? 'pointer' : '';
       if (planet) {
-        this.view.hud.setHover(`${planet.name}  ·  ${planet.biome}  ·  size ${planet.size}  ·  click to focus`);
+        this.view.hud.setHover(`${planet.name}  ·  ${BIOMES.find((b) => b.id === planet.biome)?.name ?? planet.biome}  ·  size ${planet.size}  ·  click to focus`);
         return;
       }
     } else this.view.map.canvas.style.cursor = '';

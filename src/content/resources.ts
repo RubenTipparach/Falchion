@@ -48,4 +48,20 @@ export const BIOME_YIELDS: Readonly<Record<string, Partial<Record<Resource, numb
   toxic: { gases: 4, crystals: 1 },
   barren: { metals: 6, crystals: 1 },
   gas: { gases: 6 },
+  // Change worlds-and-stars: refined types (and city worlds, taken from advanced civilisations).
+  hazy: { gases: 6, crystals: 1 },
+  eyeball: { credits: 6, food: 3, gases: 2, goods: 1 },
+  rust: { metals: 4, crystals: 1, credits: 2 },
+  swamp: { food: 3, gases: 2, goods: 1, faith: 1 },
+  storm: { gases: 4, credits: 3 },
+  choir: { crystals: 2, faith: 2, influence: -1 },
+  ecumenopolis: { credits: 30, goods: 6, influence: 3, food: -6 },
+  magma: { metals: 6, crystals: 3 },
+  acid: { gases: 3, crystals: 3 },
+  aurora: { credits: 4, faith: 2, gases: 2 },
+  bones: { goods: 3, faith: 2, metals: 1 },
+  deadtech: { metals: 5, crystals: 2 },
 };
+
+/** Science shards a year from a colony's world itself (machines that still remember something). */
+export const BIOME_SCIENCE: Readonly<Record<string, number>> = { choir: 3, deadtech: 2, ecumenopolis: 4 };

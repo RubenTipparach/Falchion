@@ -1,4 +1,4 @@
-import type { PlanetLook, SurfaceKind } from '../../content/planetLooks';
+import type { PlanetLook, PlanetPattern, SurfaceKind } from '../../content/planetLooks';
 import { Rng } from '../rng/Rng';
 import { fbmN, ridged4, smoothstep } from './Noise';
 
@@ -31,6 +31,13 @@ export interface SurfaceLook {
   readonly craters: boolean;
   /** Snow on high ground (temperate worlds with ice caps). */
   readonly snow: boolean;
+  // Optional features, passed through from the biome look (PlanetLook; no rolls of their own).
+  readonly locked?: number;
+  readonly aurora?: string;
+  readonly lightning?: number;
+  readonly seaGlow?: string;
+  readonly pattern?: PlanetPattern;
+  readonly haze?: number;
 }
 
 /**
@@ -49,8 +56,10 @@ export function surfaceLookOf(look: PlanetLook, seed: number): SurfaceLook {
   return {
     kind: look.kind, palette, seed: off, detail, sea, ice, clouds,
     cloudColor: look.cloudColor, atmosphere: look.atmosphere, atmosphereStrength: look.atmosphereStrength,
-    glow, cityGlow: look.kind === 'lava' ? '#ffd27a' : glow,
+    // A pattern's glow is its own lights (dying machines, a broadcast lattice), not a colony's.
+    glow, cityGlow: look.kind === 'lava' || look.pattern === 'machine' || look.pattern === 'circuit' ? '#ffd27a' : glow,
     dry: look.sea < -1, craters: !!look.craters, snow: look.sea >= -1 && look.ice > 0.3 && look.ice < 1,
+    locked: look.locked, aurora: look.aurora, lightning: look.lightning, seaGlow: look.seaGlow, pattern: look.pattern, haze: look.haze,
   };
 }
 

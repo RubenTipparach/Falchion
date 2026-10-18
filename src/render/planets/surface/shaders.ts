@@ -175,6 +175,9 @@ export const TERRAIN_FRAG = /* glsl */ `
 uniform vec3 uC0, uC1, uC2, uC3, uAtmo, uGlow, uCityGlow, uSun, uCam;
 uniform float uAtmoStrength, uIce, uSnow, uLava, uTime, uFine, uFar, uClose, uFade;
 uniform sampler2D uLightMap;
+#ifdef SEA_GLOW
+uniform vec3 uSeaGlow;
+#endif
 varying vec3 vDir; varying vec3 vN; varying vec3 vW; varying float vH;
 ${NOISE_GLSL}
 ${TERRAIN_GLSL}
@@ -219,6 +222,11 @@ void main() {
     col = mix(uC0, uC1, smoothstep(uSea - 0.45, uSea, h));
     col = mix(col, uC1 * 1.25 + vec3(0.0, 0.06, 0.05), smoothstep(uSea - 0.05, uSea, h) * 0.6);
     spec = 1.0;
+#ifdef SEA_GLOW
+    // Glowing seas (acid, lava), as from orbit (PlanetMaterial).
+    em += uSeaGlow * (0.55 + 0.6 * smoothstep(uSea - 0.4, uSea, h)) * (0.75 + 0.15 * coarse + 0.1 * fine);
+    col *= 0.6;
+#endif
   } else {
     float e = uDry > 0.5 ? smoothstep(-0.6, 0.7, h) : smoothstep(uSea, uSea + 0.7, h);
     col = mix(uC2, uC3, clamp(e + fine * 0.06, 0.0, 1.0));

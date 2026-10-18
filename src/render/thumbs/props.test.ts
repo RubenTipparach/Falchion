@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
+import { BIOMES } from '../../content/biomes';
 import { BUILDINGS } from '../../content/buildings';
 import { ENCOUNTER_KINDS, LOOT_PARTS } from '../../content/encounters';
 import { RESOURCES, type Resource } from '../../content/resources';
@@ -20,7 +21,7 @@ const byId = new Map(SHIP_CLASSES.map((c) => [c.id, c]));
 const ctx: ThumbContext = { factory, design: (id) => classDesign(DEFAULT_DESIGN, byId.get(id)!) };
 
 const ALL: [ThumbKind, readonly { id: string }[]][] = [
-  ['resource', RESOURCES], ['event', ENCOUNTER_KINDS], ['building', [...BUILDINGS, { id: 'capitol' }]], ['ship', SHIP_CLASSES], ['research', TECH_NODES],
+  ['resource', RESOURCES], ['event', ENCOUNTER_KINDS], ['planet', BIOMES], ['building', [...BUILDINGS, { id: 'capitol' }]], ['ship', SHIP_CLASSES], ['research', TECH_NODES],
 ];
 
 describe('thumbnails', () => {

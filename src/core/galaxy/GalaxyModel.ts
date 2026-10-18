@@ -24,12 +24,23 @@ export const DEFAULT_GALAXY: GalaxyParams = {
 
 export type SpectralClass = 'O' | 'B' | 'A' | 'F' | 'G' | 'K' | 'M';
 
+/**
+ * What a system's primary is (change worlds-and-stars). Main-sequence stars are most systems;
+ * the rest follow the Milky Way's makeup. `smbh` is the one supermassive black hole at the centre.
+ */
+export type StarKind = 'main' | 'giant' | 'white-dwarf' | 'brown-dwarf' | 'neutron' | 'pulsar' | 'black-hole' | 'smbh';
+
 export interface StarSystem {
   readonly id: string;
   readonly hex: Hex;
   readonly name: string;
+  /** Main-sequence class (for other kinds, the class it is drawn and named near). */
   readonly spectral: SpectralClass;
   readonly planetCount: number;
+  /** Missing on stars from before change worlds-and-stars (read with kindOf). */
+  readonly kind?: StarKind;
+  /** Companion stars of a binary or triple system, by class. */
+  readonly companions?: readonly SpectralClass[];
   /** World position; y (elevation) is always 0 — the galaxy is a flat plane. */
   readonly position: { readonly x: number; readonly y: 0; readonly z: number };
 }
@@ -38,9 +49,42 @@ export const SPECTRAL_COLORS: Record<SpectralClass, string> = {
   O: '#9bb0ff', B: '#aabfff', A: '#cad7ff', F: '#f8f7ff', G: '#fff4ea', K: '#ffd2a1', M: '#ffad6b',
 };
 
-const SPECTRAL_WEIGHTS: ReadonlyArray<readonly [SpectralClass, number]> = [
-  ['O', 0.5], ['B', 2], ['A', 5], ['F', 9], ['G', 14], ['K', 24], ['M', 45],
-];
+/**
+ * Main-sequence stars by number in the solar neighbourhood (percent): M dwarfs are three quarters
+ * of all stars, O stars vanishingly rare (raised a little so a few exist). O and B stars are young
+ * and live in the spiral arms: their weight grows with the arm (spectralWeights).
+ */
+export const SPECTRAL_SHARE: Readonly<Record<SpectralClass, number>> = {
+  O: 0.0006, B: 0.13, A: 0.6, F: 3, G: 7.6, K: 12.1, M: 76.5,
+};
+
+/** Class weights at a place: `arm` 0..1 is how deep in a spiral arm it is. */
+function spectralWeights(arm: number): ReadonlyArray<readonly [SpectralClass, number]> {
+  const young = 1 + 3 * arm;
+  return (['O', 'B', 'A', 'F', 'G', 'K', 'M'] as const).map((c) => [c, SPECTRAL_SHARE[c] * (c === 'O' || c === 'B' ? young : 1)] as const);
+}
+
+/**
+ * Chance a star has at least one companion, by class: about a quarter of M dwarfs, half of Sun-like
+ * stars, nearly all O stars. A fifth of multiples are triples.
+ */
+export const MULTIPLICITY: Readonly<Record<SpectralClass, number>> = {
+  O: 0.9, B: 0.8, A: 0.65, F: 0.55, G: 0.5, K: 0.4, M: 0.26,
+};
+
+/**
+ * Shares of the other kinds. Neutron stars (about 1% of stars) and black holes (0.1%) only take
+ * systems without planets, so their share among those is ten times higher. White dwarfs are about
+ * 8% of stars locally; brown dwarfs are common but faint; giants are old and gather in the bulge.
+ */
+export const REMNANT_SHARE = { neutron: 0.1, pulsarOfNeutron: 0.3, blackHole: 0.01 } as const;
+export const STAR_SHARE = { whiteDwarf: 0.08, brownDwarf: 0.12, giant: 0.01, giantInBulge: 0.04 } as const;
+
+/** The supermassive black hole at the galactic centre (like Sagittarius A*, about 4 million suns). */
+export const CENTRAL_BLACK_HOLE = { q: 0, r: 0, name: 'The Maw', solarMasses: 4_300_000 } as const;
+
+/** A star's kind (stars from before change worlds-and-stars are main-sequence). */
+export const kindOf = (s: Pick<StarSystem, 'kind'>): StarKind => s.kind ?? 'main';
 
 const SYLLABLES = ['ka', 'vor', 'eth', 'lin', 'zar', 'qu', 'oth', 'mir', 'tal', 'sen', 'dra', 'xi', 'nor', 'bel', 'ul', 'phe', 'ron', 'ash', 'cy', 'tor'];
 const SUFFIXES = ['', '', '', ' Prime', ' Major', ' Minor', ' II', ' IV'];
@@ -77,6 +121,9 @@ export class GalaxyModel {
   /** The star in a hex, or null. Same seed + hex always gives the same answer. */
   starAt(h: Hex): StarSystem | null {
     const p = hexToWorld(h);
+    if (h.q === CENTRAL_BLACK_HOLE.q && h.r === CENTRAL_BLACK_HOLE.r) {
+      return { id: `${h.q},${h.r}`, hex: h, name: CENTRAL_BLACK_HOLE.name, spectral: 'O', planetCount: 0, kind: 'smbh', companions: [], position: { x: p.x, y: 0, z: p.z } };
+    }
     const d = this.density(p.x, p.z);
     if (d <= 0) return null;
     if (hash01(this.params.seed, h.q, h.r) >= d * this.params.maxStarChance) return null;
@@ -117,14 +164,34 @@ export class GalaxyModel {
     let name = '';
     for (let i = 0; i < syll; i++) name += rng.pick(SYLLABLES);
     name = name[0].toUpperCase() + name.slice(1) + rng.pick(SUFFIXES);
+    // One draw each for class and planet count, in this order (planet rolls depend on the count).
+    const spectral = rng.weighted(spectralWeights(this.armAt(x, z)));
+    const planetCount = rng.int(0, 9);
+    // Kind and companions come from their own roll, so they never shift the rolls above.
+    const k = new Rng(hashSeed(this.params.seed, 'stellar', h.q, h.r));
+    const kind = starKind(k, planetCount, this.bulgeAt(x, z));
     return {
       id: `${h.q},${h.r}`,
       hex: h,
       name,
-      spectral: rng.weighted(SPECTRAL_WEIGHTS),
-      planetCount: rng.int(0, 9),
+      spectral: kind === 'giant' ? (k.chance(0.7) ? 'K' : 'M') : spectral,
+      planetCount,
+      kind,
+      companions: companionsOf(k, kind, spectral),
       position: { x, y: 0, z },
     };
+  }
+
+  /** How deep in a spiral arm a place is, 0..1 (young, hot stars gather there). */
+  armAt(x: number, z: number): number {
+    const r = Math.hypot(x, z);
+    const phase = this.params.arms * (Math.atan2(z, x) - Math.log(Math.max(r, 1) / 1_500) / Math.tan(this.params.pitch));
+    return (0.5 + 0.5 * Math.cos(phase)) ** ARM_POWER * smoothstep(this.params.bulgeRadius * 0.8, this.params.bulgeRadius * 2, r);
+  }
+
+  /** How deep in the old central bulge a place is, 0..1 (giants gather there). */
+  bulgeAt(x: number, z: number): number {
+    return Math.exp(-((Math.hypot(x, z) / this.params.bulgeRadius) ** 2));
   }
 
   /** Smooth 2D value noise in [0, 1]. */
@@ -137,6 +204,33 @@ export class GalaxyModel {
     const c = hash01(s, xi, yi + 1), d = hash01(s, xi + 1, yi + 1);
     return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
   }
+}
+
+/** A system's kind: remnants only where there are no planets; dwarfs and giants anywhere. */
+function starKind(rng: Rng, planetCount: number, bulge: number): StarKind {
+  const r = rng.next();
+  if (planetCount === 0) {
+    if (r < REMNANT_SHARE.blackHole) return 'black-hole';
+    if (r < REMNANT_SHARE.blackHole + REMNANT_SHARE.neutron) return rng.chance(REMNANT_SHARE.pulsarOfNeutron) ? 'pulsar' : 'neutron';
+  }
+  const giant = STAR_SHARE.giant + (STAR_SHARE.giantInBulge - STAR_SHARE.giant) * bulge;
+  const t = rng.next();
+  if (t < giant) return 'giant';
+  if (t < giant + STAR_SHARE.whiteDwarf) return 'white-dwarf';
+  if (t < giant + STAR_SHARE.whiteDwarf + STAR_SHARE.brownDwarf) return 'brown-dwarf';
+  return 'main';
+}
+
+const CLASSES: readonly SpectralClass[] = ['O', 'B', 'A', 'F', 'G', 'K', 'M'];
+
+/** Companions: lighter stars than the primary, picked by how common each lighter class is. */
+function companionsOf(rng: Rng, kind: StarKind, spectral: SpectralClass): SpectralClass[] {
+  if (kind === 'neutron' || kind === 'pulsar' || kind === 'black-hole' || kind === 'smbh') return [];
+  const p = kind === 'brown-dwarf' ? 0.2 : kind === 'white-dwarf' ? 0.25 : MULTIPLICITY[spectral];
+  if (!rng.chance(p)) return [];
+  const lighter = CLASSES.slice(CLASSES.indexOf(kind === 'main' ? spectral : 'K')).map((c) => [c, SPECTRAL_SHARE[c]] as const);
+  const n = rng.chance(0.2) ? 2 : 1;
+  return Array.from({ length: n }, () => rng.weighted(lighter));
 }
 
 /**

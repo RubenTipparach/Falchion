@@ -1,3 +1,4 @@
+import { BIOMES } from '../../content/biomes';
 import { BUILDINGS } from '../../content/buildings';
 import { ENCOUNTER_KINDS } from '../../content/encounters';
 import { RESOURCES } from '../../content/resources';
@@ -30,6 +31,7 @@ export function contactSheet(root: HTMLElement): void {
     ['building', 'Buildings', [...BUILDINGS, { id: 'capitol', name: 'Capitol' }]],
     ['ship', 'Ships', SHIP_CLASSES],
     ['research', 'Research', TECH_NODES.filter((n) => !domains || domains.includes(n.domain))],
+    ['planet', 'Planets', BIOMES],
   ];
   for (const [kind, title, items] of rows) {
     if (only && !only.includes(kind)) continue;

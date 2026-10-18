@@ -1,3 +1,4 @@
+import { settleable as canSettle } from '../content/biomes';
 import { CAPITAL_START_POP } from '../core/economy/Population';
 import { specOf } from '../content/logistics';
 import type { Squadron } from '../core/combat/Combat';
@@ -45,9 +46,10 @@ export function newEmpireState({ galaxy, tree, world, playerName, t0 }: NewEmpir
   const colonyOf = (p: Planet, buildings: string[], capital = false): Colony =>
     ({ name: capital ? `${p.name} (capital)` : p.name, biome: p.biome, planetId: p.id, starId: p.starId, size: p.size, capital, buildings, pop: capital ? CAPITAL_START_POP : 1 });
   // Capital on the most habitable world; gas giants cannot be settled.
-  const HABITABLE = ['terran', 'ocean', 'jungle', 'desert', 'ice', 'barren', 'volcanic', 'toxic'];
-  const settleable = homePlanets.filter((p) => p.biome !== 'gas')
-    .sort((a, b) => HABITABLE.indexOf(a.biome) - HABITABLE.indexOf(b.biome) || b.size - a.size);
+  const HABITABLE = ['terran', 'ocean', 'jungle', 'swamp', 'eyeball', 'aurora', 'desert', 'rust', 'storm', 'ice', 'bones', 'barren', 'hazy', 'volcanic', 'toxic', 'acid', 'deadtech', 'choir'];
+  const rank = (b: string) => (HABITABLE.includes(b) ? HABITABLE.indexOf(b) : HABITABLE.length);
+  const settleable = homePlanets.filter((p) => canSettle(p.biome))
+    .sort((a, b) => rank(a.biome) - rank(b.biome) || b.size - a.size);
   const colonies: Colony[] = [
     ...settleable.slice(0, 1).map((p) => colonyOf(p, ['shipyard', 'farm', 'trade-hub'], true)),
     ...settleable.slice(1, 3).map((p) => colonyOf(p, ['mine'])),

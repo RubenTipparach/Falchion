@@ -14,7 +14,7 @@ import { SHIP_ART } from './ships';
 import { DOMAIN_PROPS, EVENT_PROPS, PART_PROPS, RESOURCE_PROPS, STAT_PROPS } from './props';
 import { mat, prism, Prop } from './propKit';
 
-export type ThumbKind = 'ship' | 'building' | 'resource' | 'event' | 'research' | 'planet';
+export type ThumbKind = 'ship' | 'building' | 'resource' | 'event' | 'research' | 'planet' | 'hull';
 
 /** What a thumbnail shows: a cache key (changes when the picture would) and how to build it. */
 export interface ThumbSubject {
@@ -48,9 +48,27 @@ export const THUMB_SUBJECTS: Readonly<Record<ThumbKind, SubjectFn>> = {
     return b ? { key: `event:${id}`, build: b } : null;
   },
   research: (id, ctx) => researchSubject(id, ctx),
+  // A generated hull (`<style>~<variant>`, see HULL_VARIANTS): the procedural ship of that style, no class art.
+  hull: (id, ctx) => {
+    const [style, v] = id.split('~');
+    const variant = HULL_VARIANTS[Number(v)];
+    return variant ? shipSubject(`hull:${id}`, normalizeDesign({ ...ctx.design('lancer'), ...variant, style, blend: [], traits: [] }), ctx) : null;
+  },
   // A planet type (biome id): a world of that type in the system view's shader.
   planet: (id) => (PLANET_LOOKS[id] ? { key: `planet:${id}`, build: () => framedPlanet(planet(id, `planet:${id}`)) } : null),
 };
+
+/** Designs the hull sheet shows for each style: small to big, few to many engines and guns. */
+export const HULL_VARIANTS: ReadonlyArray<Pick<ShipDesign, 'seed' | 'length' | 'bulk' | 'engines' | 'weapons'>> = [
+  { seed: 11, length: 0.7, bulk: 0.7, engines: 1, weapons: 0 },
+  { seed: 23, length: 0.9, bulk: 0.9, engines: 2, weapons: 1 },
+  { seed: 37, length: 1.1, bulk: 1, engines: 2, weapons: 2 },
+  { seed: 41, length: 1.3, bulk: 1.2, engines: 3, weapons: 3 },
+  { seed: 59, length: 1.5, bulk: 1, engines: 4, weapons: 4 },
+  { seed: 67, length: 1.7, bulk: 1.4, engines: 3, weapons: 6 },
+  { seed: 73, length: 1.9, bulk: 1.7, engines: 5, weapons: 5 },
+  { seed: 89, length: 2, bulk: 2, engines: 6, weapons: 8 },
+];
 
 /** A thumbnail subject, or null for an id the kind does not know. */
 export function thumbSubject(kind: ThumbKind, id: string, ctx: ThumbContext): ThumbSubject | null {

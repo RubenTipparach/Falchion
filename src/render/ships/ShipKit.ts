@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { makeOutward } from '../geometry/orientation';
 import { Rng, hashSeed } from '../../core/rng/Rng';
 import type { ShipDesign } from '../../core/ships/ShipDesign';
+import { applyHullTexture, hullTextureFor } from './hullTextures';
 
 export type PartType = 'hull' | 'engine' | 'weapon' | 'wing' | 'detail' | 'trait';
 
@@ -56,6 +57,9 @@ export class ShipKit {
       glow: this.own(new THREE.MeshBasicMaterial({ color: design.colors.accent, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })),
       gold: this.own(new THREE.MeshStandardMaterial({ color: '#d4af37', metalness: 0.9, roughness: 0.25 })),
     };
+    // Plating: the style's on the hull, machinery on the detail; their lights glow in the accent.
+    applyHullTexture(this.mat.hull, hullTextureFor(design.style), design.colors.accent);
+    applyHullTexture(this.mat.detail, 'machinery', design.colors.accent, 0.6);
   }
 
   own<M extends THREE.Material>(m: M): M {

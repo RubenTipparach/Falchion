@@ -19,6 +19,7 @@ import { upkeepOf } from '../content/logistics';
 import { Planet } from '../core/galaxy/Planets';
 import { PlanetThumbnails } from '../render/planets/PlanetThumbnails';
 import { createThumbs } from '../render/thumbs/Thumbnails';
+import { preloadHullTextures } from '../render/ships/hullTextures';
 import { setThumbs } from '../ui/thumbs';
 import { ResourceLedger } from '../ui/ResourceLedger';
 import { NebulaLayer } from '../render/map/NebulaLayer';
@@ -98,7 +99,8 @@ async function bootstrap(): Promise<void> {
   const { factory, styles, traits } = createDefaultShipFactory();
   const economyTables: EconomyTables = { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf };
 
-  const clock = await connectWorldClock();
+  // Hull plating textures load with the clock, before any ship or thumbnail is drawn.
+  const [clock] = await Promise.all([connectWorldClock(), preloadHullTextures()]);
   // A new empire (or the template a save is laid over): see newEmpireState.
   const fresh = newEmpireState({ galaxy, tree, world, playerName: identity.displayName, t0: clock.tick() });
   // A saved empire carries on where it left off; the missed years are caught up below.

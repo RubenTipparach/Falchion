@@ -16,7 +16,7 @@ import { exploreCost } from '../core/fleet/Logistics';
 import { countOf } from '../core/fleet/Presence';
 import { minedBy } from '../core/fleet/AutoMine';
 import { SHIP_CLASSES } from '../content/shipClasses';
-import { colonyView, crateLine, haulView, shipsText, storesView } from './widgets';
+import { colonistsView, colonyView, crateLine, haulView, shipsText, storesView } from './widgets';
 import { collectWithFx } from './collectFx';
 import { clear, fmt, h, touchFirst } from './dom';
 import { icon, resourceIcon } from './icons';
@@ -199,8 +199,9 @@ export class StarInfoPanel {
     const colony = this.q.colonyAt(p.id);
     const here = this.q.groupsAt(star);
     const cost = exploreCost(p);
-    const canExplore = here.some((g) => g.stores.supply >= cost);
-    const ark = here.some((g) => countOf(g.ships, 'colony-ark') > 0);
+    const canExplore = here.some((g) => !g.company && g.stores.supply >= cost);
+    // An ark that can settle now, or why none can (arks carry colonists, and are not used up).
+    const ark = this.q.arkAt(star);
     const cache = this.q.pendingCaches(star).find((c) => c.planet.id === p.id);
     const portrait = h('img', { class: 'planet-portrait', src: this.thumb(p), alt: `${p.name}, ${biome?.name}` });
     this.el.append(
@@ -232,7 +233,7 @@ export class StarInfoPanel {
       h('div', { class: 'actions' },
         !done && !colony ? h('button', { class: 'btn primary', disabled: !canExplore, onclick: () => this.actions.explore(p) }, icon('explore'), ` Explore · ${cost} supply`) : '',
         cache || crateWaiting ? h('button', { class: 'btn primary collect', title: 'Gather what this world holds', onclick: () => collectWithFx(portrait, () => this.actions.collectPlanet(p)) }, icon('crate'), ' Collect') : '',
-        done && !colony && canSettle ? h('button', { class: 'btn', disabled: !ark, title: ark ? 'Uses one Colony Ark' : 'Needs a Colony Ark on station here', onclick: () => this.actions.settle(p) }, icon('build'), ' Settle') : '',
+        done && !colony && canSettle ? h('button', { class: 'btn', disabled: typeof ark === 'string', title: typeof ark === 'string' ? ark : 'The ark lands its colonists and spends its supply; it goes back for more', onclick: () => this.actions.settle(p) }, icon('build'), ' Settle') : '',
         p.biome !== 'gas' ? h('button', { class: 'btn land', title: colony ? `Descend to ${colony.name.replace(/ \(capital\)$/, '')}` : 'Descend to the surface', onclick: () => this.actions.land(star, p) }, icon('land'), ' Land') : '',
         h('button', { class: 'btn', onclick: () => this.actions.focusPlanet(star, null) }, 'Back to system')),
     );
@@ -281,7 +282,8 @@ export class StarInfoPanel {
           h('button', { class: 'chip active', title: 'Stop the chase', onclick: () => this.actions.chase(group.id, null) }, `✓ Chasing ${this.q.fleetInfo(group.orders.chase)?.fleet.name.split(' · ')[0] ?? 'a fleet'} · stop`)) : '',
         h('p', { class: 'small' }, shipsText(group.ships)),
         storesView(group),
-        h('div', { class: 'row orders' },
+        colonistsView(group, () => this.actions.embark(group.id)),
+        group.company ? h('p', { class: 'notice company' }, `Run by ${group.company.name}: it works on its own and takes no orders.`) : h('div', { class: 'row orders' },
           this.orderChip(group, 'autoExplore', 'Auto-explore'),
           this.orderChip(group, 'autoReturn', 'Return to resupply'),
           minedBy(group.ships, minesOf).length ? this.orderChip(group, 'autoMine', 'Auto-mine') : '',
@@ -302,7 +304,7 @@ export class StarInfoPanel {
       h('div', { class: 'actions' },
         h('button', { class: 'btn', title: 'Centre the camera on this fleet', onclick: () => this.actions.focusFleet(fleet.id) }, icon('locate'), ' Centre'),
         h('button', { class: 'btn', title: 'Zoom in to the ship', onclick: () => this.actions.focusFleet(fleet.id, true) }, icon('focus'), ' Zoom'),
-        info.mine && !(info.at && info.at.id === this.store.state.home.id) ? h('button', { class: 'btn', onclick: () => this.actions.returnHome(fleet.id) }, icon('home'), ' Return home') : '',
+        info.mine && !group?.company && !(info.at && info.at.id === this.store.state.home.id) ? h('button', { class: 'btn', onclick: () => this.actions.returnHome(fleet.id) }, icon('home'), ' Return home') : '',
         info.mine ? h('button', { class: 'btn', onclick: () => this.actions.openPanel('fleets') }, icon('fleet'), ' Fleets') : ''),
     );
   }
@@ -320,7 +322,8 @@ export class StarInfoPanel {
     return h('div', { class: 'cargo' },
       h('p', { class: 'small' }, resourceIcon('goods', 14), ` ${fmt(g.cargo ?? 0)} / ${fmt(cap)} trade goods${loadedAt && g.cargo ? ` from ${loadedAt.name}` : ''}`),
       to && from ? h('p', { class: 'small green' }, `Trade run: ${from.name} → ${to.name}, repeating`) : '',
-      h('div', { class: 'row orders' },
+      // A company chooses its own runs.
+      g.company ? '' : h('div', { class: 'row orders' },
         to ? h('button', { class: 'chip active', onclick: () => this.actions.tradeRun(g.id, null) }, '✓ Trade run · stop') : null,
         !to && canLoad ? h('button', { class: 'chip', onclick: () => this.actions.loadGoods(g.id) }, 'Load goods') : null,
         !to && sale ? h('button', { class: 'chip', onclick: () => this.actions.sellGoods(g.id) }, `Sell here · ${fmt(sale)} cr`) : null,

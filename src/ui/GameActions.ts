@@ -11,7 +11,9 @@ import type { Colony } from '../core/economy/Economy';
 import type { Job } from '../core/construction/Construction';
 import type { FleetBattle, FleetOrders } from '../core/fleet/Presence';
 import type { Resource } from '../content/resources';
+import type { GovernorFocus } from '../content/governor';
 import type { Market } from '../core/economy/Trade';
+import type { ExchangeInfo, StockView } from '../sim/EmpireSim';
 import type { DiplomacyView, FieldReport } from '../sim/EmpireSim';
 import type { DiplomaticAction } from '../core/diplomacy/Diplomacy';
 
@@ -43,6 +45,9 @@ export interface FleetGroup {
   /** Trade goods aboard, and where they were loaded. */
   readonly cargo?: number;
   readonly cargoFrom?: string;
+  /** The company that runs it (its own fleet, not the state's), and colonists its arks carry. */
+  readonly company?: { readonly id: string; readonly name: string };
+  readonly colonists?: number;
 }
 
 /** What the fleet card shows about any fleet, yours or not. */
@@ -128,6 +133,16 @@ export interface GameQueries {
   saleValue(goods: number, from: StarSystem, market: Market): number;
   /** Storage caps for each resource. */
   caps(): Partial<Record<Resource, number>>;
+  /** The state's ark at a star that can settle now, or why none can (change commerce). */
+  arkAt(star: StarSystem): FleetGroup | string;
+  /** Exchanges of the empires you have met, and their prices (with your pressure there). */
+  exchanges(): ExchangeInfo[];
+  exchangePrice(exchangeId: string, r: Resource, side: 'buy' | 'sell'): number;
+  exchangeQuote(exchangeId: string, r: Resource, side: 'buy' | 'sell', amount: number): number;
+  /** Trade goods on an exchange against a freighter run to that empire. */
+  shippingQuote(exchangeId: string): { exchange: number; freighter: number; years: number; from: string; to: string } | null;
+  /** Every share you can trade. */
+  stocks(): StockView[];
 }
 
 /** A known NPC faction as the Relations tab shows it. */
@@ -235,7 +250,18 @@ export interface GameActions {
   selectClass(classId: string): void;
   setDesign(design: ShipDesign): void;
   /** Build a ship at a shipyard colony (default: the capital). */
-  buildShip(classId: string, yardPlanetId?: string): void;
+  /** `charter`: a freighter, mining ship or ark founds a company when launched (change commerce). */
+  buildShip(classId: string, yardPlanetId?: string, charter?: boolean): void;
+  /** Load colonists onto a fleet's empty arks from your colony there; returns how many boarded. */
+  embark(fleetId: string): number;
+  buyResource(exchangeId: string, r: Resource, amount: number): void;
+  sellResource(exchangeId: string, r: Resource, amount: number): void;
+  /** The tariff other players pay you: everyone's (null), or one player's. */
+  setTariff(rate: number, player: string | null): void;
+  buyShares(key: string, n: number): void;
+  /** The empire governor (change empire-governor). */
+  setGovernor(focus: GovernorFocus, build: boolean, research: boolean, reserve: number): void;
+  sellShares(key: string, n: number): void;
   toggleTrait(traitId: string): void;
   setGovernment(id: string): void;
   togglePolicy(id: string): void;

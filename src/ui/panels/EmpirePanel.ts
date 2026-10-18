@@ -15,19 +15,29 @@ import { Drawer } from '../Drawer';
 import type { FactionView, GameActions, GameQueries } from '../GameActions';
 import type { DiplomacyView } from '../../sim/EmpireSim';
 import { CONTACT_RANGE, type DiplomaticAction } from '../../core/diplomacy/Diplomacy';
-import { icon } from '../icons';
+import { icon, resourceIcon } from '../icons';
 import { BIOMES } from '../../content/biomes';
 import { slotsOf } from '../../content/buildings';
 import type { Planet } from '../../core/galaxy/Planets';
 import { clear, fmt, h } from '../dom';
 import { thumb } from '../thumbs';
+import { COMMERCE, COMPANY_KINDS, EXCHANGE_RESOURCES } from '../../content/commerce';
+import { NO_COMMERCE } from '../../core/economy/Commerce';
+import { DEFAULT_RESERVE, FOCI, type GovernorFocus } from '../../content/governor';
+import type { StockView } from '../../sim/EmpireSim';
+import { formatDuration } from '../../core/time/WorldTime';
+import { CLOCK } from '../../app/WorldClock';
 
-type Tab = 'overview' | 'colonies' | 'trade' | 'relations' | 'politics' | 'religion' | 'intel';
-const TABS: Array<[Tab, string]> = [['overview', 'Overview'], ['colonies', 'Colonies'], ['trade', 'Trade'], ['relations', 'Relations'], ['politics', 'Politics'], ['religion', 'Religion'], ['intel', 'Espionage']];
+type Tab = 'overview' | 'colonies' | 'trade' | 'market' | 'companies' | 'relations' | 'politics' | 'religion' | 'intel';
+const TABS: Array<[Tab, string]> = [['overview', 'Overview'], ['colonies', 'Colonies'], ['trade', 'Trade'], ['market', 'Market'], ['companies', 'Companies'], ['relations', 'Relations'], ['politics', 'Politics'], ['religion', 'Religion'], ['intel', 'Espionage']];
 
 /** Exploitation: stockpile, trade goods, government and factions, faith, spy networks. */
 export class EmpirePanel extends Drawer {
   private tab: Tab = 'overview';
+  /** The exchange the Market tab shows, and the amounts trades are made in. */
+  private exchange: string | null = null;
+  private amount = 100;
+  private shareAmount = 10;
   private readonly tabsEl = h('div', { class: 'seg' });
   private readonly content = h('div', { class: 'empire-content' });
   /** Flag, name and ruler, with Edit to reopen the founding screen. */
@@ -36,7 +46,7 @@ export class EmpirePanel extends Drawer {
   constructor(private readonly store: Store<GameState>, private readonly actions: GameActions, private readonly q: GameQueries, private readonly t: EconomyTables, private readonly thumb: (p: Planet) => string) {
     super('empire', 'Empire', 'Colonies, trade, politics, religion and espionage. Income arrives every year: one minute.');
     this.body.append(this.banner, this.tabsEl, this.content);
-    store.subscribe((s, prev) => { if (this.opened && (s.identity !== prev.identity || s.economy !== prev.economy || s.empire !== prev.empire || s.lastReport !== prev.lastReport || s.fleets !== prev.fleets || s.turn !== prev.turn || s.construction !== prev.construction)) this.render(); });
+    store.subscribe((s, prev) => { if (this.opened && (s.identity !== prev.identity || s.economy !== prev.economy || s.empire !== prev.empire || s.lastReport !== prev.lastReport || s.fleets !== prev.fleets || s.turn !== prev.turn || s.construction !== prev.construction || s.commerce !== prev.commerce || s.governor !== prev.governor)) this.render(); });
   }
 
   protected onOpen(): void {
@@ -52,7 +62,7 @@ export class EmpirePanel extends Drawer {
     this.tabsEl.replaceChildren(...TABS.map(([id, label]) => h('button', { class: `seg-btn ${this.tab === id ? 'active' : ''}`, onclick: () => { this.tab = id; this.render(); } }, label)));
     clear(this.content);
     const views: Record<Tab, () => HTMLElement[]> = {
-      overview: () => this.overview(), colonies: () => this.colonies(), trade: () => this.trade(), relations: () => this.relations(), politics: () => this.politics(), religion: () => this.religion(), intel: () => this.intel(),
+      overview: () => this.overview(), colonies: () => this.colonies(), trade: () => this.trade(), market: () => this.market(), companies: () => this.companies(), relations: () => this.relations(), politics: () => this.politics(), religion: () => this.religion(), intel: () => this.intel(),
     };
     this.content.append(...views[this.tab]());
   }
@@ -97,6 +107,7 @@ export class EmpirePanel extends Drawer {
     const approval = factionApproval(this.econ, this.t, s.empire.research);
     const caps = this.q.caps();
     return [
+      this.governorCard(),
       h('div', { class: 'stock-grid' }, ...RESOURCES.map((res) => h('div', { class: 'stock' },
         thumb('resource', res.id, 40),
         h('span', { class: 'stock-name' }, res.name),
@@ -131,12 +142,15 @@ export class EmpirePanel extends Drawer {
     const docked = dock?.ships.find((x) => x.classId === FREIGHTER)?.count ?? 0;
     const perHold = this.q.cargoCapacity([{ classId: FREIGHTER, count: 1 }]);
     const colonies = s.economy.colonies.map((c) => (c.starId ? this.q.starById(c.starId) : null)).filter((x): x is StarSystem => !!x);
-    const fleets = groups.filter((g) => g.id !== 'dock');
+    // Companies run their own freighters (Companies tab).
+    const fleets = groups.filter((g) => g.id !== 'dock' && !g.company);
+    const companyFreighters = groups.filter((g) => g.company).reduce((n, g) => n + (g.ships.find((x) => x.classId === FREIGHTER)?.count ?? 0), 0);
     return [
-      h('p', { class: 'muted' }, `Colonies make trade goods (${fmt(s.empire.materials.goods)} in store, +${made} a year; Manufactories make more). Bulk Freighters carry ${perHold} each to another world and sell them: the farther from where they were loaded, the better the price, and foreign markets pay more than your own colonies.${pct ? ` Your traders get +${pct}%.` : ''}`),
+      h('p', { class: 'muted' }, `Colonies make trade goods (${fmt(s.empire.materials.goods)} in store, +${made} a year; Manufactories make more). Bulk Freighters carry ${perHold} each to another world and sell them: the farther from where they were loaded, the better the price, and foreign markets pay more than your own colonies, less their tariff.${pct ? ` Your traders get +${pct}%.` : ''} To sell at once without a ship, use the Market tab; freighters chartered as a company trade on their own (Companies).`),
       h('section', { class: 'card' }, h('h4', {}, 'Freighters'),
         groups.length ? h('ul', { class: 'plain' },
           dock && docked ? h('li', {}, h('b', {}, `${docked} in the dock`), h('span', { class: 'muted' }, ' · pick a market below to start a trade run')) : null,
+          companyFreighters ? h('li', {}, h('b', {}, `${companyFreighters} run by trading companies`), h('span', { class: 'muted' }, ' · they choose their own routes (Companies tab)')) : null,
           ...fleets.map((g) => {
             const run = g.orders?.trade;
             const to = run && this.q.starById(run.to);
@@ -158,6 +172,138 @@ export class EmpirePanel extends Drawer {
             h('td', { class: 'num mono' }, from ? `${fmt(this.q.saleValue(perHold, from, m))} cr` : '—'),
             h('td', {}, from && by ? h('button', { class: 'chip', onclick: () => this.actions.tradeRun(by, star) }, running ? `Add freighters (${running} running)` : 'Start trade run') : h('span', { class: 'muted small' }, running ? `${running} running` : from ? 'No free freighters' : 'Needs another colony to load at')));
         }))),
+    ];
+  }
+
+  /**
+   * Exchanges (change commerce): buy and sell resources at once on the exchange of any empire you
+   * have met, against what freighters would get; and the tariffs other players pay you.
+   */
+  private market(): HTMLElement[] {
+    const s = this.store.state;
+    const exchanges = this.q.exchanges();
+    if (!exchanges.length) return [h('p', { class: 'muted' }, 'No exchanges yet: you can trade only on the exchanges of empires you have met. Your home\'s neighbours make contact within a year.'), this.tariffs()];
+    const ex = exchanges.find((x) => x.id === this.exchange) ?? exchanges[0];
+    this.exchange = ex.id;
+    const amount = this.amount;
+    const caps = this.q.caps();
+    const spread = Math.round(COMMERCE.spread * 100);
+    const ship = this.q.shippingQuote(ex.id);
+    return [
+      h('p', { class: 'muted' }, `Trade at once on the exchange of any empire you have met. Buying costs ${spread}% above the price and selling pays ${spread}% below it, and the owner takes its tariff both ways. Prices drift over the years, and your own trading moves them: a big sale lowers the price you get there, for a while.`),
+      h('div', { class: 'exchange-pick' }, ...exchanges.map((x) => h('button', { class: `chip ${x.id === ex.id ? 'active' : ''}`, onclick: () => { this.exchange = x.id; this.render(); } },
+        h('span', { class: 'doc-dot', style: `--doc:${x.color ?? '#7fd3e6'}` }), x.name, h('small', { class: 'muted' }, ` · ${x.tariff}% tariff`)))),
+      h('div', { class: 'row amount-pick' }, h('span', { class: 'small muted' }, 'Amount:'),
+        ...[10, 100, 500, 1000].map((n) => h('button', { class: `chip ${n === amount ? 'active' : ''}`, onclick: () => { this.amount = n; this.render(); } }, fmt(n)))),
+      h('div', { class: 'exchange' },
+        h('div', { class: 'ex-row ex-head' }, h('span', {}, 'Resource'), h('span', { class: 'num' }, 'Buy / sell each'), h('span', {}, '')),
+        ...EXCHANGE_RESOURCES.map((r) => {
+          const def = RESOURCES.find((x) => x.id === r)!;
+          const stock = s.empire.materials[r];
+          const room = caps[r] !== undefined ? Math.max(0, caps[r]! - stock) : Infinity;
+          const buyN = Math.min(amount, Math.floor(room)), sellN = Math.min(amount, Math.floor(stock));
+          const buy = buyN ? this.q.exchangeQuote(ex.id, r, 'buy', buyN) : 0, sell = sellN ? this.q.exchangeQuote(ex.id, r, 'sell', sellN) : 0;
+          return h('div', { class: 'ex-row' },
+            h('span', { class: 'ex-res' }, resourceIcon(r, 16), h('span', {}, h('b', {}, def.name), h('small', { class: 'muted' }, `${fmt(stock)}${caps[r] !== undefined ? ` of ${fmt(caps[r]!)}` : ''} in store`))),
+            h('span', { class: 'num mono ex-price' }, h('span', { class: 'red', title: 'Buy price, each' }, this.q.exchangePrice(ex.id, r, 'buy').toFixed(2)), h('span', { class: 'green', title: 'Sell price, each' }, this.q.exchangePrice(ex.id, r, 'sell').toFixed(2))),
+            h('span', { class: 'trade-btns' },
+              h('button', { class: 'chip', disabled: !buyN || buy > s.empire.materials.credits, title: buyN ? `${fmt(buyN)} ${def.name.toLowerCase()} for ${fmt(buy)} credits` : 'No room in store', onclick: () => this.actions.buyResource(ex.id, r, buyN) }, buyN ? `Buy ${fmt(buyN)} · ${fmt(buy)} cr` : 'Store full'),
+              h('button', { class: 'chip', disabled: !sellN, title: sellN ? `${fmt(sellN)} ${def.name.toLowerCase()} for ${fmt(sell)} credits` : 'None to sell', onclick: () => this.actions.sellResource(ex.id, r, sellN) }, sellN ? `Sell ${fmt(sellN)} · ${fmt(sell)} cr` : 'None to sell')));
+        })),
+      ship ? h('section', { class: 'card ship-vs' }, h('h4', {}, 'Shipping against the exchange: trade goods'),
+        h('div', { class: 'vs-row' }, h('span', {}, `${ex.name} exchange`), h('span', { class: 'vs-bar' }, h('i', { style: `width:${Math.min(100, (100 * ship.exchange) / Math.max(ship.freighter, ship.exchange))}%` })), h('b', { class: 'mono' }, `${ship.exchange.toFixed(2)} cr each, now`)),
+        h('div', { class: 'vs-row' }, h('span', {}, 'By freighter'), h('span', { class: 'vs-bar freighter' }, h('i', { style: `width:${Math.min(100, (100 * ship.freighter) / Math.max(ship.freighter, ship.exchange))}%` })), h('b', { class: 'mono' }, `${ship.freighter.toFixed(2)} cr each`)),
+        h('p', { class: 'small muted' }, `A freighter loads at ${ship.from} and sells at ${ship.to}: ${formatDuration(ship.years, CLOCK)} one way, ${ship.freighter > ship.exchange ? `${(ship.freighter / Math.max(0.01, ship.exchange)).toFixed(1)}× what the exchange pays` : 'no better than the exchange'}. The exchange pays now, with no ship.`))
+        : h('p', { class: 'small muted' }, `You know no world of ${ex.name} a freighter could sell at.`),
+      this.tariffs(),
+    ];
+  }
+
+  /**
+   * The empire governor (change empire-governor): a focus, and whether it builds in free slots and
+   * picks research when none is set. Companies (chartered ships) do the mining, trading and settling.
+   */
+  private governorCard(): HTMLElement {
+    const g = this.store.state.governor ?? { focus: 'balanced' as GovernorFocus, build: false, research: false, reserve: DEFAULT_RESERVE };
+    const set = (patch: Partial<typeof g>) => { const n = { ...g, ...patch }; this.actions.setGovernor(n.focus, n.build, n.research, n.reserve); };
+    const on = g.build || g.research;
+    const reserve = h('input', { type: 'range', min: 0, max: 5000, step: 100, value: g.reserve }) as HTMLInputElement;
+    const out = h('output', { class: 'mono' }, fmt(g.reserve));
+    reserve.addEventListener('input', () => { out.textContent = fmt(Number(reserve.value)); });
+    reserve.addEventListener('change', () => set({ reserve: Number(reserve.value) }));
+    return h('section', { class: `card governor ${on ? 'on' : ''}` },
+      h('div', { class: 'row-between' }, h('h4', {}, 'Governor'), h('span', { class: `pill ${on ? 'good' : ''}` }, on ? 'Running the empire' : 'Off')),
+      h('p', { class: 'small muted' }, 'Pick a focus and let the governor build and research for it. Freighters, miners and colony arks chartered as companies trade, mine and settle on their own.'),
+      h('div', { class: 'seg focus-pick' }, ...(Object.keys(FOCI) as GovernorFocus[]).map((f) => h('button', { class: `seg-btn ${g.focus === f ? 'active' : ''}`, title: FOCI[f].blurb, onclick: () => set({ focus: f }) }, FOCI[f].name))),
+      h('p', { class: 'small' }, FOCI[g.focus].blurb),
+      h('div', { class: 'row' },
+        h('button', { class: `chip ${g.build ? 'active' : ''}`, 'aria-pressed': String(g.build), title: 'Every year, start the best building for the focus on each colony with a free slot', onclick: () => set({ build: !g.build }) }, g.build ? '✓ Build in free slots' : 'Build in free slots'),
+        h('button', { class: `chip ${g.research ? 'active' : ''}`, 'aria-pressed': String(g.research), title: 'Pick the next research for the focus whenever none is set', onclick: () => set({ research: !g.research }) }, g.research ? '✓ Pick research' : 'Pick research')),
+      h('label', { class: 'slider reserve' }, h('span', {}, 'Keep in reserve'), reserve, out));
+  }
+
+  /** Your tariffs: what other players pay to trade on your exchange or sell goods at your worlds. */
+  private tariffs(): HTMLElement {
+    const c = this.store.state.commerce ?? NO_COMMERCE;
+    const slider = (value: number, set: (n: number) => void) => {
+      const input = h('input', { type: 'range', min: 0, max: COMMERCE.maxTariff, step: 1, value }) as HTMLInputElement;
+      const out = h('output', { class: 'mono' }, `${value}%`);
+      input.addEventListener('input', () => { out.textContent = `${input.value}%`; });
+      input.addEventListener('change', () => set(Number(input.value)));
+      return [input, out];
+    };
+    const players = this.q.diplomacyView();
+    return h('section', { class: 'card tariffs' }, h('h4', {}, 'Your tariffs'),
+      h('p', { class: 'small muted' }, 'Other players pay your tariff when they trade on your exchange or sell trade goods at your worlds; it reaches you the next year. A high tariff earns more from each trade, and makes your markets the last place they choose.'),
+      h('label', { class: 'slider' }, h('span', {}, 'Everyone'), ...slider(c.tariff, (n) => this.actions.setTariff(n, null))),
+      ...players.map((v) => h('label', { class: 'slider' }, h('span', {}, h('span', { class: 'doc-dot', style: `--doc:${v.empire.color ?? '#7fd3e6'}` }), v.empire.name), ...slider(c.tariffs?.[v.empire.id] ?? c.tariff, (n) => this.actions.setTariff(n, v.empire.id)))),
+      players.length ? '' : h('p', { class: 'small muted' }, 'Players you meet can be given tariffs of their own here.'));
+  }
+
+  /**
+   * Companies and the stock market (change commerce): the companies your civilian ships founded,
+   * and shares in yours, other players' and NPC corporations.
+   */
+  private companies(): HTMLElement[] {
+    const s = this.store.state;
+    const stocks = this.q.stocks();
+    const own = stocks.filter((x) => x.kind === 'own');
+    const market = stocks.filter((x) => x.kind !== 'own');
+    const n = this.shareAmount;
+    const credits = s.empire.materials.credits;
+    const fee = COMMERCE.shareFee;
+    const income = own.reduce((t, x) => t + x.dividend * x.held, 0) + market.reduce((t, x) => t + x.dividend * x.held, 0);
+    const worth = stocks.reduce((t, x) => t + x.price * x.held, 0);
+    const trade = (x: StockView) => {
+      const buyN = Math.min(n, x.float), sellN = Math.min(n, x.held);
+      const cost = Math.ceil(x.price * buyN * (1 + fee)), gain = Math.floor(x.price * sellN * (1 - fee));
+      return h('span', { class: 'trade-btns' },
+        h('button', { class: 'chip', disabled: !buyN || cost > credits, title: buyN ? `${buyN} shares for ${fmt(cost)} credits` : 'None for sale', onclick: () => this.actions.buyShares(x.key, buyN) }, buyN ? `Buy ${buyN} · ${fmt(cost)} cr` : 'None for sale'),
+        h('button', { class: 'chip', disabled: !sellN, title: sellN ? `${sellN} shares for ${fmt(gain)} credits` : 'You hold none', onclick: () => this.actions.sellShares(x.key, sellN) }, sellN ? `Sell ${sellN} · ${fmt(gain)} cr` : 'Sell'));
+    };
+    return [
+      h('p', { class: 'muted' }, `A freighter, mining ship or colony ark built with "Charter a company" founds a company that runs it on its own: traders buy goods from you and sell them on the best route they know, miners sell you their ore, and colony companies settle the best worlds you have surveyed nearby for a fee. Each year a company pays its upkeep and ${Math.round(COMMERCE.tax * 100)}% tax, pays out half of the rest as dividends and keeps the remainder; when its last ten years add up to a profit and it has the credits, it buys another ship, up to ${COMMERCE.maxShips}.`),
+      h('div', { class: 'row amount-pick' }, h('span', { class: 'small muted' }, 'Shares per trade:'),
+        ...[1, 10, 50, 100].map((k) => h('button', { class: `chip ${k === n ? 'active' : ''}`, onclick: () => { this.shareAmount = k; this.render(); } }, String(k)))),
+      h('p', { class: 'small muted' }, `Your shares are worth ${fmt(Math.round(worth))} credits and pay about ${fmt(Math.round(income))} a year in dividends. Each trade costs a ${Math.round(fee * 100)}% fee.`),
+      h('section', { class: 'card' }, h('h4', {}, 'Your companies'),
+        own.length ? h('div', { class: 'company-list' }, ...own.map((x) => h('div', { class: 'company' },
+          h('div', { class: 'row-between' },
+            h('div', {}, h('b', {}, x.name), h('div', { class: 'small muted' }, `${COMPANY_KINDS[x.sector as keyof typeof COMPANY_KINDS]?.name ?? x.sector} · ${x.ships ?? 0} ship${x.ships === 1 ? '' : 's'} · ${fmt(Math.round(x.treasury ?? 0))} cr in the bank · last year ${(x.profit ?? 0) >= 0 ? '+' : ''}${fmt(x.profit ?? 0)} cr`)),
+            x.fleetId ? h('button', { class: 'chip', onclick: () => this.actions.focusFleet(x.fleetId!) }, 'Show fleet') : ''),
+          x.status ? h('div', { class: 'small company-status' }, x.status) : '',
+          h('div', { class: 'small' }, `Share ${x.price.toFixed(2)} cr · dividend ${x.dividend.toFixed(2)} a share · you hold ${x.held} of ${x.shares} · ${x.float} for sale`),
+          h('span', { class: 'meter' }, h('i', { style: `width:${(100 * x.held) / (x.shares ?? 100)}%` })),
+          trade(x)))) : h('p', { class: 'small muted' }, 'None yet. Build a freighter, mining ship or colony ark with "Charter a company" ticked.')),
+      h('section', { class: 'card' }, h('h4', {}, 'Stock market'),
+        market.length ? h('table', { class: 'data stocks' },
+          h('thead', {}, h('tr', {}, h('th', {}, 'Company'), h('th', { class: 'num' }, 'Price'), h('th', { class: 'num' }, 'Yield'), h('th', { class: 'num' }, 'Held'), h('th', {}, ''))),
+          h('tbody', {}, ...market.map((x) => h('tr', { class: x.held ? 'on' : '' },
+            h('td', {}, h('b', {}, x.name), h('div', { class: 'small muted' }, `${x.owner}${x.kind === 'player' ? ' (player)' : ''} · ${x.kind === 'player' ? COMPANY_KINDS[x.sector as keyof typeof COMPANY_KINDS]?.name ?? x.sector : x.sector}`)),
+            h('td', { class: 'num mono' }, x.history ? sparkline(x.history) : '', ` ${x.price.toFixed(2)}`),
+            h('td', { class: 'num mono' }, x.price ? `${((100 * x.dividend) / x.price).toFixed(2)}%` : '—'),
+            h('td', { class: 'num mono' }, fmt(x.held)),
+            h('td', {}, x.delisted ? h('button', { class: 'chip', onclick: () => this.actions.sellShares(x.key, x.held) }, 'Write off') : trade(x)))))) : h('p', { class: 'small muted' }, 'Meet other empires to trade their shares: each NPC faction has two corporations, and players you have met list their companies here.')),
     ];
   }
 
@@ -334,4 +480,20 @@ function reputationChart(rel: Relations | undefined, factions: readonly FactionV
   return h('div', {}, chart,
     h('div', { class: 'rep-legend' }, ...factions.map((f) => h('span', {}, h('i', { style: `background:${f.color}` }), f.name))),
     years.length < 3 ? h('p', { class: 'small muted' }, 'The chart fills in as the years pass: a point every five years.') : '');
+}
+
+/** A tiny line of a price over time (oldest first). */
+function sparkline(values: readonly number[]): SVGSVGElement {
+  const w = 54, hgt = 16;
+  const lo = Math.min(...values), hi = Math.max(...values), span = hi - lo || 1;
+  const pts = values.map((v, i) => `${((i / (values.length - 1)) * w).toFixed(1)},${(hgt - 1 - ((v - lo) / span) * (hgt - 2)).toFixed(1)}`).join(' ');
+  const up = values[values.length - 1] >= values[0];
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${w} ${hgt}`);
+  svg.setAttribute('class', `spark ${up ? 'up' : 'down'}`);
+  svg.setAttribute('aria-hidden', 'true');
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  line.setAttribute('points', pts);
+  svg.append(line);
+  return svg;
 }

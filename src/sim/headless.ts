@@ -25,6 +25,7 @@ export { applyEffects, EMPTY_WORLD, validWorld };
 import { CommandError, decodeArgs, type Command } from './commands';
 import { allPlayerMarkets, marketsFor, type TradingEmpire } from '../core/economy/PlayerMarkets';
 import type { Market } from '../core/economy/Trade';
+import { cleanCommerce } from '../core/economy/Commerce';
 import { stepNpcs, type RaidTargets } from '../core/npc/NpcSim';
 import type { NpcDecision, NpcRaid } from '../core/npc/types';
 import { hexAt, type FleetMovement } from '../core/fleet/Fleet';
@@ -354,6 +355,7 @@ function otherEmpiresOf(others: readonly TradingEmpire[], playerId: string): Oth
     name: typeof o.empire?.name === 'string' ? o.empire.name : typeof o.name === 'string' ? o.name : 'Unknown',
     home: isHex(o.home) ? o.home : null,
     colonies: (Array.isArray(o.colonies) ? o.colonies : []).filter(isHex).slice(0, 200),
+    ...((o as { commerce?: unknown }).commerce ? { commerce: cleanCommerce((o as { commerce?: unknown }).commerce) } : {}),
   }));
 }
 

@@ -7,6 +7,7 @@ import type { Effects, FactionId, GovernmentDef, PolicyDef } from '../../content
 import { FACTIONS } from '../../content/society';
 import { Rng, hashSeed } from '../rng/Rng';
 import { FREIGHTER } from './Trade';
+import { BASE_PRICE, COMMERCE } from '../../content/commerce';
 import type { TechTree } from '../research/TechTree';
 import type { ResearchState } from '../research/types';
 
@@ -97,13 +98,33 @@ export interface Presence {
    * Mining crews. With `pools`, each mines the asteroid pool it is at (`pool`: a system's fields
    * of its resource); without, `deposits` lists what it can mine there (no limit).
    */
-  readonly miners: ReadonlyArray<{ readonly classId: string; readonly count: number; readonly deposits?: readonly Resource[]; readonly pool?: string }>;
+  readonly miners: ReadonlyArray<{ readonly classId: string; readonly count: number; readonly deposits?: readonly Resource[]; readonly pool?: string; readonly contract?: Contract }>;
   /** What each asteroid pool holds this year: mining draws it down. */
   readonly pools?: Readonly<Record<string, number>>;
   /** Empires with at least one of our ships inside their territory. */
   readonly reached: readonly string[];
   /** Technology spies can steal from each empire (beyond the tables' alienTech). */
   readonly techOf?: Readonly<Record<string, readonly string[]>>;
+}
+
+/** A mining company's crew: the state pays it the contract price for what it mines (change commerce). */
+export interface Contract {
+  readonly company: string;
+  readonly name: string;
+}
+
+/** What the state pays a mining company for one unit of a mineral. */
+export const contractPrice = (r: Resource): number => (BASE_PRICE[r] ?? 0) * COMMERCE.contractShare;
+
+/**
+ * Income from outside the colonies in a year, named for the ledger: companies' tax and dividends,
+ * corporations' dividends, and tariffs and dividends from other empires. Not touched by stability.
+ */
+export interface Transfer {
+  readonly r: Resource;
+  readonly n: number;
+  readonly group: string;
+  readonly label: string;
 }
 
 export interface TurnReport {
@@ -259,7 +280,7 @@ export function miningYield(e: EconomyState, t: EconomyTables, research: Researc
   return Math.round(perShip * (c.rate ?? 1) * ASTEROID_RATE * (1 + miningPct / 100));
 }
 
-export function resolveTurn(e: EconomyState, research: ResearchState, turn: number, t: EconomyTables, presence?: Presence): { economy: EconomyState; research: ResearchState; report: TurnReport; mined: Record<string, number> } {
+export function resolveTurn(e: EconomyState, research: ResearchState, turn: number, t: EconomyTables, presence?: Presence, transfers: readonly Transfer[] = []): { economy: EconomyState; research: ResearchState; report: TurnReport; mined: Record<string, number>; contracts: Record<string, number> } {
   const effs = activeEffects(e, t);
   const income: Partial<Record<Resource, number>> = {};
   const ledger: LedgerEntry[] = [];
@@ -289,6 +310,15 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   let idleMiners = 0;
   const pools = presence?.pools ? { ...presence.pools } : null;
   const mined: Record<string, number> = {};
+  const contracts: Record<string, number> = {};
+  // A company's crew is paid for what it mines (credits from the state to the company).
+  const pay = (crew: Presence['miners'][number], r: Resource, n: number) => {
+    if (!crew.contract || n <= 0) return;
+    const credits = Math.round(n * contractPrice(r));
+    if (!credits) return;
+    contracts[crew.contract.company] = (contracts[crew.contract.company] ?? 0) + credits;
+    add('credits', -credits, 'Companies', `Ore contract: ${crew.contract.name}`);
+  };
   for (const crew of crews) {
     const c = t.classes.find((x) => x.id === crew.classId);
     if (!c?.mines || !crew.count) continue;
@@ -299,11 +329,14 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
       const take = Math.min(left, Math.round(crew.count * perShip * (c.rate ?? 1) * ASTEROID_RATE * (1 + miningPct / 100)));
       pools[crew.pool!] = left - take;
       mined[crew.pool!] = (mined[crew.pool!] ?? 0) + take;
-      add(c.mines, take, 'Mining ships', `${c.name} ×${crew.count}`);
+      add(c.mines, take, crew.contract ? 'Companies' : 'Mining ships', crew.contract ? `${crew.contract.name}: ${c.name} ×${crew.count}` : `${c.name} ×${crew.count}`);
+      pay(crew, c.mines, take);
       continue;
     }
     if (!crew.deposits?.includes(c.mines)) { idleMiners += crew.count; continue; }
-    add(c.mines, Math.round(crew.count * perShip * (c.rate ?? 1) * (1 + miningPct / 100)), 'Mining ships', `${c.name} ×${crew.count}`);
+    const take = Math.round(crew.count * perShip * (c.rate ?? 1) * (1 + miningPct / 100));
+    add(c.mines, take, crew.contract ? 'Companies' : 'Mining ships', crew.contract ? `${crew.contract.name}: ${c.name} ×${crew.count}` : `${c.name} ×${crew.count}`);
+    pay(crew, c.mines, take);
   }
   if (idleMiners) lines.push(pools
     ? `${idleMiners} mining ship${idleMiners === 1 ? '' : 's'} idle: no asteroid field of their kind where they are, or it is mined out`
@@ -344,6 +377,9 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
     if (income[r] !== before) ledger.push({ r, n: income[r]! - before, group: 'Adjustments', label: famine && unrest < 1 ? 'Famine and unrest' : famine ? 'Famine (−20%)' : unrest < 1 ? `Unrest (stability ${stability}%)` : `High stability (${stability}%)` });
   }
   if (unrest < 1) lines.push(`Unrest: stability ${stability}% cut income by 20%`);
+
+  // Transfers from companies, corporations and other empires: after stability, which does not touch them.
+  for (const x of transfers) add(x.r, x.n, x.group, x.label);
 
   // Storage: income stops at the cap (stock above it from loot is kept, not lost).
   const caps = capsOf(e, t);
@@ -413,7 +449,7 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   const colonies = populationYear(e, t, income.food ?? 0, lines);
 
   res = autoResearch(res, t, lines);
-  return { economy: { ...e, stock, faith, colonies, focus }, research: res, report: { income, lines, science, ledger }, mined };
+  return { economy: { ...e, stock, faith, colonies, focus }, research: res, report: { income, lines, science, ledger }, mined, contracts };
 }
 
 /**

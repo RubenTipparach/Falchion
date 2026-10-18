@@ -10,6 +10,8 @@ import type { BattleLogEntry } from '../core/combat/BattleLog';
 import type { Job } from '../core/construction/Construction';
 import type { ShipDesign } from '../core/ships/ShipDesign';
 import type { FleetView } from '../render/map/FleetLayer';
+import type { CommerceState } from '../core/economy/Commerce';
+import type { GovernorState } from '../core/empire/Governor';
 
 /** Policy side of the economy; the stockpile lives on the empire. */
 export type EconomySettings = Omit<EconomyState, 'stock'>;
@@ -60,6 +62,10 @@ export interface GameState {
   readonly battleLog?: readonly BattleLogEntry[];
   /** One-off changes to the stores (purchases, sales, loot, plunder), newest first: the resource ledger. */
   readonly flows?: readonly Flow[];
+  /** Tariffs, exchange pressure, companies and shares (change commerce); missing in older saves. */
+  readonly commerce?: CommerceState;
+  /** The empire governor's settings (change empire-governor); missing: no governor. */
+  readonly governor?: GovernorState;
 }
 
 export interface Relations {

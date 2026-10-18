@@ -9,6 +9,9 @@ import type { Hex } from '../core/hex/Hex';
 import { normalizeDesign, type ShipDesign } from '../core/ships/ShipDesign';
 import type { EmpireSim } from './EmpireSim';
 import { DIPLOMATIC_ACTIONS, type DiplomaticAction } from '../core/diplomacy/Diplomacy';
+import { EXCHANGE_RESOURCES } from '../content/commerce';
+import { FOCI, type GovernorFocus } from '../content/governor';
+import type { Resource } from '../content/resources';
 
 /**
  * Every order a player can give, as a command the server applies to its copy of the empire.
@@ -82,6 +85,14 @@ const orders: ArgCodec<FleetOrders> = {
     return { autoExplore: o.autoExplore === true, autoReturn: o.autoReturn === true, autoMine: o.autoMine === true, ...(o.stance === 'aggressive' ? { stance: 'aggressive' as const } : {}) };
   },
 };
+/** A whole number from 0 to a million (amounts, shares, percents). */
+const count: ArgCodec<number> = { encode: (v) => v, decode: (raw) => (Number.isInteger(raw) && (raw as number) >= 0 && (raw as number) <= 1e6 ? (raw as number) : fail('bad number')) };
+const resource: ArgCodec<Resource> = { encode: (v) => v, decode: (raw) => ((EXCHANGE_RESOURCES as readonly unknown[]).includes(raw) ? (raw as Resource) : fail('bad resource')) };
+/** An exchange: `npc:<faction>` or `player:<id>`. */
+const exchange: ArgCodec<string> = { encode: (v) => v, decode: (raw) => (typeof raw === 'string' && /^(npc|player):[\w:,.-]{1,80}$/.test(raw) ? raw : fail('bad exchange')) };
+/** A share: `own:<company>`, `player:<owner>:<company>` or `npc:<corporation>`. */
+const share: ArgCodec<string> = { encode: (v) => v, decode: (raw) => (typeof raw === 'string' && /^(own|player|npc):[\w:#,.-]{1,120}$/.test(raw) ? raw : fail('bad share')) };
+const focus: ArgCodec<GovernorFocus> = { encode: (v) => v, decode: (raw) => (typeof raw === 'string' && Object.hasOwn(FOCI, raw) ? (raw as GovernorFocus) : fail('bad focus')) };
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const design: ArgCodec<ShipDesign> = {
   encode: (d) => d,
@@ -127,8 +138,15 @@ export const COMMANDS = {
   setFocus: [nullable(id)],
   selectClass: [id],
   setDesign: [design],
-  buildShip: [id, optional(id)],
+  buildShip: [id, optional(id), optional(bool)],
   settle: [planet],
+  embark: [id],
+  buyResource: [exchange, resource, count],
+  sellResource: [exchange, resource, count],
+  setTariff: [count, nullable(playerId)],
+  buyShares: [share, count],
+  sellShares: [share, count],
+  setGovernor: [focus, bool, bool, count],
   buildDepot: [star],
   build: [id, id],
   toggleTrait: [id],

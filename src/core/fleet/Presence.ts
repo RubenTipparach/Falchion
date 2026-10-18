@@ -20,6 +20,8 @@ export interface FleetOrders {
    * fleet will be, at its own speed. A faster chaser catches up; a slower one only when the other stops.
    */
   readonly chase?: string;
+  /** A colony company's fleet: the planet it is taking colonists to (change commerce). */
+  readonly settle?: string;
 }
 
 /** A fleet as another empire's chaser sees it: where it is going and how fast. */
@@ -40,6 +42,10 @@ export interface Loadout extends Stores {
   readonly cargoFrom?: string;
   /** A running battle at sea with another player's fleet: who, which round, and the year it was fought. */
   readonly battle?: FleetBattle;
+  /** The company that owns and runs this fleet (its ships are not the state's; change commerce). */
+  readonly company?: string;
+  /** Colony arks loaded with colonists: one colony's worth each (change commerce). */
+  readonly colonists?: number;
 }
 
 export interface FleetBattle {

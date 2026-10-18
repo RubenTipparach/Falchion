@@ -12,6 +12,8 @@ export interface Job {
   readonly site: string;
   readonly startTurn: number;
   readonly doneTurn: number;
+  /** A civilian ship that founds a company when it is launched (change commerce). */
+  readonly charter?: boolean;
 }
 
 /** Queue a job at a site: it starts when the site's previous job finishes. */

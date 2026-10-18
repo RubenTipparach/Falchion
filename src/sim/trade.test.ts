@@ -9,6 +9,8 @@ import { ALIEN_TECH, TECH_NODES } from '../content/techTree';
 import { EncounterResolver } from '../core/encounters/Encounters';
 import { goodsPrice, MAX_TRADE_DISTANCE, saleValue } from '../core/economy/Trade';
 import { marketFactor } from '../core/npc/Reputation';
+import { npcTariff } from '../core/economy/Exchange';
+import { npcById } from '../core/npc/NpcCatalog';
 import { GalaxyModel } from '../core/galaxy/GalaxyModel';
 import { hexDistance } from '../core/hex/Hex';
 import { TechTree } from '../core/research/TechTree';
@@ -70,7 +72,10 @@ describe('trade goods', () => {
     expect(sold?.text).toContain(to.name);
     expect(l.cargo ?? 0).toBe(0);
     expect(sold!.text).toContain(`for ${expected} credits`);
-    expect(expected).toBe(Math.round(saleValue(50, trip, market.kind) * marketFactor(standing)));
+    // The faction takes its tariff (change commerce).
+    const gross = saleValue(50, trip, market.kind) * marketFactor(standing);
+    const def = npcById(galaxy, market.npc!)!;
+    expect(expected).toBe(Math.round(gross) - Math.round((gross * npcTariff(def.archetype.id, standing)) / 100));
     // Trading with a faction warms it to you.
     expect(s.standingWith(market.npc!)).toBeGreaterThan(standing);
     // Heading home for the next load.

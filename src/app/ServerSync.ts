@@ -10,6 +10,10 @@ import type { FleetView } from '../render/map/FleetLayer';
 import type { GameState } from './GameState';
 import type { SavedGame } from './SaveGame';
 import { COLONY_RADIUS, HOME_RADIUS } from './World';
+import { cleanCommerce, NO_COMMERCE, publicCommerceOf, type PublicCommerce } from '../core/economy/Commerce';
+import { SHIP_CLASSES } from '../content/shipClasses';
+
+const COSTS = new Map(SHIP_CLASSES.map((c) => [c.id, c.cost]));
 
 /** What other players may see of an empire (the server keeps only this public). */
 export interface PublicEmpire {
@@ -25,6 +29,8 @@ export interface PublicEmpire {
    * anyone who sees the battle can watch it.
    */
   readonly fleets: ReadonlyArray<Pick<FleetView, 'id' | 'name' | 'movement' | 'design'> & { readonly armed: boolean; readonly stance?: 'aggressive'; readonly battle?: PublicBattle; readonly chase?: string; readonly damage?: Readonly<Record<string, number>> }>;
+  /** Its tariffs and companies (change commerce). */
+  readonly commerce?: PublicCommerce;
 }
 
 /** A fleet's battle at sea as other players see it. */
@@ -91,6 +97,7 @@ export function publicEmpire(s: GameState, color: string): PublicEmpire {
     empire: id ? { name: id.name, ruler: id.ruler, title: id.title, capital: id.capital, flag: id.flag } : undefined,
     home: s.home.hex,
     colonies,
+    commerce: publicCommerceOf(s.commerce ?? NO_COMMERCE, s.loadouts, (id) => COSTS.get(id)),
     fleets: s.fleets.filter((f) => f.owner === s.playerName).map((f) => {
       const l = s.loadouts[f.id];
       const b = l?.battle;
@@ -156,7 +163,7 @@ export function othersOnMap(players: readonly OtherPlayer[]): { fleets: FleetVie
 export function empiresOf(players: readonly OtherPlayer[]): OtherEmpire[] {
   return players.map((p) => {
     const id = p.empire ? cleanIdentity({ ...p.empire, color: p.color }, HERALDRY) : null;
-    return { id: p.id, name: id?.name ?? p.name, color: id?.color ?? colorFor(p.id), home: isHex(p.home) ? p.home : null, colonies: (p.colonies ?? []).filter(isHex) };
+    return { id: p.id, name: id?.name ?? p.name, color: id?.color ?? colorFor(p.id), home: isHex(p.home) ? p.home : null, colonies: (p.colonies ?? []).filter(isHex), ...(p.commerce ? { commerce: cleanCommerce(p.commerce) } : {}) };
   });
 }
 

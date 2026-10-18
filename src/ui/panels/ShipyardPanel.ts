@@ -18,6 +18,8 @@ import { CLOCK } from '../../app/WorldClock';
 import { clear, fmt, h } from '../dom';
 import { icon, resourceIcon } from '../icons';
 import { thumb } from '../thumbs';
+import { COMMERCE, COMPANY_KINDS } from '../../content/commerce';
+import { companyKindOf } from '../../core/economy/Companies';
 
 const PALETTES: Array<[string, string, string]> = [
   ['#b8c4d6', '#3a4a63', '#4fd1ff'], ['#e8e2d0', '#7a2e2e', '#ffb347'], ['#2b2f3a', '#11131a', '#ff3b6b'],
@@ -50,6 +52,8 @@ export class ShipyardPanel extends Drawer {
   private shownKey = '';
   private readonly clock = new THREE.Clock();
   private yard: string | undefined;
+  /** Civilian ships found a company when built (change commerce): on unless unticked. */
+  private charter = true;
 
   constructor(
     private readonly store: Store<GameState>,
@@ -157,6 +161,7 @@ export class ShipyardPanel extends Drawer {
     const discount = this.q.buildDiscount();
     const affordable = canAfford(s.empire.materials, c.cost, discount);
     const doc = DOCTRINES[c.doctrine];
+    const kind = companyKindOf(c);
     const costRow = Object.entries(c.cost).map(([r, n]) => {
       const def = RESOURCES.find((x) => x.id === r)!;
       const need = Math.ceil(n! * (1 - discount / 100));
@@ -179,13 +184,25 @@ export class ShipyardPanel extends Drawer {
         h('div', { class: 'costs' }, ...costRow, discount ? h('span', { class: 'muted small' }, `−${discount}% from research`) : null),
         unlocked
           ? h('div', { class: 'build-at' }, this.yardSelect(),
-            h('button', { class: 'btn primary', disabled: !affordable || !this.game.yards().length, onclick: () => this.actions.buildShip(c.id, this.yard) }, affordable ? `Build · ${formatDuration(buildYears(c), CLOCK)}` : 'Not enough resources'))
+            h('button', { class: 'btn primary', disabled: !affordable || !this.game.yards().length, onclick: () => this.actions.buildShip(c.id, this.yard, kind ? this.charter : undefined) }, affordable ? `Build · ${formatDuration(buildYears(c), CLOCK)}` : 'Not enough resources'))
           : c.unlock
             // Locked: straight to the research that unlocks it.
             ? h('button', { class: 'btn locked-build', title: `Open ${this.tree.node(c.unlock).name} in the research tree`, onclick: () => this.actions.openResearch(c.unlock!) }, icon('lock'), ` Research ${this.tree.node(c.unlock).name} →`)
             : h('span', { class: 'locked-note' }, icon('lock'), ' Locked')),
+      unlocked && kind ? this.charterToggle(kind) : '',
       this.queueView(),
     );
+  }
+
+  /** Charter a company with a civilian ship: it runs the ship itself and grows when it makes money. */
+  private charterToggle(kind: keyof typeof COMPANY_KINDS): HTMLElement {
+    const box = h('input', { type: 'checkbox', checked: this.charter }) as HTMLInputElement;
+    box.addEventListener('change', () => { this.charter = box.checked; });
+    const k = COMPANY_KINDS[kind];
+    const kept = COMMERCE.stateShares, sold = COMMERCE.shares - COMMERCE.stateShares;
+    return h('label', { class: 'charter' }, box,
+      h('span', {}, h('b', {}, `Charter a ${k.name.toLowerCase()}`),
+        h('small', { class: 'muted' }, ` ${k.blurb} It pays its own upkeep, ${Math.round(COMMERCE.tax * 100)}% tax and dividends, and buys more ships when it profits. You keep ${kept} of its ${COMMERCE.shares} shares and get ${sold}% of the ship's value back; it takes no orders.`)));
   }
 
   /** What the selected yard is building, with time left. */

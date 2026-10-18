@@ -997,3 +997,48 @@ img.thumb:not(.ready) { animation: thumb-wait 1.2s ease-in-out infinite alternat
 button.field-row { width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 4px; }
 button.field-row:hover { background: var(--raise); }
 .field-bar.big { display: block; height: 6px; margin: 4px 0 10px; }
+
+/* ── Commerce: exchanges, tariffs, companies (change commerce) ── */
+.exchange-pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.exchange-pick .doc-dot { margin-right: 4px; }
+.amount-pick { flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 10px; }
+table.data.stocks td { vertical-align: middle; }
+.trade-btns { display: inline-flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.exchange { display: grid; border-top: 1px solid var(--line-strong); }
+.ex-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 7px 4px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.ex-head { font: 600 10px var(--font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); padding: 6px 4px; }
+.ex-res { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.ex-res > span { display: grid; }
+.ex-price { display: grid; text-align: right; font-size: 12px; }
+.ex-row .trade-btns { flex-direction: column; align-items: stretch; }
+.ex-row .trade-btns .chip { text-align: center; }
+.ship-vs { margin-top: 10px; }
+.vs-row { display: grid; grid-template-columns: 130px 1fr auto; align-items: center; gap: 8px; font-size: 12px; margin: 4px 0; }
+.vs-bar { height: 8px; border-radius: 4px; background: rgba(127, 211, 230, 0.1); overflow: hidden; }
+.vs-bar i { display: block; height: 100%; background: var(--muted); }
+.vs-bar.freighter i { background: var(--good); }
+.tariffs { margin-top: 10px; }
+.tariffs .slider { grid-template-columns: 150px 1fr 44px; }
+.tariffs .slider .doc-dot { margin-right: 6px; }
+.company-list { display: grid; gap: 10px; }
+.company { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 6px; background: rgba(10, 16, 32, 0.5); }
+.company .meter { height: 4px; }
+.company-status { color: var(--chart); }
+svg.spark { width: 54px; height: 16px; vertical-align: middle; }
+svg.spark polyline { fill: none; stroke-width: 1.4; stroke: var(--good); }
+svg.spark.down polyline { stroke: var(--bad); }
+.charter { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 4px; font-size: 12px; cursor: pointer; }
+.charter input { margin-top: 2px; }
+.notice.company { border-left-color: var(--good); background: rgba(124, 255, 155, 0.06); }
+.row.colonists { align-items: center; gap: 8px; margin: 4px 0; }
+@media (max-width: 720px) {
+  .vs-row { grid-template-columns: 90px 1fr; }
+  .vs-row b { grid-column: 1 / -1; }
+  .tariffs .slider { grid-template-columns: 100px 1fr 40px; }
+}
+
+/* ── Empire governor (change empire-governor) ── */
+.card.governor { margin-bottom: 10px; }
+.card.governor.on { border-color: rgba(124, 255, 155, 0.4); }
+.card.governor .focus-pick { margin: 6px 0; }
+.card.governor .slider.reserve { grid-template-columns: 120px 1fr 56px; margin-top: 8px; }

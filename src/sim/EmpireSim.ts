@@ -6,8 +6,16 @@ import { BattleResult, CombatBonuses, Damage, menderRepair, repairDamage, resolv
 import { recordRound } from '../core/combat/BattleRecord';
 import { logBattle, tallyLost, tallyOf, type BattleLogEntry } from '../core/combat/BattleLog';
 import { ROLE_TRAIT } from '../core/ships/ClassDesign';
-import { bonusOf, canAfford, capsOf, Colony, EconomyTables, FLOW_LOG, miningYield, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf, type Flow, type Stockpile, type TurnReport } from '../core/economy/Economy';
+import { bonusOf, canAfford, capsOf, Colony, contractPrice, EconomyTables, FLOW_LOG, miningYield, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf, type Flow, type Stockpile, type Transfer, type TurnReport } from '../core/economy/Economy';
 import { cargoCapacity, FREIGHTER, saleValue, type Market } from '../core/economy/Trade';
+import { BASE_PRICE, COMMERCE, EXCHANGE_RESOURCES, type CompanyKind } from '../content/commerce';
+import { BIOME_YIELDS } from '../content/resources';
+import { FOCI, FOOD_FLOOR, type GovernorFocus } from '../content/governor';
+import { pickBuilding, pickResearch } from '../core/empire/Governor';
+import { charter, companyKindOf, companyName, companyYear, fleetValue, floatOf, sharePrice, shipValue, wantsShip, type Company, type CompanyYear } from '../core/economy/Companies';
+import { cleanTariff, fadePressure, npcTariff, trade as exchangeTrade, unitPrice, type ExchangeView } from '../core/economy/Exchange';
+import { corpKey, MAX_SHARE_TRADE, NO_COMMERCE, playerCompanyKey, publicCommerceOf, stakeKey, tariffFor, type CommerceState, type PublicCommerce } from '../core/economy/Commerce';
+import { corporationsOf, corpNpc, corpPrice, type Corporation } from '../core/economy/Corporations';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
 import { addHaul, Collected, crateMaterials, Haul, planetCache } from '../core/encounters/PlanetCache';
 import type { Card } from '../core/encounters/types';
@@ -50,7 +58,50 @@ export interface OtherEmpire {
   readonly color?: string;
   readonly home?: Hex | null;
   readonly colonies: readonly Hex[];
+  /** Its tariffs and companies (change commerce), when it published them. */
+  readonly commerce?: PublicCommerce;
 }
+
+/** An exchange you can trade on (change commerce): an NPC faction's or a player's. */
+export interface ExchangeInfo extends ExchangeView {
+  readonly name: string;
+  readonly kind: 'npc' | 'player';
+  /** The NPC faction or player that runs it. */
+  readonly owner: string;
+  readonly color?: string;
+  readonly home?: StarSystem;
+}
+
+/** A share on the stock market: one of your companies, another player's, or an NPC corporation. */
+export interface StockView {
+  /** `own:<company>`, `player:<owner>:<company>` or `npc:<corporation>`. */
+  readonly key: string;
+  readonly kind: 'own' | 'player' | 'npc';
+  readonly name: string;
+  /** The empire it belongs to. */
+  readonly owner: string;
+  /** Its kind of company, or what a corporation does. */
+  readonly sector: string;
+  readonly price: number;
+  /** Dividend per share last year (a corporation's every year). */
+  readonly dividend: number;
+  /** Shares you (the state) hold, and how many are for sale. */
+  readonly held: number;
+  readonly float: number;
+  readonly shares?: number;
+  readonly ships?: number;
+  readonly treasury?: number;
+  readonly profit?: number;
+  readonly fleetId?: string;
+  /** A corporation's price over the last 240 years, every 10. */
+  readonly history?: readonly number[];
+  readonly delisted?: boolean;
+  /** One of your companies: what its fleet is doing. */
+  readonly status?: string;
+}
+
+/** The ledger heading of what other empires owed you (tariffs, dividends). */
+const OWED = 'From other empires';
 
 /** One other player in the Relations tab: the relation, any proposal, and what you can do. */
 export interface DiplomacyView {
@@ -156,6 +207,11 @@ export interface SimDeps {
 }
 
 const BASE_SPEED = 1; // ly per year (one year = one minute)
+const ARK = 'colony-ark';
+/** Supply an ark spends settling a world: all of its own (change commerce). */
+const ARK_SUPPLY = specOf(ARK)?.supply ?? 6;
+/** The ship a company of each kind buys when it has none to copy. */
+const COMPANY_SHIP: Readonly<Record<CompanyKind, string>> = { trade: FREIGHTER, mining: 'prospector', colony: ARK };
 /** Supply an auto-exploring fleet needs to set off for another system. */
 const MIN_SURVEY_SUPPLY = 2;
 /** Map colour of an empire that has not been founded yet. */
@@ -307,8 +363,13 @@ export class EmpireSim {
 
   isFriendly = (star: StarSystem): boolean => this.isFriendlyHex(star.hex);
 
+  /** The state's fleets' loadouts (company fleets' ships are not in the state's roster). */
+  protected stateLoadouts(loadouts = this.state.loadouts): Loadout[] {
+    return Object.values(loadouts).filter((l) => !l.company);
+  }
+
   /** Ships at the home dock. */
-  docked = (): Squadron[] => dockedShips(this.state.economy.roster, Object.values(this.state.loadouts));
+  docked = (): Squadron[] => dockedShips(this.state.economy.roster, this.stateLoadouts());
 
   protected dockStores(ships = this.docked()): Stores {
     const full = fullStores(ships, specOf);
@@ -330,12 +391,17 @@ export class EmpireSim {
         damage: l.damage, hull: this.hullOf(l.ships, l.damage), repair: stationed ? this.repairSite(dest) : null,
         star: this.deps.galaxy.starAt(dest), stationed, eta: Math.max(0, arrivalTurn(f.movement) - s.turn), friendly: stationed && this.isFriendlyHex(dest), orders: l.orders,
         cargo: l.cargo, cargoFrom: l.cargoFrom, battle: inBattle(l.battle, s.turn) ? l.battle : undefined,
+        ...(l.company ? { company: { id: l.company, name: this.companyById(l.company)?.name ?? 'A company' } } : {}),
+        ...(countOf(l.ships, ARK) ? { colonists: l.colonists ?? 0 } : {}),
       });
     }
     return out;
   };
 
   groupsAt = (star: StarSystem): FleetGroup[] => this.groups().filter((g) => g.stationed && g.star?.id === star.id && shipTotal(g.ships) > 0);
+
+  /** The state's groups at a star: what the player can give orders to (not companies' fleets). */
+  protected stateGroupsAt = (star: StarSystem): FleetGroup[] => this.groupsAt(star).filter((g) => !g.company);
 
   planetById = (id: string): Planet | null => {
     const star = this.starById(id.slice(0, id.lastIndexOf('/')));
@@ -397,7 +463,7 @@ export class EmpireSim {
   /** Mining ships and where they are: each mines its system's fields of its resource. */
   protected presence(): Presence {
     const s = this.state;
-    const miners: Array<{ classId: string; count: number; pool?: string }> = [];
+    const miners: Array<{ classId: string; count: number; pool?: string; contract?: { company: string; name: string } }> = [];
     const pools: Record<string, number> = {};
     const at = (star: StarSystem | null, classId: string): string | undefined => {
       const r = this.classById.get(classId)?.mines;
@@ -409,7 +475,9 @@ export class EmpireSim {
     for (const x of this.docked()) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, pool: at(s.home, x.classId) });
     for (const g of this.groups()) {
       if (g.id === 'dock') continue;
-      for (const x of g.ships) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, pool: g.stationed ? at(g.star, x.classId) : undefined });
+      // A mining company's crews are paid for what they mine.
+      const contract = g.company ? { company: g.company.id, name: g.company.name } : undefined;
+      for (const x of g.ships) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, pool: g.stationed ? at(g.star, x.classId) : undefined, ...(contract ? { contract } : {}) });
     }
     const known = this.knownNpcs();
     const reached = known.map((n) => n.def.name).filter((n) => this.reached(n));
@@ -490,7 +558,11 @@ export class EmpireSim {
     // Ships leave with full holds: the dock's spending this turn stays with the dock.
     // Survey groups explore and come home for supply on their own by default.
     const orders = kind === 'Survey Group' ? { autoExplore: true, autoReturn: true } : undefined;
-    this.deps.store.update({ fleets: [...s.fleets, fleet], loadouts: { ...s.loadouts, [id]: { ships: wanted, ...fullStores(wanted, specOf), orders } } });
+    // Arks leave with colonists from the capital, one colony's worth each, while it has people to spare.
+    const capital = s.economy.colonies.find((c) => c.capital);
+    const colonists = countOf(wanted, ARK) ? Math.min(countOf(wanted, ARK), Math.max(0, (capital?.pop ?? 1) - 1)) : 0;
+    this.deps.store.update({ fleets: [...s.fleets, fleet], loadouts: { ...s.loadouts, [id]: { ships: wanted, ...fullStores(wanted, specOf), orders, ...(countOf(wanted, ARK) ? { colonists } : {}) } } });
+    if (colonists && capital?.planetId) this.movePeople(capital.planetId, -colonists);
     if (!quiet) this.dispatch(`${label} departs for ${to.name} (${formatDuration(travelTurns(hexDistance(s.home.hex, to.hex), speed), CLOCK)})`);
   }
 
@@ -511,6 +583,7 @@ export class EmpireSim {
 
   /** Send a fleet to any hex: a star system or empty space. */
   moveFleetToHex(fleetId: string, to: Hex, label: string, quiet = false): void {
+    if (this.runByCompany(fleetId)) return;
     // Any other course ends a chase.
     const l = this.state.loadouts[fleetId];
     if (l?.orders?.chase) this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: { ...l.orders, chase: undefined } } } }));
@@ -535,6 +608,7 @@ export class EmpireSim {
   }
 
   setOrders(fleetId: string, orders: FleetOrders): void {
+    if (this.runByCompany(fleetId)) return;
     const l = this.state.loadouts[fleetId];
     if (!l) return;
     // A trade run carries on unless the fleet is sent exploring. The flags are stored the same
@@ -551,6 +625,7 @@ export class EmpireSim {
   }
 
   dockFleet(fleetId: string): void {
+    if (this.runByCompany(fleetId)) return;
     const s = this.state;
     const f = s.fleets.find((x) => x.id === fleetId);
     if (!f || !s.loadouts[fleetId]) return;
@@ -558,6 +633,9 @@ export class EmpireSim {
     const { [fleetId]: gone, ...loadouts } = s.loadouts;
     // Goods still aboard go back into the stockpile.
     const materials = gone.cargo ? { ...s.empire.materials, goods: s.empire.materials.goods + gone.cargo } : s.empire.materials;
+    // Colonists aboard go home to the capital.
+    const capital = s.economy.colonies.find((c) => c.capital);
+    if (gone.colonists && capital?.planetId) this.movePeople(capital.planetId, gone.colonists);
     this.deps.store.update({ fleets: s.fleets.filter((x) => x.id !== fleetId), loadouts, empire: { ...s.empire, materials } });
     this.noteFlow(s.empire.materials, `${f.name} docked: cargo unloaded`);
     this.dispatch(`${f.name} docks at ${s.home.name}`);
@@ -570,11 +648,12 @@ export class EmpireSim {
   protected adjustGroup(groupId: string, delta: Squadron[], stores?: Partial<Stores>, damage?: Damage): void {
     const s = this.state;
     const roster = { ...s.economy.roster };
-    for (const d of delta) roster[d.classId] = Math.max(0, (roster[d.classId] ?? 0) + d.count);
+    // A company's ships are its own: the state's roster does not change.
+    if (!s.loadouts[groupId]?.company) for (const d of delta) roster[d.classId] = Math.max(0, (roster[d.classId] ?? 0) + d.count);
     if (groupId === 'dock') {
       const spent = { ...s.dockSpent };
       if (stores) {
-        const full = fullStores(dockedShips(roster, Object.values(s.loadouts)), specOf);
+        const full = fullStores(dockedShips(roster, this.stateLoadouts(s.loadouts)), specOf);
         if (stores.supply !== undefined) spent.supply = Math.max(0, full.supply - stores.supply);
       }
       this.deps.store.update({ economy: { ...s.economy, roster }, dockSpent: spent, empire: { ...s.empire, fleetPower: this.fleetPower(roster) } });
@@ -591,6 +670,8 @@ export class EmpireSim {
     const next = clampStores(rescaleStores({ supply: stores?.supply ?? l.supply }, l.ships, ships, specOf), ships, specOf);
     const carried = Object.fromEntries(Object.entries(damage ?? l.damage ?? {}).filter(([id, d]) => d > 0 && countOf(ships, id) > 0));
     const { damage: _old, ...rest } = l;
+    // Arks lost take their colonists with them.
+    if (rest.colonists !== undefined) rest.colonists = Math.min(rest.colonists, countOf(ships, ARK));
     this.deps.store.update({ economy: { ...s.economy, roster }, loadouts: { ...s.loadouts, [groupId]: { ...rest, ships, ...next, ...(Object.keys(carried).length ? { damage: carried } : {}) } }, empire: { ...s.empire, fleetPower: this.fleetPower(roster) } });
   }
 
@@ -634,7 +715,7 @@ export class EmpireSim {
     const star = this.starOfPlanet(planet);
     if (!star) return null;
     const cost = exploreCost(planet);
-    return this.groupsAt(star).filter((g) => g.stores.supply >= cost).sort((a, b) => b.stores.supply - a.stores.supply)[0] ?? null;
+    return this.stateGroupsAt(star).filter((g) => g.stores.supply >= cost).sort((a, b) => b.stores.supply - a.stores.supply)[0] ?? null;
   }
 
   explore(planet: Planet, quiet = false): boolean {
@@ -798,7 +879,11 @@ export class EmpireSim {
     this.deps.store.update((s) => ({ designs: { ...s.designs, [id]: normalizeDesign(allowed) } }));
   }
 
-  buildShip(classId: string, yardPlanetId?: string): void {
+  /**
+   * Lay down a ship at a yard. `charter`: a freighter, mining ship or colony ark founds a company
+   * when it is launched (change commerce); other ships ignore it.
+   */
+  buildShip(classId: string, yardPlanetId?: string, charter?: boolean): void {
     const s = this.state;
     const c = this.classById.get(classId);
     if (!c || !this.isClassUnlocked(c)) return;
@@ -807,11 +892,12 @@ export class EmpireSim {
     const discount = Math.min(40, this.bonus('build'));
     if (!canAfford(s.empire.materials, c.cost, discount)) return;
     // Paid up front; the hull takes years (minutes) at the yard, one at a time.
-    const construction = enqueue(s.construction, { kind: 'ship', item: classId, site: yard.planetId }, buildYears(c), s.turn);
+    const chartered = charter === true && !!companyKindOf(c);
+    const construction = enqueue(s.construction, { kind: 'ship', item: classId, site: yard.planetId, ...(chartered ? { charter: true } : {}) }, buildYears(c), s.turn);
     const job = construction[construction.length - 1];
     this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, c.cost, discount) }, construction });
     this.noteFlow(s.empire.materials, `Built a ${c.name}`);
-    this.dispatch(`${c.name} laid down at ${yard.name}: ready in ${formatDuration(job.doneTurn - s.turn, CLOCK)}`);
+    this.dispatch(`${c.name} laid down at ${yard.name}${chartered ? ' for a new company' : ''}: ready in ${formatDuration(job.doneTurn - s.turn, CLOCK)}`);
   }
 
   /** A finished hull joins the home dock, or a group in the yard's system. */
@@ -823,7 +909,7 @@ export class EmpireSim {
       return;
     }
     const star = this.starById(yard.starId)!;
-    const here = this.groupsAt(star).find((g) => g.id !== 'dock');
+    const here = this.stateGroupsAt(star).find((g) => g.id !== 'dock');
     if (here) return this.adjustGroup(here.id, one);
     const id = `yard-${yard.starId}-t${s.turn}`;
     const fleet = { id, name: `${star.name} Yard Group`, owner: s.playerName, color: this.empireColor(), movement: planMovement(star.hex, star.hex, s.turn, 1), design: this.designOf(one) };
@@ -837,7 +923,7 @@ export class EmpireSim {
    * Next year's economy on the current state, without changing anything: the resource ledger's
    * income and costs (change resource-ledger).
    */
-  forecast = (): TurnReport => resolveTurn({ ...this.state.economy, stock: this.state.empire.materials }, this.state.empire.research, this.state.turn, this.deps.economy, this.presence()).report;
+  forecast = (): TurnReport => resolveTurn({ ...this.state.economy, stock: this.state.empire.materials }, this.state.empire.research, this.state.turn, this.deps.economy, this.presence(), this.transfers()).report;
 
   /** Record a one-off change to the stores since `before` (what caused it), newest first. */
   protected noteFlow(before: Stockpile, what: string): void {
@@ -854,26 +940,101 @@ export class EmpireSim {
 
   // ── Commands: colonies ─────────────────────────────────────────────
 
+  /**
+   * Settle a surveyed planet with a Colony Ark on station there (change commerce): the ark is not
+   * used up, but it spends its colonists and all of its supply. A fleet's ark needs colonists aboard
+   * (see embark); an ark at the home dock takes them from the capital, which needs population 2.
+   */
   settle(planet: Planet): void {
     const s = this.state;
     const star = this.starOfPlanet(planet);
     if (!star || this.colonyAt(planet.id)) return;
-    if (!s.explored[planet.id]) return this.dispatch(`Survey ${planet.name} before settling it`, 'bad');
-    if (!settleable(planet.biome)) return this.dispatch(`${planet.name} cannot be settled: ${BIOMES.find((b) => b.id === planet.biome)?.settle === 'conquest' ? 'it can only be taken' : 'nothing can live on it'}`, 'bad');
-    const g = this.groupsAt(star).find((x) => countOf(x.ships, 'colony-ark') > 0);
-    if (!g) return this.dispatch(`Settling ${planet.name} needs a Colony Ark on station in ${star.name}`, 'bad');
-    this.adjustGroup(g.id, [{ classId: 'colony-ark', count: -1 }]);
-    // A new world starts with one point of population; it grows on its own food surplus.
+    const why = this.cannotSettle(planet);
+    if (why) return this.dispatch(why, 'bad');
+    const ark = this.arkAt(star);
+    if (typeof ark === 'string') return this.dispatch(ark, 'bad');
+    if (ark.id !== 'dock') {
+      const l = s.loadouts[ark.id];
+      this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [ark.id]: { ...l, colonists: (l.colonists ?? 0) - 1, supply: l.supply - ARK_SUPPLY } } }));
+    } else {
+      this.adjustGroup('dock', [], { supply: ark.stores.supply - ARK_SUPPLY });
+      this.movePeople(s.economy.colonies.find((c) => c.capital)!.planetId!, -1);
+    }
+    this.foundColony(planet, star);
+  }
+
+  /**
+   * The state's ark at a star that can settle now (a fleet's, with colonists and a full ark's
+   * supply; or the home dock's, with colonists from the capital), else why none can.
+   */
+  arkAt = (star: StarSystem): FleetGroup | string => {
+    const arks = this.stateGroupsAt(star).filter((x) => countOf(x.ships, ARK) > 0);
+    if (!arks.length) return `Settling needs a Colony Ark on station in ${star.name}`;
+    const fleet = arks.find((g) => g.id !== 'dock' && (g.colonists ?? 0) > 0 && g.stores.supply >= ARK_SUPPLY);
+    if (fleet) return fleet;
+    const capital = this.state.economy.colonies.find((c) => c.capital);
+    const dock = arks.find((g) => g.id === 'dock' && g.stores.supply >= ARK_SUPPLY);
+    if (dock && capital && (capital.pop ?? 1) >= 2) return dock;
+    if (arks.some((g) => g.id !== 'dock' && !(g.colonists ?? 0))) return `The ark at ${star.name} has no colonists: load them at a colony with population 2 or more (Embark)`;
+    if (arks.some((g) => g.id === 'dock')) return `Settling from the dock takes colonists from ${capital?.name ?? 'the capital'}, which needs population 2, and ${ARK_SUPPLY} supply`;
+    return `The ark at ${star.name} needs ${ARK_SUPPLY} supply to settle: resupply in a friendly system`;
+  };
+
+  /** Why a planet cannot be settled (null when it can). */
+  protected cannotSettle(planet: Planet): string | null {
+    if (!this.state.explored[planet.id]) return `Survey ${planet.name} before settling it`;
+    if (!settleable(planet.biome)) return `${planet.name} cannot be settled: ${BIOMES.find((b) => b.id === planet.biome)?.settle === 'conquest' ? 'it can only be taken' : 'nothing can live on it'}`;
+    return null;
+  }
+
+  /** A new colony on a planet: one point of population, which grows on its own food surplus. */
+  protected foundColony(planet: Planet, star: StarSystem, by?: string): void {
     const colony: Colony = { name: planet.name, biome: planet.biome, planetId: planet.id, starId: star.id, size: planet.size, buildings: [], pop: 1 };
     this.deps.store.update((st) => ({ economy: { ...st.economy, colonies: [...st.economy.colonies, colony] } }));
-    this.dispatch(`${planet.name} settled: a new colony with ${slotsOf(planet.size)} building slots`, 'good');
+    this.dispatch(`${planet.name} settled${by ? ` by ${by}` : ''}: a new colony with ${slotsOf(planet.size)} building slots`, 'good');
     this.deps.report?.('colony', `settled ${planet.name} in ${star.name}`, placeOf(star));
+  }
+
+  /** Add (or take, negative) population on a colony. */
+  protected movePeople(planetId: string, delta: number): void {
+    this.deps.store.update((st) => ({ economy: { ...st.economy, colonies: st.economy.colonies.map((c) => (c.planetId === planetId ? { ...c, pop: Math.max(1, (c.pop ?? 1) + delta) } : c)) } }));
+  }
+
+  /**
+   * Load colonists onto a fleet's empty arks from your colonies in the system it is at: one per
+   * ark, each from a colony with population 2 or more (the most populous first), which loses one.
+   * Returns how many boarded.
+   */
+  embark(fleetId: string, quiet = false): number {
+    const s = this.state;
+    const l = s.loadouts[fleetId];
+    const star = this.stationedAt(fleetId);
+    if (!l || !star) return 0;
+    if (l.company && !quiet) { this.notYours(fleetId); return 0; }
+    let room = countOf(l.ships, ARK) - (l.colonists ?? 0);
+    if (room <= 0) { if (!quiet) this.dispatch(`${this.fleetName(fleetId)} is already carrying colonists`); return 0; }
+    let boarded = 0;
+    for (;;) {
+      if (room <= 0) break;
+      const from = this.state.economy.colonies.filter((c) => c.starId === star.id && (c.pop ?? 1) >= 2).sort((a, b) => (b.pop ?? 1) - (a.pop ?? 1))[0];
+      if (!from?.planetId) break;
+      this.movePeople(from.planetId, -1);
+      boarded++;
+      room--;
+    }
+    if (!boarded) {
+      if (!quiet) this.dispatch(`No colony at ${star.name} has people to spare: colonists board from a colony with population 2 or more`, 'bad');
+      return 0;
+    }
+    this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...st.loadouts[fleetId], colonists: (st.loadouts[fleetId].colonists ?? 0) + boarded } } }));
+    if (!quiet) this.dispatch(`${boarded} colon${boarded === 1 ? 'y' : 'ies'}' worth of colonists boarded ${this.fleetName(fleetId)} at ${star.name}`, 'good');
+    return boarded;
   }
 
   buildDepot(star: StarSystem): void {
     const s = this.state;
     if (this.isFriendly(star)) return;
-    const g = this.groupsAt(star).find((x) => countOf(x.ships, 'construction-tender') > 0);
+    const g = this.stateGroupsAt(star).find((x) => countOf(x.ships, 'construction-tender') > 0);
     if (!g) return this.dispatch(`A supply depot needs a Construction Tender on station in ${star.name}`, 'bad');
     const cost = { credits: 60, metals: 40 };
     if (!canAfford(s.empire.materials, cost)) return this.dispatch('A supply depot costs 60 credits and 40 metals', 'bad');
@@ -884,7 +1045,7 @@ export class EmpireSim {
     this.deps.report?.('depot', `built a supply depot at ${star.name}`, placeOf(star));
   }
 
-  build(planetId: string, buildingId: string): void {
+  build(planetId: string, buildingId: string, quiet = false): void {
     const s = this.state;
     const colony = this.colonyAt(planetId);
     const b = BUILDINGS.find((x) => x.id === buildingId);
@@ -899,7 +1060,7 @@ export class EmpireSim {
     const job = construction[construction.length - 1];
     this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, b.cost) }, construction });
     this.noteFlow(s.empire.materials, `${b.name} on ${colony.name}`);
-    this.dispatch(`${b.name} under construction on ${colony.name}: ready in ${formatDuration(job.doneTurn - s.turn, CLOCK)}`);
+    if (!quiet) this.dispatch(`${b.name} under construction on ${colony.name}: ready in ${formatDuration(job.doneTurn - s.turn, CLOCK)}`);
   }
 
   /** Finish construction due by this year; returns what was completed. */
@@ -912,8 +1073,9 @@ export class EmpireSim {
       const colony = this.colonyAt(j.site);
       if (!colony) continue;
       if (j.kind === 'ship') {
-        this.launchShip(j.item, colony);
-        news.push(`${this.classById.get(j.item)?.name ?? j.item} launched at ${colony.name}`);
+        const company = j.charter ? this.charterCompany(j.item, colony) : null;
+        if (!company) this.launchShip(j.item, colony);
+        news.push(company ? `${this.classById.get(j.item)?.name ?? j.item} launched at ${colony.name}: ${company.name} is founded, the state holds ${company.held} of its ${company.shares} shares` : `${this.classById.get(j.item)?.name ?? j.item} launched at ${colony.name}`);
       } else {
         const colonies = this.state.economy.colonies.map((c) => (c.planetId === j.site ? { ...c, buildings: [...(c.buildings ?? []), j.item] } : c));
         this.deps.store.update((st) => ({ economy: { ...st.economy, colonies } }));
@@ -967,6 +1129,12 @@ export class EmpireSim {
     const news: string[] = [];
     for (const f of s.fleets) {
       const l = s.loadouts[f.id];
+      // Companies run their own fleets.
+      if (l?.company) {
+        const note = this.runCompanyFleet(f.id);
+        if (note) news.push(note);
+        continue;
+      }
       if (l?.orders?.chase) {
         const note = this.steerChase(f.id);
         if (note) news.push(note);
@@ -1060,7 +1228,7 @@ export class EmpireSim {
     // Name the resource it goes for: the one with most left there.
     const report = this.fieldReport(next);
     const resource = [...resources].sort((a, b) => stockFor(report, [b]) - stockFor(report, [a]))[0];
-    this.moveFleet(f.id, next, true);
+    this.steer(f.id, next);
     return `${f.name} heads to ${next.name} to mine ${resource}`;
   }
 
@@ -1124,14 +1292,30 @@ export class EmpireSim {
   /** Goods a group can carry, with research. */
   cargoCapacity = (ships: readonly Squadron[]): number => cargoCapacity(ships, bonusOf(this.tree, this.state.empire.research, 'cargo'));
 
-  /** What a cargo loaded at `from` sells for at a market. */
-  saleValue = (goods: number, from: StarSystem, market: Market): number => {
+  /** What a cargo loaded at `from` sells for at a market, after the market's tariff. */
+  saleValue = (goods: number, from: StarSystem, market: Market): number => this.saleQuote(goods, from, market).credits;
+
+  /** A sale's credits after tariff, and the tariff (which goes to the market's owner, when a player). */
+  saleQuote = (goods: number, from: StarSystem, market: Market): { credits: number; tariff: number } => {
     const s = this.state;
     const at = this.starById(market.starId);
+    if (!at) return { credits: 0, tariff: 0 };
     const tradePct = tradePctOf({ ...s.economy, stock: s.empire.materials }, this.deps.economy, s.empire.research);
     // An NPC faction pays more the better you stand with it.
     const factor = market.npc ? marketFactor(this.standingWith(market.npc)) : 1;
-    return at ? Math.round(saleValue(goods, hexDistance(from.hex, at.hex), market.kind, tradePct) * factor) : 0;
+    const gross = saleValue(goods, hexDistance(from.hex, at.hex), market.kind, tradePct) * factor;
+    const tariff = Math.round(gross * this.marketTariff(market) / 100);
+    return { credits: Math.round(gross) - tariff, tariff };
+  };
+
+  /** Percent a market's owner takes from goods sold there: none at home (change commerce). */
+  marketTariff = (market: Market): number => {
+    if (market.npc) {
+      const def = npcById(this.deps.galaxy, market.npc);
+      return def ? npcTariff(def.archetype.id, this.standingWith(market.npc)) : 0;
+    }
+    if (market.player) return this.playerTariff(market.player);
+    return 0;
   };
 
   /** Where a fleet is on station, if it is. */
@@ -1142,6 +1326,7 @@ export class EmpireSim {
 
   /** Fill a fleet's freighters with trade goods at one of your colony systems. */
   loadGoods(fleetId: string, quiet = false): number {
+    if (!quiet && this.runByCompany(fleetId)) return 0;
     const s = this.state;
     const l = s.loadouts[fleetId];
     const star = this.stationedAt(fleetId);
@@ -1149,29 +1334,39 @@ export class EmpireSim {
     const room = this.cargoCapacity(l.ships) - (l.cargo ?? 0);
     const take = Math.max(0, Math.min(room, Math.floor(s.empire.materials.goods ?? 0)));
     if (!take) return 0;
+    // A trading company buys its goods from the state.
+    const company = l.company ? this.companyById(l.company) : undefined;
+    const paid = company ? Math.round(take * (BASE_PRICE.goods ?? 4) * COMMERCE.goodsShare) : 0;
     this.deps.store.update({
-      empire: { ...s.empire, materials: { ...s.empire.materials, goods: s.empire.materials.goods - take } },
+      empire: { ...s.empire, materials: { ...s.empire.materials, goods: s.empire.materials.goods - take, credits: s.empire.materials.credits + paid } },
       loadouts: { ...s.loadouts, [fleetId]: { ...l, cargo: (l.cargo ?? 0) + take, cargoFrom: l.cargo ? l.cargoFrom : star.id } },
     });
-    this.noteFlow(s.empire.materials, `${this.fleetName(fleetId)} loaded goods at ${star.name}`);
+    if (company) this.bookCompany(company.id, 0, paid);
+    this.noteFlow(s.empire.materials, company ? `Goods sold to ${company.name}` : `${this.fleetName(fleetId)} loaded goods at ${star.name}`);
     if (!quiet) this.dispatch(`${this.fleetName(fleetId)} loads ${take} trade goods at ${star.name}`);
     return take;
   }
 
   /** Sell a fleet's goods at the market it is at (not where they were loaded). Returns the credits. */
   sellGoods(fleetId: string, quiet = false): number {
+    if (!quiet && this.runByCompany(fleetId)) return 0;
     const s = this.state;
     const l = s.loadouts[fleetId];
     const star = this.stationedAt(fleetId);
     const market = star && this.marketAt(star);
     const from = l?.cargoFrom ? this.starById(l.cargoFrom) : null;
     if (!l?.cargo || !star || !market || !from || from.id === star.id) return 0;
-    const credits = this.saleValue(l.cargo, from, market);
+    const { credits, tariff } = this.saleQuote(l.cargo, from, market);
+    // A company's sale is its own revenue; the state's goes into the treasury.
+    const company = l.company ? this.companyById(l.company) : undefined;
     this.deps.store.update({
-      empire: { ...s.empire, materials: { ...s.empire.materials, credits: s.empire.materials.credits + credits } },
+      empire: company ? s.empire : { ...s.empire, materials: { ...s.empire.materials, credits: s.empire.materials.credits + credits } },
       loadouts: { ...s.loadouts, [fleetId]: { ...l, cargo: 0, cargoFrom: undefined } },
     });
-    this.noteFlow(s.empire.materials, `${this.fleetName(fleetId)} sold goods at ${market.name}`);
+    if (company) this.bookCompany(company.id, credits, 0);
+    else this.noteFlow(s.empire.materials, `${this.fleetName(fleetId)} sold goods at ${market.name}`);
+    // Another player's world: its owner gets the tariff.
+    if (market.player && tariff > 0) this.emit([{ kind: 'payout', to: market.player, label: `Tariffs from ${this.empireName()}`, credits: tariff }]);
     if (market.npc) this.changeStanding(market.npc, Math.min(STANDING.tradeMax, Math.max(1, Math.floor(l.cargo * STANDING.perGoods))));
     if (!quiet) this.dispatch(this.saleNews(fleetId, l.cargo, market, credits), 'good');
     return credits;
@@ -1186,6 +1381,7 @@ export class EmpireSim {
    * market, sells them there, and repeats. From the dock, the docked freighters set out as a new fleet.
    */
   tradeRun(groupId: string, to: StarSystem | null): void {
+    if (this.runByCompany(groupId)) return;
     const s = this.state;
     if (!to) {
       const l = s.loadouts[groupId];
@@ -1230,9 +1426,16 @@ export class EmpireSim {
     }
     if (at.id === from.id) this.loadGoods(fleetId, true);
     const cargo = this.state.loadouts[fleetId]?.cargo ?? 0;
-    const next = cargo > 0 ? to : from;
-    if (next.id !== at.id) this.moveFleet(fleetId, next, true);
+    // A company waits at the loading end until its holds are half full; a state run leaves with what there is.
+    const enough = l.company ? cargo >= this.cargoCapacity(l.ships) / 2 : cargo > 0;
+    const next = enough ? to : from;
+    if (next.id !== at.id) this.steer(fleetId, next);
     return news;
+  }
+
+  /** Set a fleet's course for a star without a word (standing orders and companies). */
+  protected steer(fleetId: string, to: StarSystem): void {
+    this.setCourse(fleetId, to.hex, to.name, true);
   }
 
   foundFaith(name: string, tenets: string[]): void {
@@ -1388,6 +1591,7 @@ export class EmpireSim {
    * for where its quarry will be; it fights when they are on the same hex.
    */
   chase(fleetId: string, target: string | null): void {
+    if (this.runByCompany(fleetId)) return;
     const s = this.state;
     const f = s.fleets.find((x) => x.id === fleetId);
     const l = s.loadouts[fleetId];
@@ -1514,6 +1718,581 @@ export class EmpireSim {
     }
     return out;
   }
+
+  // ── The empire governor (change empire-governor) ──
+
+  /** Switch the governor on or change it: its focus, whether it builds and picks research, and its credit reserve. */
+  setGovernor(focus: GovernorFocus, build: boolean, research: boolean, reserve: number): void {
+    if (!(focus in FOCI)) return;
+    this.deps.store.update({ governor: { focus, build, research, reserve: Math.max(0, Math.min(1_000_000, Math.round(reserve))) } });
+  }
+
+  /**
+   * The governor's year: a research focus when none is set, and the best building for its focus on
+   * every colony with a free slot and nothing under construction, while the credits last above the
+   * reserve. Returns its news.
+   */
+  protected govern(): string[] {
+    const g = this.state.governor;
+    if (!g) return [];
+    const news: string[] = [];
+    if (g.research && !this.state.economy.focus) {
+      const id = pickResearch(this.deps.tree, this.state.empire.research, g.focus);
+      if (id) {
+        this.setFocus(id);
+        news.push(`Governor: research ${this.deps.tree.node(id).name} next`);
+      }
+    }
+    if (!g.build) return news;
+    const caps = this.caps();
+    const stock = this.state.empire.materials;
+    const nearlyFull = RESOURCES.filter((r) => caps[r.id] !== undefined && stock[r.id] >= caps[r.id]! * 0.8).length;
+    const foodIncome = this.state.lastReport?.income.food ?? FOOD_FLOOR;
+    for (const c of this.state.economy.colonies) {
+      if (!c.planetId || this.jobs(c.planetId).some((j) => j.kind === 'building')) continue;
+      const have = c.buildings ?? [];
+      if (have.length >= slotsOf(c.size ?? 3, c.capital)) continue;
+      const site = { biomeYields: BIOME_YIELDS[c.biome] ?? {}, buildings: have, foodIncome, nearlyFull };
+      const m = this.state.empire.materials;
+      const pick = pickBuilding(BUILDINGS, g.focus, site, (b) => this.isBuildingUnlocked(b.id) && canAfford(m, b.cost) && m.credits - (b.cost.credits ?? 0) >= g.reserve);
+      if (!pick) continue;
+      this.build(c.planetId, pick.id, true);
+      news.push(`Governor: ${pick.name} started on ${c.name}`);
+    }
+    return news;
+  }
+
+  // ── Commerce: companies, exchanges, tariffs and shares (change commerce) ──
+
+  get commerce(): CommerceState {
+    return this.state.commerce ?? NO_COMMERCE;
+  }
+
+  protected updateCommerce(fn: (c: CommerceState) => CommerceState): void {
+    this.deps.store.update((st) => ({ commerce: fn(st.commerce ?? NO_COMMERCE) }));
+  }
+
+  companyById = (id: string): Company | undefined => this.commerce.companies.find((c) => c.id === id);
+
+  /** True, and says so, when a fleet is a company's: the state gives it no orders. */
+  protected runByCompany(fleetId: string): boolean {
+    if (!this.state.loadouts[fleetId]?.company) return false;
+    this.notYours(fleetId);
+    return true;
+  }
+
+  protected notYours(fleetId: string): void {
+    const c = this.companyById(this.state.loadouts[fleetId]?.company ?? '');
+    this.dispatch(`${this.fleetName(fleetId)} is run by ${c?.name ?? 'a company'}: it takes no orders from the state`, 'bad');
+  }
+
+  /** The empire's name as other empires know it. */
+  protected empireName = (): string => this.state.identity?.name ?? this.state.playerName;
+
+  /** Book what a company earned and spent this year (settled at the start of the next). */
+  protected bookCompany(id: string, revenue: number, costs: number): void {
+    if (!revenue && !costs) return;
+    this.updateCommerce((c) => ({ ...c, companies: c.companies.map((x) => (x.id === id ? { ...x, revenue: x.revenue + revenue, costs: x.costs + costs } : x)) }));
+  }
+
+  /** A company's ships (none when its fleet is gone). */
+  companyShips = (c: Company): Squadron[] => [...(this.state.loadouts[c.fleetId]?.ships ?? [])];
+
+  protected costOf = (classId: string) => this.classById.get(classId)?.cost;
+
+  /** A share of one of your companies: its assets and record. */
+  sharePriceOf = (c: Company): number => sharePrice(c, fleetValue(this.companyShips(c), this.costOf));
+
+  /** Shares other players hold in one of your companies (kept in the shared world). */
+  protected outsideShares(companyId: string, owner = this.me): number {
+    return Object.values(this.sharedWorld().stakes?.[stakeKey(owner, companyId)] ?? {}).reduce((a, b) => a + b, 0);
+  }
+
+  /**
+   * A chartered ship is launched: it founds a company that owns it as its own fleet, in the yard's
+   * system. The state keeps most of the shares and sells the rest, for that share of the ship's value.
+   */
+  protected charterCompany(classId: string, yard: Colony): Company | null {
+    const c = this.classById.get(classId);
+    const kind = companyKindOf(c);
+    if (!c || !kind) return null;
+    const s = this.state;
+    const star = (yard.starId ? this.starById(yard.starId) : null) ?? s.home;
+    const n = (this.commerce.chartered ?? 0) + 1;
+    const name = companyName(kind, star.name, hashSeed(this.me, n), this.commerce.companies.map((x) => x.name));
+    const company = charter(`co-${n}`, name, kind, `company-${n}-t${s.turn}`, s.turn);
+    // A colony company's first ark takes its colonists from the yard's world, if it can spare them.
+    const colonists = kind === 'colony' && yard.planetId && (yard.pop ?? 1) >= 2 ? 1 : 0;
+    if (colonists) this.movePeople(yard.planetId!, -1);
+    const ipo = Math.round((shipValue(c.cost) * (company.shares - company.held)) / company.shares);
+    const before = this.state.empire.materials;
+    this.deps.store.update((st) => ({
+      empire: { ...st.empire, materials: { ...st.empire.materials, credits: st.empire.materials.credits + ipo } },
+      commerce: { ...(st.commerce ?? NO_COMMERCE), chartered: n, companies: [...(st.commerce ?? NO_COMMERCE).companies, company] },
+    }));
+    this.companyFleet(company, classId, star, colonists);
+    this.noteFlow(before, `${name}: ${company.shares - company.held} shares floated`);
+    return company;
+  }
+
+  /** A new fleet for a company, with one ship, at a star. */
+  protected companyFleet(company: Company, classId: string, star: StarSystem, colonists = 0): void {
+    const s = this.state;
+    const ships = [{ classId, count: 1 }];
+    const fleet = { id: company.fleetId, name: company.name, owner: s.playerName, color: this.empireColor(), movement: planMovement(star.hex, star.hex, s.turn, 1), design: this.designOf(ships) };
+    const orders: FleetOrders | undefined = company.kind === 'mining' ? { autoMine: true } : undefined;
+    this.deps.store.update((st) => ({
+      fleets: [...st.fleets.filter((f) => f.id !== fleet.id), fleet],
+      loadouts: { ...st.loadouts, [fleet.id]: { ships, ...fullStores(ships, specOf), ...(orders ? { orders } : {}), company: company.id, ...(company.kind === 'colony' ? { colonists } : {}) } },
+    }));
+  }
+
+  /** A company's year at work: trading, mining or settling. Returns its news, if any. */
+  protected runCompanyFleet(fleetId: string): string | null {
+    const l = this.state.loadouts[fleetId];
+    const company = l?.company ? this.companyById(l.company) : undefined;
+    if (!l || !company) return null;
+    if (company.kind === 'trade') return this.companyTrade(fleetId);
+    if (company.kind === 'mining') return this.mineOn(fleetId);
+    return this.companyColonize(fleetId, company);
+  }
+
+  /** A trading company takes the best route it knows whenever it is empty at the loading end. */
+  protected companyTrade(fleetId: string): string | null {
+    const l = this.state.loadouts[fleetId];
+    const at = this.stationedAt(fleetId);
+    if (!at) return null;
+    const route = l.orders?.trade;
+    if (!route || (!l.cargo && at.id === route.from) || !this.starById(route.to) || !this.marketAt(this.starById(route.to)!)) {
+      const best = this.bestTradeRoute(fleetId, at);
+      if (!best) return null;
+      if (best.from !== route?.from || best.to !== route?.to) {
+        this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...st.loadouts[fleetId], orders: { ...st.loadouts[fleetId].orders, trade: best } } } }));
+      }
+    }
+    return this.runTrade(fleetId);
+  }
+
+  /**
+   * The route that pays a fleet's freighters most a year: load at your colony nearest a market and
+   * sell there, less what the goods cost a company, over the years of the round trip.
+   */
+  bestTradeRoute(fleetId: string, at: StarSystem): { from: string; to: string } | null {
+    const l = this.state.loadouts[fleetId];
+    const cap = l ? this.cargoCapacity(l.ships) : 0;
+    if (!cap) return null;
+    const speed = this.fleetSpeed();
+    const cost = cap * (BASE_PRICE.goods ?? 4) * COMMERCE.goodsShare;
+    const colonies = [...this.colonyStars()].map((id) => this.starById(id)).filter((x): x is StarSystem => !!x);
+    let best: { from: string; to: string } | null = null, rate = 0;
+    for (const m of this.markets()) {
+      const to = this.starById(m.starId);
+      if (!to) continue;
+      const from = colonies.filter((c) => c.id !== to.id).sort((a, b) => hexDistance(a.hex, to.hex) - hexDistance(b.hex, to.hex) || (a.id < b.id ? -1 : 1))[0];
+      if (!from) continue;
+      const years = travelTurns(hexDistance(at.hex, from.hex), speed) + 2 * travelTurns(hexDistance(from.hex, to.hex), speed) + 2;
+      const r = (this.saleValue(cap, from, m) - cost) / years;
+      if (r > rate) { rate = r; best = { from: from.id, to: to.id }; }
+    }
+    return best;
+  }
+
+  /** Whether a company may settle a planet: surveyed, settleable, free, outside other empires' space. */
+  protected canSettleFor(planet: Planet, fleetId: string): boolean {
+    if (this.cannotSettle(planet) || this.colonyAt(planet.id)) return false;
+    const star = this.starOfPlanet(planet);
+    if (!star) return false;
+    // Someone else's space (another player's or an NPC's), unless it is also yours.
+    const yours = this.colonyStars().has(star.id) || this.playerClaim().colonies.some((c) => hexDistance(c.hex, star.hex) <= c.radius);
+    if (!yours && this.describe(star).owner) return false;
+    // Another of your companies is already taking colonists there.
+    return !Object.entries(this.state.loadouts).some(([id, l]) => id !== fleetId && l.orders?.settle === planet.id);
+  }
+
+  /** What a world is worth to settle: its yields at base prices, bigger worlds more. */
+  protected worldValue(planet: Planet): number {
+    let v = 0;
+    for (const [r, n] of Object.entries(BIOME_YIELDS[planet.biome] ?? {})) v += (n ?? 0) * (r === 'credits' ? 1 : BASE_PRICE[r as Resource] ?? 2);
+    return v * (0.6 + 0.2 * planet.size);
+  }
+
+  /** The best world for a colony company to settle within reach of a hex. */
+  protected bestSettlement(from: Hex, fleetId: string): Planet | null {
+    let best: Planet | null = null, score = 0;
+    for (const id of Object.keys(this.state.explored)) {
+      const p = this.planetById(id);
+      const star = p ? this.starOfPlanet(p) : null;
+      if (!p || !star) continue;
+      const d = hexDistance(from, star.hex);
+      if (d > COMMERCE.colonyReach) continue;
+      const value = this.worldValue(p);
+      if (value <= 0) continue;
+      const sc = value / (1 + d / 10);
+      if (sc > score && this.canSettleFor(p, fleetId)) { score = sc; best = p; }
+    }
+    return best;
+  }
+
+  /**
+   * A colony company's year: load colonists where it can, settle the world it is bound for when it
+   * is there, pick the next one, or head back for colonists and supply.
+   */
+  protected companyColonize(fleetId: string, company: Company): string | null {
+    const at = this.stationedAt(fleetId);
+    if (!at) return null;
+    let l = this.state.loadouts[fleetId];
+    if ((l.colonists ?? 0) < countOf(l.ships, ARK) && this.colonyStars().has(at.id)) {
+      this.embark(fleetId, true);
+      l = this.state.loadouts[fleetId];
+    }
+    const loaded = l.colonists ?? 0;
+    if (loaded > 0 && l.supply >= ARK_SUPPLY) {
+      const bound = l.orders?.settle ? this.planetById(l.orders.settle) : null;
+      const target = bound && this.canSettleFor(bound, fleetId) ? bound : this.bestSettlement(at.hex, fleetId);
+      if (!target) {
+        if (bound) this.setSettleTarget(fleetId, undefined);
+        return null;
+      }
+      const star = this.starOfPlanet(target)!;
+      if (star.id === at.id) return this.companySettle(fleetId, company, target, star);
+      if (target.id !== bound?.id) {
+        this.setSettleTarget(fleetId, target.id);
+        this.steer(fleetId, star);
+        return `${company.name} sets out to settle ${target.name}`;
+      }
+      return null;
+    }
+    // Out of colonists: the nearest system with a colony that can spare people; out of supply: the nearest friendly one.
+    const to = loaded === 0 ? this.nearestPeopled(at.hex) : this.isFriendly(at) ? null : this.nearestFriendly(at.hex);
+    if (to && to.id !== at.id) {
+      this.steer(fleetId, to);
+      return loaded === 0 ? `${company.name} heads to ${to.name} for colonists` : null;
+    }
+    return null;
+  }
+
+  protected setSettleTarget(fleetId: string, planetId: string | undefined): void {
+    this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...st.loadouts[fleetId], orders: { ...st.loadouts[fleetId].orders, settle: planetId } } } }));
+  }
+
+  /** A colony company settles a world: its ark spends its colonists and supply, and the state pays the fee. */
+  protected companySettle(fleetId: string, company: Company, planet: Planet, star: StarSystem): string {
+    const l = this.state.loadouts[fleetId];
+    this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, colonists: (l.colonists ?? 0) - 1, supply: l.supply - ARK_SUPPLY, orders: { ...l.orders, settle: undefined } } } }));
+    this.foundColony(planet, star, company.name);
+    const before = this.state.empire.materials;
+    const fee = Math.max(0, Math.min(COMMERCE.settleFee, Math.floor(before.credits)));
+    if (fee) {
+      this.deps.store.update((st) => ({ empire: { ...st.empire, materials: { ...st.empire.materials, credits: st.empire.materials.credits - fee } } }));
+      this.noteFlow(before, `Settlement fee: ${company.name}`);
+      this.bookCompany(company.id, fee, 0);
+    }
+    return `${company.name} settled ${planet.name}${fee ? ` for a fee of ${fee} credits` : ''}`;
+  }
+
+  /** The nearest system with a colony of yours that can spare colonists (population 2 or more). */
+  protected nearestPeopled(from: Hex): StarSystem | null {
+    const stars = [...new Set(this.state.economy.colonies.filter((c) => (c.pop ?? 1) >= 2 && c.starId).map((c) => c.starId!))]
+      .map((id) => this.starById(id)).filter((x): x is StarSystem => !!x);
+    return stars.sort((a, b) => hexDistance(from, a.hex) - hexDistance(from, b.hex) || (a.id < b.id ? -1 : 1))[0] ?? null;
+  }
+
+  /** Every company's accounts for the year, settled from what it earned and spent (no change made). */
+  protected companyYears(): Array<{ readonly year: CompanyYear; readonly state: number }> {
+    return this.commerce.companies.map((c) => {
+      const upkeep = this.companyShips(c).reduce((n, x) => n + x.count * (this.deps.economy.upkeepOf?.(this.classById.get(x.classId)!) ?? 1), 0);
+      const year = companyYear(c, upkeep);
+      return { year, state: Math.round(year.perShare * c.held) };
+    });
+  }
+
+  /**
+   * The year's income from outside the colonies (the economy's transfers): your companies' tax and
+   * the state's dividends, NPC corporations' dividends, and what other empires owe you.
+   */
+  protected transfers(years = this.companyYears()): Transfer[] {
+    const out: Transfer[] = [];
+    for (const { year, state } of years) {
+      if (year.tax) out.push({ r: 'credits', n: year.tax, group: 'Companies', label: `Tax: ${year.company.name}` });
+      if (state) out.push({ r: 'credits', n: state, group: 'Companies', label: `Dividends: ${year.company.name}` });
+    }
+    for (const [key, n] of Object.entries(this.commerce.portfolio ?? {})) {
+      const corp = key.startsWith('npc:') ? this.corporation(key.slice(4)) : null;
+      const d = corp ? Math.round(corp.dividend * n) : 0;
+      if (d) out.push({ r: 'credits', n: d, group: 'Investments', label: `Dividends: ${corp!.name}` });
+    }
+    for (const [label, n] of Object.entries(this.sharedWorld().payouts?.[this.me] ?? {})) {
+      // Whole credits; a fraction stays owed until it adds up.
+      const credits = Math.floor(n);
+      if (credits > 0) out.push({ r: 'credits', n: credits, group: OWED, label });
+    }
+    return out;
+  }
+
+  /**
+   * After the year's economy: what was owed is collected, companies' books are closed (with this
+   * year's ore contracts carried into the next), other players get their dividends, and companies
+   * grow, or are wound up when they have lost their fleet.
+   */
+  protected settleCommerce(years: ReadonlyArray<{ readonly year: CompanyYear }>, transfers: readonly Transfer[], contracts: Readonly<Record<string, number>>): string[] {
+    const effects: SharedEffect[] = [];
+    const claimed = Object.fromEntries(transfers.filter((t) => t.group === OWED).map((t) => [t.label, t.n]));
+    if (Object.keys(claimed).length) effects.push({ kind: 'claim', player: this.me, amounts: claimed });
+    const stakes = this.sharedWorld().stakes ?? {};
+    const news: string[] = [];
+    const companies: Company[] = [];
+    for (const { year } of years) {
+      let c: Company = { ...year.company, revenue: year.company.revenue + (contracts[year.company.id] ?? 0) };
+      for (const [holder, n] of Object.entries(stakes[stakeKey(this.me, c.id)] ?? {})) {
+        const credits = Math.round(year.perShare * n * 100) / 100;
+        if (credits > 0 && holder !== this.me) effects.push({ kind: 'payout', to: holder, label: `Dividends: ${c.name} (${this.empireName()})`, credits });
+      }
+      const ships = this.companyShips(c);
+      const classId = [...ships].sort((a, b) => b.count - a.count)[0]?.classId ?? COMPANY_SHIP[c.kind];
+      const cls = this.classById.get(classId)!;
+      const price = shipValue(cls.cost);
+      if (wantsShip(c, shipTotal(ships), price, this.state.turn) && this.hasWorkFor(c, ships, contracts[c.id] ?? 0)) {
+        c = { ...c, treasury: c.treasury - price, grown: this.state.turn };
+        if (ships.length) this.adjustGroup(c.fleetId, [{ classId, count: 1 }]);
+        else this.companyFleet(c, classId, this.state.home);
+        news.push(`${c.name} bought a ${cls.name}: its fleet is ${shipTotal(ships) + 1} strong`);
+      } else if (!ships.length) {
+        news.push(`${c.name} has lost its fleet and cannot buy another: it is wound up`);
+        continue;
+      }
+      companies.push(c);
+    }
+    this.emit(effects);
+    this.updateCommerce((cm) => ({ ...cm, companies, pressure: fadePressure(cm.pressure) }));
+    return news;
+  }
+
+  /**
+   * Whether a company has work for another ship: a trading company only when trade goods are piling
+   * up beyond what it carries, a mining company only when every ship it has was mining last year.
+   */
+  protected hasWorkFor(c: Company, ships: readonly Squadron[], contracted: number): boolean {
+    if (c.kind === 'trade') {
+      // Goods the colonies make in a round trip must fill one more freighter's hold.
+      const run = this.state.loadouts[c.fleetId]?.orders?.trade;
+      const from = run && this.starById(run.from), to = run && this.starById(run.to);
+      if (!from || !to) return false;
+      const trip = 2 * travelTurns(hexDistance(from.hex, to.hex), this.fleetSpeed()) + 2;
+      const made = Math.max(0, this.state.lastReport?.income.goods ?? 0);
+      return made * trip >= this.cargoCapacity([...ships, { classId: FREIGHTER, count: 1 }]);
+    }
+    if (c.kind === 'mining') {
+      const full = ships.reduce((n, x) => n + x.count * this.minePerYear(x.classId) * contractPrice(this.classById.get(x.classId)?.mines ?? 'metals'), 0);
+      return contracted >= full * 0.75;
+    }
+    return true;
+  }
+
+  /** What a company's fleet is doing, in a few words (the Companies tab). */
+  companyStatus = (c: Company): string => {
+    const s = this.state;
+    const l = s.loadouts[c.fleetId];
+    const f = s.fleets.find((x) => x.id === c.fleetId);
+    if (!l || !f) return 'Has no fleet: it buys a ship when it can';
+    const at = this.stationedAt(c.fleetId);
+    const dest = this.deps.galaxy.starAt(f.movement.route[f.movement.route.length - 1]);
+    if (c.kind === 'trade') {
+      const run = l.orders?.trade;
+      const from = run && this.starById(run.from), to = run && this.starById(run.to);
+      if (!run || !from || !to) return 'Looking for a market';
+      if (at?.id === from.id && !l.cargo) return `Waiting at ${from.name} for trade goods`;
+      return l.cargo ? `Carrying ${fmtInt(l.cargo)} goods from ${from.name} to ${to.name}` : `Heading back to ${from.name} for goods`;
+    }
+    if (c.kind === 'mining') return at ? (stockFor(this.fieldReport(at), minedBy(l.ships, (id) => this.classById.get(id)?.mines)) > 0 ? `Mining at ${at.name}` : 'No field with rock left in reach') : `Heading to ${dest?.name ?? 'a field'} to mine`;
+    const bound = l.orders?.settle ? this.planetById(l.orders.settle) : null;
+    if (bound) return `Taking colonists to ${bound.name}`;
+    if (!(l.colonists ?? 0)) return at ? `Waiting at ${at.name} for colonists: a colony there needs population 2` : `Heading to ${dest?.name ?? 'a colony'} for colonists`;
+    if (l.supply < ARK_SUPPLY) return 'Resupplying';
+    return `No surveyed world to settle within ${COMMERCE.colonyReach} ly: survey more systems nearby`;
+  };
+
+  // ── Exchanges ──
+
+  /** The exchanges you can trade on: every NPC faction you know and every player you have met. */
+  exchanges = (): ExchangeInfo[] => {
+    const out: ExchangeInfo[] = [];
+    for (const { def } of this.knownNpcs()) {
+      const makes = Object.entries(BIOME_YIELDS[def.archetype.biome] ?? {}).filter(([, n]) => (n ?? 0) > 0).map(([r]) => r as Resource);
+      out.push({ id: `npc:${def.id}`, name: def.name, kind: 'npc', owner: def.id, color: def.color, tariff: npcTariff(def.archetype.id, this.standingWith(def.id)), makes, home: def.home });
+    }
+    for (const e of this.otherEmpires()) {
+      if (e.id === this.me || !this.hasMet(e.id)) continue;
+      const home = e.home ? this.deps.galaxy.starAt(e.home) : null;
+      out.push({ id: `player:${e.id}`, name: e.name, kind: 'player', owner: e.id, color: e.color, tariff: this.playerTariff(e.id), ...(home ? { home } : {}) });
+    }
+    return out;
+  };
+
+  /** The tariff another player charges you (their default before they published one). */
+  protected playerTariff(player: string): number {
+    const e = this.otherEmpires().find((x) => x.id === player);
+    return e?.commerce ? tariffFor(e.commerce, this.me) : NO_COMMERCE.tariff;
+  }
+
+  /** What a unit costs to buy, or pays to sell, on an exchange now (with your pressure there). */
+  exchangePrice = (exchangeId: string, r: Resource, side: 'buy' | 'sell'): number => {
+    const ex = this.exchanges().find((x) => x.id === exchangeId);
+    return ex ? unitPrice(ex, r, this.state.turn, side, this.commerce.pressure?.[exchangeId]?.[r] ?? 0) : 0;
+  };
+
+  /** What a trade would come to, without making it. */
+  exchangeQuote = (exchangeId: string, r: Resource, side: 'buy' | 'sell', amount: number): number => {
+    const ex = this.exchanges().find((x) => x.id === exchangeId);
+    return ex && amount > 0 ? exchangeTrade(ex, r, this.state.turn, side, amount, this.commerce.pressure?.[exchangeId]?.[r] ?? 0).credits : 0;
+  };
+
+  buyResource(exchangeId: string, r: Resource, amount: number): void {
+    this.tradeOnExchange(exchangeId, r, 'buy', amount);
+  }
+
+  sellResource(exchangeId: string, r: Resource, amount: number): void {
+    this.tradeOnExchange(exchangeId, r, 'sell', amount);
+  }
+
+  protected tradeOnExchange(exchangeId: string, r: Resource, side: 'buy' | 'sell', want: number): void {
+    const s = this.state;
+    const ex = this.exchanges().find((x) => x.id === exchangeId);
+    if (!ex) return this.dispatch('You can only trade on the exchanges of empires you have met', 'bad');
+    if (!EXCHANGE_RESOURCES.includes(r)) return;
+    const stock = s.empire.materials[r] ?? 0;
+    const cap = this.caps()[r];
+    let amount = Math.max(0, Math.min(COMMERCE.maxTrade, Math.floor(want)));
+    amount = side === 'sell' ? Math.min(amount, Math.floor(stock)) : cap !== undefined ? Math.min(amount, Math.max(0, Math.floor(cap - stock))) : amount;
+    const name = RESOURCES.find((x) => x.id === r)!.name.toLowerCase();
+    if (!amount) return this.dispatch(side === 'sell' ? `No ${name} to sell` : `No room to store more ${name}: build Warehouses`, 'bad');
+    const pressure = this.commerce.pressure?.[exchangeId]?.[r] ?? 0;
+    const t = exchangeTrade(ex, r, s.turn, side, amount, pressure);
+    if (side === 'buy' && t.credits > s.empire.materials.credits) return this.dispatch(`${amount} ${name} costs ${fmtInt(t.credits)} credits on the ${ex.name} exchange`, 'bad');
+    const before = s.empire.materials;
+    const materials = { ...before, [r]: stock + (side === 'buy' ? amount : -amount), credits: before.credits + (side === 'buy' ? -t.credits : t.credits) };
+    this.deps.store.update((st) => ({
+      empire: { ...st.empire, materials },
+      commerce: { ...(st.commerce ?? NO_COMMERCE), pressure: { ...st.commerce?.pressure, [exchangeId]: { ...st.commerce?.pressure?.[exchangeId], [r]: t.pressure } } },
+    }));
+    this.noteFlow(before, `${side === 'buy' ? 'Bought' : 'Sold'} ${amount} ${name} on the ${ex.name} exchange`);
+    if (ex.kind === 'player' && t.tariff > 0) this.emit([{ kind: 'payout', to: ex.owner, label: `Tariffs from ${this.empireName()}`, credits: t.tariff }]);
+    this.dispatch(`${side === 'buy' ? 'Bought' : 'Sold'} ${amount} ${name} on the ${ex.name} exchange for ${fmtInt(t.credits)} credits`);
+  }
+
+  /**
+   * Freighters against the exchange, for trade goods: what an exchange pays a unit now, and what a
+   * freighter run from your colony nearest that empire's nearest world would (with the years one way).
+   */
+  shippingQuote = (exchangeId: string): { exchange: number; freighter: number; years: number; from: string; to: string } | null => {
+    const ex = this.exchanges().find((x) => x.id === exchangeId);
+    if (!ex) return null;
+    const theirs = this.markets().filter((m) => (ex.kind === 'npc' ? m.npc === ex.owner : m.player === ex.owner));
+    const colonies = [...this.colonyStars()].map((id) => this.starById(id)).filter((x): x is StarSystem => !!x);
+    let best: { exchange: number; freighter: number; years: number; from: string; to: string } | null = null;
+    for (const m of theirs) {
+      const to = this.starById(m.starId);
+      if (!to) continue;
+      const from = colonies.sort((a, b) => hexDistance(a.hex, to.hex) - hexDistance(b.hex, to.hex))[0];
+      if (!from) continue;
+      const years = travelTurns(hexDistance(from.hex, to.hex), this.fleetSpeed());
+      const freighter = this.saleValue(100, from, m) / 100;
+      if (!best || years < best.years) best = { exchange: this.exchangePrice(exchangeId, 'goods', 'sell'), freighter, years, from: from.name, to: m.name };
+    }
+    return best;
+  };
+
+  // ── Tariffs ──
+
+  /** Set the tariff other players pay you: everyone's (no player), or one player's. */
+  setTariff(rate: number, player: string | null): void {
+    const t = cleanTariff(rate);
+    this.updateCommerce((c) => {
+      if (!player) return { ...c, tariff: t };
+      const tariffs = { ...c.tariffs };
+      if (t === c.tariff) delete tariffs[player];
+      else tariffs[player] = t;
+      return { ...c, tariffs };
+    });
+  }
+
+  // ── Shares ──
+
+  /** An NPC corporation by id, if you know its faction. */
+  protected corporation(id: string): Corporation | null {
+    const npc = this.knownNpcs().find((n) => n.def.id === corpNpc(id));
+    return npc ? corporationsOf(npc.def).find((c) => c.id === id) ?? null : null;
+  }
+
+  /** Every share you can trade: your companies, those of players you have met, and known factions' corporations. */
+  stocks = (): StockView[] => {
+    const year = this.state.turn, mine = this.commerce;
+    const out: StockView[] = mine.companies.map((c) => ({
+      key: `own:${c.id}`, kind: 'own', name: c.name, owner: this.empireName(), sector: c.kind, price: this.sharePriceOf(c), dividend: c.dividend, status: this.companyStatus(c),
+      held: c.held, float: floatOf(c, this.outsideShares(c.id)), shares: c.shares, ships: shipTotal(this.companyShips(c)), treasury: c.treasury, profit: c.profits[c.profits.length - 1] ?? 0, fleetId: c.fleetId,
+    }));
+    for (const e of this.otherEmpires()) {
+      if (e.id === this.me || !this.hasMet(e.id)) continue;
+      for (const c of e.commerce?.companies ?? []) {
+        const key = playerCompanyKey(e.id, c.id);
+        out.push({ key, kind: 'player', name: c.name, owner: e.name, sector: c.kind, price: c.price, dividend: c.dividend, held: mine.portfolio?.[key] ?? 0, float: floatOf(c, this.outsideShares(c.id, e.id)), shares: c.shares, ships: c.ships });
+      }
+    }
+    for (const { def } of this.knownNpcs()) {
+      for (const c of corporationsOf(def)) {
+        const key = corpKey(c.id);
+        const held = mine.portfolio?.[key] ?? 0;
+        out.push({ key, kind: 'npc', name: c.name, owner: def.name, sector: c.blurb, price: corpPrice(c, year), dividend: c.dividend, held, float: COMMERCE.maxCorpShares - held, history: Array.from({ length: 24 }, (_, i) => corpPrice(c, year - (23 - i) * 10)) });
+      }
+    }
+    // Shares still held in companies no longer listed (wound up, or their empire gone quiet).
+    for (const [key, n] of Object.entries(mine.portfolio ?? {})) {
+      if (n > 0 && !out.some((x) => x.key === key)) out.push({ key, kind: key.startsWith('npc:') ? 'npc' : 'player', name: 'Delisted company', owner: '—', sector: 'No longer trades', price: 0, dividend: 0, held: n, float: 0, delisted: true });
+    }
+    return out;
+  };
+
+  buyShares(key: string, want: number): void {
+    this.tradeShares(key, Math.max(0, Math.min(MAX_SHARE_TRADE, Math.floor(want))), 'buy');
+  }
+
+  sellShares(key: string, want: number): void {
+    this.tradeShares(key, Math.max(0, Math.min(MAX_SHARE_TRADE, Math.floor(want))), 'sell');
+  }
+
+  protected tradeShares(key: string, want: number, side: 'buy' | 'sell'): void {
+    const stock = this.stocks().find((x) => x.key === key);
+    if (!stock || !want) return;
+    const n = side === 'buy' ? Math.min(want, stock.float) : Math.min(want, stock.held);
+    if (!n) return this.dispatch(side === 'buy' ? `No ${stock.name} shares are for sale` : `You hold no ${stock.name} shares`, 'bad');
+    const credits = side === 'buy' ? Math.ceil(stock.price * n * (1 + COMMERCE.shareFee)) : Math.floor(stock.price * n * (1 - COMMERCE.shareFee));
+    const before = this.state.empire.materials;
+    if (side === 'buy' && credits > before.credits) return this.dispatch(`${n} ${stock.name} shares cost ${fmtInt(credits)} credits`, 'bad');
+    const delta = side === 'buy' ? n : -n;
+    this.deps.store.update((st) => {
+      const c = st.commerce ?? NO_COMMERCE;
+      const portfolio = { ...c.portfolio };
+      if (stock.kind !== 'own') {
+        const left = (portfolio[key] ?? 0) + delta;
+        if (left > 0) portfolio[key] = left;
+        else delete portfolio[key];
+      }
+      const companies = stock.kind === 'own' ? c.companies.map((x) => (`own:${x.id}` === key ? { ...x, held: x.held + delta } : x)) : c.companies;
+      return {
+        empire: { ...st.empire, materials: { ...st.empire.materials, credits: st.empire.materials.credits + (side === 'buy' ? -credits : credits) } },
+        commerce: { ...c, companies, portfolio },
+      };
+    });
+    // Another player's company: the shared world records who holds it, so its dividends reach you.
+    if (key.startsWith('player:')) {
+      const [, owner, id] = key.split(':');
+      this.emit([{ kind: 'stake', company: stakeKey(owner, id), player: this.me, delta }]);
+    }
+    this.noteFlow(before, `${side === 'buy' ? 'Bought' : 'Sold'} ${n} ${stock.name} shares`);
+    this.dispatch(`${side === 'buy' ? 'Bought' : 'Sold'} ${n} ${stock.name} shares for ${fmtInt(credits)} credits`);
+  }
+
+  /** What other empires see of your commerce: tariffs and companies. */
+  publicCommerce = (): PublicCommerce => publicCommerceOf(this.commerce, this.state.loadouts, this.costOf);
 
   // ── NPC empires ────────────────────────────────────────────────────
 
@@ -1760,7 +2539,10 @@ export class EmpireSim {
     const met = [...this.discover(), ...this.diplomaticNews()];
     const s = this.state;
     const speed = this.fleetSpeed();
-    const { economy, research, report, mined } = resolveTurn({ ...s.economy, stock: s.empire.materials }, s.empire.research, s.turn, this.deps.economy, this.presence());
+    // Companies close last year's books; their tax and dividends, and what other empires owe, are income.
+    const years = this.companyYears();
+    const transfers = this.transfers(years);
+    const { economy, research, report, mined, contracts } = resolveTurn({ ...s.economy, stock: s.empire.materials }, s.empire.research, s.turn, this.deps.economy, this.presence(), transfers);
     this.drawFields(mined);
     const next = s.turn + 1;
     // Logistics: fleets in friendly systems refill their supply and repair (fully at a shipyard world,
@@ -1799,6 +2581,7 @@ export class EmpireSim {
       engaged: [],
       dispatches: news.length ? [...news, ...s.dispatches].slice(0, 40) : s.dispatches,
     });
+    const growth = this.settleCommerce(years, transfers, contracts);
     // Research that finished this year (full nodes research themselves) may speed fleets up.
     if (this.fleetSpeed() !== speed) this.retimeFleets();
     this.sampleRelations(next);
@@ -1809,7 +2592,7 @@ export class EmpireSim {
       this.resolveRaids(r.raids);
     }
     // Construction finishing this year, then fleets acting on standing orders.
-    const done = [...this.completeConstruction(), ...this.followOrders()];
+    const done = [...growth, ...this.completeConstruction(), ...this.govern(), ...this.followOrders()];
     if (!quiet && done.length) this.deps.store.update((st) => ({ dispatches: [...done.map((text) => ({ turn: next, text, tone: 'good' as const })), ...st.dispatches].slice(0, 40) }));
     return { income: report.income, arrivals: [...arrivals, ...done] };
   }

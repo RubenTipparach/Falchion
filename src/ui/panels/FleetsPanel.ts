@@ -12,7 +12,7 @@ import { Drawer } from '../Drawer';
 import type { FleetGroup, GameActions, GameQueries } from '../GameActions';
 import { clear, h } from '../dom';
 import { icon } from '../icons';
-import { locateButton, shipsText, storesView } from '../widgets';
+import { colonistsView, locateButton, shipsText, storesView } from '../widgets';
 
 const classOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)!;
 
@@ -58,12 +58,14 @@ export class FleetsPanel extends Drawer {
       h('div', { class: 'where' }, this.where(g)),
       h('div', { class: 'small' }, shipsText(g.ships)),
       storesView(g),
-      g.capacity.supply && g.stores.supply === 0 ? h('div', { class: 'notice warn' }, 'Out of supply: cannot explore. Return home or reach a friendly system to resupply.') : null,
-      h('div', { class: 'row orders' }, h('span', { class: 'small muted' }, 'Standing orders:'),
+      colonistsView(g, () => this.actions.embark(g.id)),
+      g.company ? h('div', { class: 'notice company' }, `Run by ${g.company.name}: it works on its own and takes no orders from the state. Open Empire › Companies to see its books.`) : null,
+      g.company ? null : g.capacity.supply && g.stores.supply === 0 ? h('div', { class: 'notice warn' }, 'Out of supply: cannot explore. Return home or reach a friendly system to resupply.') : null,
+      g.company ? null : h('div', { class: 'row orders' }, h('span', { class: 'small muted' }, 'Standing orders:'),
         this.order(g, 'autoExplore', 'Auto-explore', 'Survey unexplored planets wherever it is on station'),
         this.order(g, 'autoReturn', 'Return to resupply', 'Head home when it can explore nothing more here'),
         minedBy(g.ships, (id) => classOf(id).mines).length ? this.order(g, 'autoMine', 'Auto-mine', `When its fields run dry, move on to the nearest field with rocks left (within ${MINE_REACH} ly)`) : null),
-      h('div', { class: 'row' },
+      g.company ? null : h('div', { class: 'row' },
         target && target.id !== g.star?.id ? h('button', { class: 'btn primary', onclick: () => this.actions.moveFleet(g.id, target) }, icon('fleet'), ` Send to ${target.name}`) : null,
         !atHome ? h('button', { class: 'btn', onclick: () => this.actions.returnHome(g.id) }, icon('home'), ' Return home') : null,
         atHome ? h('button', { class: 'btn', onclick: () => this.actions.dockFleet(g.id) }, 'Dock (merge into home dock)') : null));

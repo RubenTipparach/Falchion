@@ -20,7 +20,14 @@ export interface SharedWorld {
   readonly relations?: Readonly<Record<string, Relation>>;
   /** Pairs of players that have met (first contact), with when. */
   readonly contacts?: Contacts;
+  /** Shares other players hold in a player's companies: company key (`${owner}:${companyId}`) -> holder -> shares. */
+  readonly stakes?: Readonly<Record<string, Readonly<Record<string, number>>>>;
+  /** Credits owed to a player (tariffs, dividends), by what for: collected in their next year. */
+  readonly payouts?: Readonly<Record<string, Readonly<Record<string, number>>>>;
 }
+
+/** Most separate payout lines kept for one player (the rest are added to "Other"). */
+const MAX_PAYOUT_LINES = 40;
 
 export const EMPTY_WORLD: SharedWorld = { tick: 0, npcs: {}, asteroids: {} };
 
@@ -46,7 +53,13 @@ export type SharedEffect =
   /** A player's diplomatic action toward another (ignored when not open to them, or before they met). */
   | { readonly kind: 'diplomacy'; readonly by: string; readonly other: string; readonly action: DiplomaticAction; readonly at: number }
   /** The NPC empires after a year of their own (stepped by whoever runs them: the server, or a guest's browser). */
-  | { readonly kind: 'npcStep'; readonly npcs: Readonly<Record<string, NpcState>>; readonly tick: number };
+  | { readonly kind: 'npcStep'; readonly npcs: Readonly<Record<string, NpcState>>; readonly tick: number }
+  /** A player bought (positive) or sold shares of another player's company (`${owner}:${companyId}`). */
+  | { readonly kind: 'stake'; readonly company: string; readonly player: string; readonly delta: number }
+  /** Credits owed to a player: a tariff or a dividend, collected in their next year. */
+  | { readonly kind: 'payout'; readonly to: string; readonly label: string; readonly credits: number }
+  /** A player collected what it was owed (exactly these amounts: what arrived since stays owed). */
+  | { readonly kind: 'claim'; readonly player: string; readonly amounts: Readonly<Record<string, number>> };
 
 /** The world after some effects, in order. Pure. */
 export function applyEffects(world: SharedWorld, effects: readonly SharedEffect[]): SharedWorld {
@@ -55,6 +68,8 @@ export function applyEffects(world: SharedWorld, effects: readonly SharedEffect[
   let tick = world.tick;
   let relations = world.relations;
   let contacts = world.contacts;
+  let stakes = world.stakes;
+  let payouts = world.payouts;
   for (const e of effects) {
     switch (e.kind) {
       case 'mined': {
@@ -101,6 +116,38 @@ export function applyEffects(world: SharedWorld, effects: readonly SharedEffect[
         tick = e.tick;
         break;
       }
+      case 'stake': {
+        const holders = { ...stakes?.[e.company] };
+        const n = Math.max(0, Math.round((holders[e.player] ?? 0) + e.delta));
+        if (n) holders[e.player] = n;
+        else delete holders[e.player];
+        const next = { ...stakes };
+        if (Object.keys(holders).length) next[e.company] = holders;
+        else delete next[e.company];
+        stakes = next;
+        break;
+      }
+      case 'payout': {
+        if (!(e.credits > 0) || !Number.isFinite(e.credits)) break;
+        const owed = { ...payouts?.[e.to] };
+        const label = e.label in owed || Object.keys(owed).length < MAX_PAYOUT_LINES ? e.label : 'Other';
+        owed[label] = Math.round(((owed[label] ?? 0) + e.credits) * 100) / 100;
+        payouts = { ...payouts, [e.to]: owed };
+        break;
+      }
+      case 'claim': {
+        const owed = { ...payouts?.[e.player] };
+        for (const [label, n] of Object.entries(e.amounts)) {
+          const left = Math.round(((owed[label] ?? 0) - n) * 100) / 100;
+          if (left > 0) owed[label] = left;
+          else delete owed[label];
+        }
+        const next = { ...payouts };
+        if (Object.keys(owed).length) next[e.player] = owed;
+        else delete next[e.player];
+        payouts = next;
+        break;
+      }
       case 'npcColony': {
         const n = npcs[e.npc];
         if (!n) break;
@@ -110,6 +157,6 @@ export function applyEffects(world: SharedWorld, effects: readonly SharedEffect[
       }
     }
   }
-  if (npcs === world.npcs && asteroids === world.asteroids && tick === world.tick && relations === world.relations && contacts === world.contacts) return world;
-  return { ...world, tick, npcs, asteroids, ...(relations ? { relations } : {}), ...(contacts ? { contacts } : {}) };
+  if (npcs === world.npcs && asteroids === world.asteroids && tick === world.tick && relations === world.relations && contacts === world.contacts && stakes === world.stakes && payouts === world.payouts) return world;
+  return { ...world, tick, npcs, asteroids, ...(relations ? { relations } : {}), ...(contacts ? { contacts } : {}), ...(stakes ? { stakes } : {}), ...(payouts ? { payouts } : {}) };
 }

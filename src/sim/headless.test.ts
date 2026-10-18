@@ -18,6 +18,7 @@ import { createWorld } from '../app/World';
 import { EmpireSim } from './EmpireSim';
 import { encodeCommand } from './commands';
 import { advanceSave, applyCommand, EMPTY_WORLD } from './headless';
+import type { SharedEffect } from '../core/world/SharedWorld';
 import { newEmpireState } from './newEmpireState';
 
 const ID = '123456789012345678';
@@ -111,12 +112,20 @@ describe("other players' worlds are markets", () => {
     // The server plays it year by year, as the ticker does, until the goods are sold.
     const trip = hexDistance(world.home.hex, target.hex);
     let now = started.save;
-    for (let t = t0 + 1; t <= t0 + trip + 3 && !dispatches(now).some((d) => d.text.includes('sold')); t++) now = advanceSave(now, me, t, EMPTY_WORLD, [], others)!.save;
-    const price = saleValue(50, trip, 'player');
+    const effects: SharedEffect[] = [];
+    for (let t = t0 + 1; t <= t0 + trip + 3 && !dispatches(now).some((d) => d.text.includes('sold')); t++) {
+      const r = advanceSave(now, me, t, EMPTY_WORLD, [], others)!;
+      now = r.save;
+      effects.push(...r.effects);
+    }
+    // The other player has published no tariff: the default 10% goes to them (change commerce).
+    const gross = saleValue(50, trip, 'player');
+    const tariff = Math.round(gross * 0.1);
     const sold = dispatches(now).find((d) => d.text.includes('sold 50 trade goods'));
     const fleet = (now.fleets as GameState['fleets']).find((f) => f.id === fleetId)!;
-    expect(sold?.text).toBe(`${fleet.name} sold 50 trade goods at ${target.name} (Iron Dominion) for ${price} credits`);
-    expect(price).toBeGreaterThan(saleValue(50, trip, 'npc'));
+    expect(sold?.text).toBe(`${fleet.name} sold 50 trade goods at ${target.name} (Iron Dominion) for ${gross - tariff} credits`);
+    expect(effects).toContainEqual({ kind: 'payout', to: OTHER, label: 'Tariffs from Ruben', credits: tariff });
+    expect(gross).toBeGreaterThan(saleValue(50, trip, 'npc'));
     expect(goodsPrice(trip, 'player')).toBe(goodsPrice(trip, 'own') * 1.5);
     expect(loadouts(now)[fleetId].cargo ?? 0).toBe(0);
   });

@@ -11,7 +11,6 @@ import { RESOURCES } from '../../content/resources';
 import { Drawer } from '../Drawer';
 import type { FleetGroup, GameActions, GameQueries } from '../GameActions';
 import { exploreCost } from '../../core/fleet/Logistics';
-import { countOf } from '../../core/fleet/Presence';
 import { locateButton, storesView } from '../widgets';
 import { clear, fmt, h } from '../dom';
 import { collectWithFx } from '../collectFx';
@@ -73,8 +72,8 @@ export class ExplorePanel extends Drawer {
     const biome = BIOMES.find((b) => b.id === p.biome)!;
     const colony = this.q.colonyAt(p.id);
     const cost = exploreCost(p);
-    const canExplore = groups.some((g) => g.stores.supply >= cost);
-    const ark = groups.some((g) => countOf(g.ships, 'colony-ark') > 0);
+    const canExplore = groups.some((g) => !g.company && g.stores.supply >= cost);
+    const ark = this.q.arkAt(star);
     const card = h('div', { class: 'planet-card' },
       h('div', { class: 'pc-head' },
         h('img', { class: 'planet-thumb', src: this.thumb(p), alt: `${p.name}, ${biome.name}` }),
@@ -91,7 +90,8 @@ export class ExplorePanel extends Drawer {
           result.success ? h('p', { class: 'green' }, 'Success!') : h('p', { class: 'red' }, `Failure — ${result.cost?.description} (−${result.cost?.fleetPower} fleet power)`)));
       if (result.crate) card.append(this.crateView(p.id, result.crate.tier, result.crate.cards));
       if (!colony && settleable(p.biome)) {
-        card.append(h('div', { class: 'row' }, h('button', { class: 'btn', disabled: !ark, title: ark ? 'Uses one Colony Ark' : 'Needs a Colony Ark on station here', onclick: () => this.actions.settle(p) }, icon('build'), ark ? ' Settle colony' : ' Settle (needs a Colony Ark here)')));
+        const why = typeof ark === 'string' ? ark : null;
+        card.append(h('div', { class: 'row' }, h('button', { class: 'btn', disabled: !!why, title: why ?? 'The ark lands its colonists and spends its supply; it goes back for more', onclick: () => this.actions.settle(p) }, icon('build'), why ? ' Settle (no ark ready here)' : ' Settle colony')), why ? h('p', { class: 'small muted' }, why) : '');
       }
     }
     return card;

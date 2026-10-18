@@ -150,7 +150,20 @@ function publicBattle(b) {
   };
 }
 
-/** Only what other players may see: identity, home, colony stars and fleets (no stockpiles or research). */
+/** Tariffs and companies (change commerce): bounded numbers, short names, at most 40 companies. */
+function publicCommerce(c) {
+  if (!c || typeof c !== 'object') return undefined;
+  const pct = (n) => (Number.isFinite(n) ? Math.max(0, Math.min(50, Math.round(n))) : 0);
+  const num = (n, max) => (Number.isFinite(n) ? Math.max(0, Math.min(max, n)) : 0);
+  const tariffs = {};
+  if (c.tariffs && typeof c.tariffs === 'object') for (const [id, n] of Object.entries(c.tariffs).slice(0, 200)) if (/^[\w-]{1,40}$/.test(id)) tariffs[id] = pct(n);
+  const companies = (Array.isArray(c.companies) ? c.companies.slice(0, 40) : [])
+    .filter((x) => typeof x?.id === 'string' && /^[\w-]{1,40}$/.test(x.id) && ['trade', 'mining', 'colony'].includes(x.kind))
+    .map((x) => ({ id: x.id, name: text(String(x.name ?? 'Company'), 60), kind: x.kind, shares: Math.round(num(x.shares, 10_000)), held: Math.round(num(x.held, 10_000)), price: num(x.price, 1e7), dividend: num(x.dividend, 1e6), ships: Math.round(num(x.ships, 100)) }));
+  return { tariff: pct(c.tariff), ...(Object.keys(tariffs).length ? { tariffs } : {}), companies };
+}
+
+/** Only what other players may see: identity, home, colony stars, fleets, tariffs and companies (no stockpiles or research). */
 export function publicView(p) {
   const fleets = Array.isArray(p?.fleets) ? p.fleets.slice(0, 50) : [];
   return {
@@ -168,6 +181,7 @@ export function publicView(p) {
       // The other player's fleet it is chasing, if any.
       ...(typeof f.chase === 'string' ? { chase: f.chase.slice(0, 160) } : {}),
     })),
+    ...(publicCommerce(p?.commerce) ? { commerce: publicCommerce(p.commerce) } : {}),
   };
 }
 

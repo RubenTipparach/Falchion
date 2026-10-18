@@ -2,11 +2,12 @@ import { CAPITAL_START_POP } from '../core/economy/Population';
 import type { GameState } from './GameState';
 import type { Hex } from '../core/hex/Hex';
 import { LEGACY_MATERIALS, RESOURCES } from '../content/resources';
+import type { Loadout } from '../core/fleet/Presence';
 
 /** Fields that persist between sessions; the rest is view state or derived from the world. */
 export const SAVED = [
   'turn', 'empire', 'economy', 'designs', 'shipyardClass', 'hiddenTraits', 'explored', 'openedCrates', 'collectedCaches',
-  'fleets', 'loadouts', 'dockSpent', 'depots', 'construction', 'lastReport', 'dispatches', 'engaged', 'identity', 'home', 'relations', 'battleLog', 'flows',
+  'fleets', 'loadouts', 'dockSpent', 'depots', 'construction', 'lastReport', 'dispatches', 'engaged', 'identity', 'home', 'relations', 'battleLog', 'flows', 'commerce', 'governor',
 ] as const satisfies ReadonlyArray<keyof GameState>;
 
 /** The persistent fields of a save, as a patch for the game state (view state untouched). */
@@ -38,7 +39,7 @@ export function savedHome(save: SavedGame | null): Hex | null {
  * (fleets with no ships of yours aboard). Idempotent: an up-to-date save comes back unchanged.
  */
 export function upgradeSave<T extends SavedGame>(save: T): T {
-  save = dropAmmunition(givePopulation(save));
+  save = giveColonists(dropAmmunition(givePopulation(save)));
   const old = save.empire?.materials as Record<string, number> | undefined;
   const routes = 'routes' in (save.economy ?? {});
   const scenery = (save.fleets ?? []).some((f) => !save.loadouts?.[f.id]);
@@ -56,6 +57,17 @@ function givePopulation<T extends SavedGame>(save: T): T {
   const colonies = save.economy?.colonies;
   if (!colonies?.some((c) => c.pop === undefined)) return save;
   return { ...save, economy: { ...save.economy, colonies: colonies.map((c) => (c.pop === undefined ? { ...c, pop: c.capital ? CAPITAL_START_POP : 1 } : c)) } };
+}
+
+/**
+ * Saves from before colony arks were reusable (change commerce): an ark already out in a fleet
+ * carries its colonists, as it would have when it set off.
+ */
+function giveColonists<T extends SavedGame>(save: T): T {
+  const loadouts = save.loadouts;
+  const arks = (l: Loadout) => l.ships.find((x) => x.classId === 'colony-ark')?.count ?? 0;
+  if (!loadouts || !Object.values(loadouts).some((l) => arks(l) > 0 && l.colonists === undefined)) return save;
+  return { ...save, loadouts: Object.fromEntries(Object.entries(loadouts).map(([id, l]) => [id, arks(l) > 0 && l.colonists === undefined ? { ...l, colonists: arks(l) } : l])) };
 }
 
 /** Saves from before ammunition was removed: drop it from fleets and the home dock. */

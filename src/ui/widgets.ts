@@ -124,3 +124,16 @@ export function crateLine(crate: LootCrate, opened: boolean): string {
   ].filter(Boolean);
   return `${crate.tier} crate opened · ${parts.join(', ')}`;
 }
+
+/**
+ * Colony arks: colonists aboard (one colony's worth per ark), and Embark where a colony of yours can
+ * spare people. Arks are not used up by settling; they come back for more (change commerce).
+ */
+export function colonistsView(g: FleetGroup, embark: () => void): HTMLElement | null {
+  if (g.colonists === undefined || g.id === 'dock') return null;
+  const arks = g.ships.find((x) => x.classId === 'colony-ark')?.count ?? 0;
+  const room = arks - g.colonists;
+  return h('div', { class: 'row colonists' },
+    h('span', { class: 'small' }, `Colonists aboard: ${g.colonists} of ${arks}`),
+    !g.company && room > 0 && g.stationed && g.friendly ? h('button', { class: 'chip', title: 'Load colonists from your colony here (it needs population 2 or more, and loses one per ark)', onclick: embark }, 'Embark colonists') : null);
+}

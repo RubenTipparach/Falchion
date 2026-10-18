@@ -12,7 +12,6 @@ import { fmt, h } from './dom';
 import { thumb } from './thumbs';
 import { icon, resourceIcon } from './icons';
 import type { Card, LootCrate } from '../core/encounters/types';
-import { thumb } from './thumbs';
 
 const nameOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)?.name ?? id;
 

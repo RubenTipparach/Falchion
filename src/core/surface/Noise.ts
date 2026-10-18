@@ -8,18 +8,30 @@ const m289 = (x: number): number => x - Math.floor((x + 0.5) / 289) * 289;
 const perm = (x: number): number => m289(m289(x * 34 + 1) * x);
 const NSX = 2 / 7, NSY = 0.5 / 7 - 1;
 
+/**
+ * The gradient for hash `j` (0..48), before normalising. `f` rounds each step, so a test can run it
+ * as the GPU does (Math.fround, float32) and check both pick the same gradient.
+ */
+export function gradientOf(j: number, f: (x: number) => number = (x) => x): [number, number, number] {
+  const xi = Math.floor(f((j + 0.5) / 7)), yi = Math.floor(f(j - 7 * xi));
+  let gx = f(xi * f(NSX) + f(NSY)), gy = f(yi * f(NSX) + f(NSY));
+  const gz = f(f(1 - Math.abs(gx)) - Math.abs(gy));
+  // gz is a multiple of 1/7 that is often exactly 0: decide with a margin, so float64 here and
+  // float32 on the GPU always flip the same gradients (the GLSL uses the same 0.05). Without
+  // it, about a quarter of the gradients came out different and the baked globe (CPU) and the
+  // detail patch (GPU) disagreed on where the land was.
+  if (gz <= 0.05) {
+    gx = f(gx - (Math.floor(gx) * 2 + 1));
+    gy = f(gy - (Math.floor(gy) * 2 + 1));
+  }
+  return [gx, gy, gz];
+}
+
 function corner(jx: number, jy: number, jz: number, ox: number, oy: number, oz: number, x: number, y: number, z: number): number {
   let m = 0.6 - (x * x + y * y + z * z);
   if (m <= 0) return 0;
   const p = perm(perm(perm(jz + oz) + jy + oy) + jx + ox);
-  const j = p - 49 * Math.floor((p + 0.5) / 49);
-  const xi = Math.floor((j + 0.5) / 7), yi = Math.floor(j - 7 * xi);
-  let gx = xi * NSX + NSY, gy = yi * NSX + NSY;
-  const gz = 1 - Math.abs(gx) - Math.abs(gy);
-  if (gz <= 0) {
-    gx -= Math.floor(gx) * 2 + 1;
-    gy -= Math.floor(gy) * 2 + 1;
-  }
+  const [gx, gy, gz] = gradientOf(p - 49 * Math.floor((p + 0.5) / 49));
   const nrm = 1.79284291400159 - 0.85373472095314 * (gx * gx + gy * gy + gz * gz);
   m *= m;
   return m * m * nrm * (gx * x + gy * y + gz * z);

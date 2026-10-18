@@ -40,6 +40,8 @@ export interface Colony {
   readonly size?: number;
   readonly capital?: boolean;
   readonly buildings?: readonly string[];
+  /** Population (whole number): one major city per point on the planet's surface (see Population.ts). */
+  readonly pop?: number;
 }
 
 /** Food each colony eats per turn. */

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Settlement } from '../../../core/surface/SurfaceLayout';
 import { BASE_OCTAVES, SurfaceLook, frameAt, rawHeight } from '../../../core/surface/Terrain';
 import { smoothstep } from '../../../core/surface/Noise';
+import { NO_LIGHTS } from '../NightLightMap';
 import { AMP, ATMO_FRAG, ATMO_VERT, BASE_OCT, BASE_VERT, CLOUD_FRAG, CLOUD_VERT, MAX_SITES, PATCH_VERT, TERRAIN_FRAG } from './shaders';
 
 /** Quality knobs: desktop full, touch-first devices lighter. */
@@ -46,7 +47,11 @@ export class SurfaceTerrain {
   private faces: THREE.BufferGeometry[] = [];
   private pit: { dir: THREE.Vector3; radius: number; depth: number } | null = null;
 
-  constructor(private readonly look: SurfaceLook, private readonly sites: readonly Settlement[], private readonly quality: SurfaceQuality) {
+  /**
+   * `lights` is the planet's night-light map (shared with the system view), drawn from orbit; the
+   * streets and roads take over closer in.
+   */
+  constructor(readonly look: SurfaceLook, private readonly sites: readonly Settlement[], private readonly quality: SurfaceQuality, lights: THREE.Texture | null) {
     const c = (hex: string) => new THREE.Color(hex);
     const cityA = Array.from({ length: MAX_SITES }, () => new THREE.Vector4());
     const cityB = Array.from({ length: MAX_SITES }, () => new THREE.Vector4(0, 0.0001, 1, 0));
@@ -68,6 +73,7 @@ export class SurfaceTerrain {
       uFine: { value: 40 }, uFar: { value: 1 }, uClose: { value: 0 }, uFade: { value: 0 },
       uPatchOn: { value: 0 }, uPC: { value: new THREE.Vector3(0, 0, 1) }, uPT1: { value: new THREE.Vector3(1, 0, 0) }, uPT2: { value: new THREE.Vector3(0, 1, 0) },
       uPSize: { value: 0.3 }, uOct: { value: BASE_OCT }, uEps: { value: 0.004 },
+      uBaseN: { value: quality.baseCells }, uLightMap: { value: lights ?? NO_LIGHTS },
     };
     const defines = quality.lite ? { LITE: 1 } : {};
     // Transparent only so the globe can crossfade over planet view; it writes depth as an opaque mesh would.
@@ -225,7 +231,13 @@ export class SurfaceTerrain {
       U.uPT1.value.set(...fr.t1);
       U.uPT2.value.set(...fr.t2);
       U.uPSize.value = size;
-      U.uOct.value = Math.min(Math.max(BASE_OCT + Math.log2(0.6 / Math.max(o.d * 2.5, 0.012)) * 1.25, BASE_OCT), this.quality.maxOctaves);
+      // Octaves the patch's grid can hold: the finest wavelength spans at least four cells where
+      // the grid is densest (its centre). More would alias, and every resample of the grid (a size
+      // step, a centre snap) would make the ground jump. Taken from the unquantised size, so the
+      // count, and the detail with it, changes smoothly with the zoom.
+      const cell = (Math.min(Math.max(o.d * 3.2, 0.03), 0.45) * 2 * 0.35) / this.quality.patchCells;
+      const resolvable = 1 + Math.log2(1 / (4 * cell * this.look.detail)) / Math.log2(2.02);
+      U.uOct.value = Math.min(Math.max(resolvable, BASE_OCT), this.quality.maxOctaves);
       U.uEps.value = 0.7 / this.quality.patchCells;
     }
     U.uFine.value = Math.min(Math.max(36 / o.d, 30), 9000);

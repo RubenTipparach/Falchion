@@ -8,6 +8,7 @@ import { formatDuration } from '../core/time/WorldTime';
 import { CLOCK } from '../app/WorldClock';
 import type { FleetGroup } from './GameActions';
 import { fmt, h } from './dom';
+import { thumb } from './thumbs';
 import { icon, resourceIcon } from './icons';
 import type { Card, LootCrate } from '../core/encounters/types';
 
@@ -49,7 +50,11 @@ export interface BuildGates {
   nodeName(nodeId: string): string;
 }
 
-export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>, build: (buildingId: string) => void, tables: EconomyTables, queued: readonly Job[] = [], turn = 0, gates?: BuildGates): HTMLElement {
+/**
+ * A colony's output, buildings and build menu. `locate`, when given, adds a locate button to each
+ * building that flies the camera to its model on the planet's surface.
+ */
+export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>, build: (buildingId: string) => void, tables: EconomyTables, queued: readonly Job[] = [], turn = 0, gates?: BuildGates, locate?: (buildingId: string) => void): HTMLElement {
   const have = c.buildings ?? [];
   const pending = queued.filter((j) => j.kind === 'building');
   const slots = slotsOf(c.size ?? 3, c.capital);
@@ -62,7 +67,12 @@ export function colonyView(c: Colony, stock: Readonly<Record<Resource, number>>,
   return h('div', { class: 'colony' },
     h('div', { class: 'small' }, h('b', {}, 'Output '), out.join('  ') || '—', h('span', { class: 'muted' }, ' / yr')),
     h('div', { class: 'buildings' },
-      ...have.map((id) => h('span', { class: 'building', title: BUILDINGS.find((b) => b.id === id)?.blurb ?? '' }, BUILDINGS.find((b) => b.id === id)?.name ?? id)),
+      ...have.map((id) => {
+        const name = BUILDINGS.find((b) => b.id === id)?.name ?? id;
+        return h('span', { class: 'building', title: BUILDINGS.find((b) => b.id === id)?.blurb ?? '' },
+          thumb('building', id, 28), h('span', { class: 'building-name' }, name),
+          locate ? locateButton(`Show the ${name} on the surface`, () => locate(id)) : '');
+      }),
       ...pending.map((j) => h('span', { class: 'building pending', title: j.startTurn > turn ? 'Queued' : 'Under construction' }, `⏳ ${BUILDINGS.find((b) => b.id === j.item)?.name ?? j.item} · ${formatDuration(j.doneTurn - turn, CLOCK)}`)),
       ...Array.from({ length: Math.max(0, free) }, () => h('span', { class: 'building empty' }, 'Empty slot'))),
     free > 0 ? h('div', { class: 'build-menu' }, ...BUILDINGS.filter((b) => !(b.unique && (have.includes(b.id) || pending.some((j) => j.item === b.id)))).map((b) =>

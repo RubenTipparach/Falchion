@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import type { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { BUILDINGS } from '../../../content/buildings';
-import { PLANET_LOOKS } from '../../../content/planetLooks';
 import type { Planet } from '../../../core/galaxy/Planets';
 import { Rng, hashSeed } from '../../../core/rng/Rng';
 import { smoothstep } from '../../../core/surface/Noise';
-import { SettlementInput, SurfaceLayout, surfaceLayout } from '../../../core/surface/SurfaceLayout';
-import { SurfaceLook, frameAt, offsetDir, surfaceLookOf } from '../../../core/surface/Terrain';
+import type { SettlementInput, SurfaceLayout } from '../../../core/surface/SurfaceLayout';
+import { SurfaceLook, frameAt, offsetDir } from '../../../core/surface/Terrain';
+import { planetLayout, planetLightMap } from '../planetLayouts';
+import { RoadMesh } from './RoadMesh';
 import type { InputCapture } from '../../map/MapCameraController';
 import type { MapLayer, ViewState } from '../../map/MapLayer';
 import type { PlanetFrame } from '../../map/SystemLayer';
@@ -42,6 +43,9 @@ export interface SurfaceHost {
   readonly lite: boolean;
 }
 
+/** Where a landing goes: a settlement (index in the surface layout) or a building (its id). */
+export type SurfaceSpot = { readonly city: number } | { readonly building: string };
+
 /** Read-only state for the HUD. */
 export interface SurfaceStatus {
   /** The close-up is drawn (crossfading in or below). */
@@ -63,6 +67,7 @@ interface Built {
   readonly layout: SurfaceLayout;
   readonly terrain: SurfaceTerrain;
   readonly settlements: Settlements;
+  readonly roads: RoadMesh;
   readonly labels: SurfaceLabels;
   readonly scene: THREE.Scene;
 }
@@ -88,13 +93,16 @@ export class SurfaceLayer implements MapLayer {
   private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.001, 20);
   private readonly starCam = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
   private sky: { scene: THREE.Scene; stars: THREE.Points; backdrop: THREE.Mesh } | null = null;
+  /** This frame's close-up view: worked out in poseCamera (before the map is drawn), drawn in overlay. */
+  private shot: { fade: number; d: number; focus: THREE.Vector3; sun: THREE.Vector3; inv: THREE.Quaternion; alt: number } | null = null;
   private frame: PlanetFrame | null = null;
   private s = Infinity;
   private u = -1;
   private active = false;
   private time = 0;
   private lastTime = 0;
-  private pendingLand = false;
+  /** A landing asked for, flown once the planet is in view and baked (null: none). */
+  private pendingLand: SurfaceSpot | null = null;
   /**
    * The rig keeps to the map camera's view until the player takes over (a drag or a glide) or the
    * descent passes the blend; it re-attaches above the hand-over.
@@ -136,7 +144,7 @@ export class SurfaceLayer implements MapLayer {
     this.disposeBuilt('next');
     if (!samePlanet) {
       this.disposeBuilt('built');
-      this.pendingLand = false;
+      this.pendingLand = null;
       this.cancelFly();
       this.attached = true;
     }
@@ -145,14 +153,20 @@ export class SurfaceLayer implements MapLayer {
     if (!target) this.deactivate();
   }
 
-  /** Fly down to the main city (or the best landing site); waits for the planet to be in view and baked. */
-  land(): void {
-    if (this.target) this.pendingLand = true;
+  /**
+   * Fly down to the main city (or the best landing site on an unsettled world), or to one of the
+   * planet's cities or buildings; waits for the planet to be in view and baked. A new landing
+   * takes over from a glide under way.
+   */
+  land(at: SurfaceSpot = { city: 0 }): void {
+    if (!this.target) return;
+    this.cancelFly();
+    this.pendingLand = at;
   }
 
   /** Rise back to planet view. */
   leave(altitude: number): void {
-    this.pendingLand = false;
+    this.pendingLand = null;
     this.cancelFly();
     this.host.zoom.setTargetAltitude(altitude);
   }
@@ -198,7 +212,13 @@ export class SurfaceLayer implements MapLayer {
     this.built!.settlements.update(this.time);
   }
 
-  overlay(renderer: THREE.WebGLRenderer, labels: CSS2DRenderer, mapCamera: THREE.PerspectiveCamera): void {
+  /**
+   * Work out this frame's close-up camera (before the map is drawn). Below the hand-over the
+   * close-up drives the view: the map camera is moved to the same viewpoint, so the sky, the sun,
+   * the other planets and the orbit lines behind the planet turn with it at every zoom level.
+   */
+  poseCamera(mapCamera: THREE.PerspectiveCamera): void {
+    this.shot = null;
     const b = this.built, f = this.frame, t = this.target;
     if (!this.active || !b || !f || !t) return;
     const R = f.radius;
@@ -237,16 +257,34 @@ export class SurfaceLayer implements MapLayer {
       d = pose.d;
       focus = pose.focus;
     }
-    if (fade < 0.004) { b.labels.hide(); return; }
     // Same lens as the map (field of view, aspect, a phone's bottom-sheet offset), planet-scale clipping.
     const camAlt = this.camera.position.length() - ground(this.camera.position.clone().normalize());
     this.camAlt = Math.max(camAlt, 0);
     const L = this.camera.position.length();
     this.copyLens(this.camera, mapCamera, Math.max(0.00004, Math.min(camAlt * 0.2, 0.5)), Math.sqrt(Math.max(L * L - 1, 0)) + 1.3);
     this.camera.updateMatrixWorld();
-    b.terrain.update({ cam: this.camera.position, focus, d, alt: camAlt, sun, time: this.time, fade });
+    this.shot = { fade, d, focus, sun, inv, alt: camAlt };
+    if (u > 0) {
+      mapCamera.position.copy(this.camera.position).multiplyScalar(R).applyQuaternion(f.quaternion).add(f.position);
+      mapCamera.quaternion.copy(f.quaternion).multiply(this.camera.quaternion);
+      mapCamera.updateMatrixWorld();
+    }
+  }
+
+  overlay(renderer: THREE.WebGLRenderer, labels: CSS2DRenderer, mapCamera: THREE.PerspectiveCamera): void {
+    // A host that does not pose the camera first (MapLayer.poseCamera is optional) still gets the view.
+    if (!this.shot) this.poseCamera(mapCamera);
+    const shot = this.shot, b = this.built;
+    this.shot = null;
+    if (!shot || !b || !this.active) return;
+    const u = this.u;
+    const { fade, d, focus, sun, inv } = shot;
+    if (fade < 0.004) { b.labels.hide(); return; }
+    b.terrain.update({ cam: this.camera.position, focus, d, alt: shot.alt, sun, time: this.time, fade });
     b.settlements.group.visible = u > -0.05;
-    b.settlements.setPointScale(renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)));
+    const pxAtOne = (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / Math.max(1, renderer.domElement.height);
+    b.settlements.setPointScale(1 / pxAtOne);
+    b.roads.setPixelSize(pxAtOne);
     b.labels.update(this.camera.position, d, u > 0);
 
     const covered = this.covers();
@@ -309,26 +347,29 @@ export class SurfaceLayer implements MapLayer {
   }
 
   private create(t: SurfaceTarget, key: string): Built {
-    const look = surfaceLookOf(PLANET_LOOKS[t.planet.biome] ?? PLANET_LOOKS.barren, hashSeed(t.planet.id, 'surface'));
-    const layout = surfaceLayout(t.planet.id, look, t.colony);
-    const terrain = new SurfaceTerrain(look, layout.settlements, this.quality);
+    // The same layout and light map the system view draws (src/render/planets/planetLayouts.ts).
+    const { look, layout } = planetLayout(t.planet, t.colony);
+    const terrain = new SurfaceTerrain(look, layout.settlements, this.quality, planetLightMap(t.planet, t.colony));
     const mine = layout.buildings.find((x) => x.id === 'mine' && !x.orbital);
     if (mine) terrain.setPit(new THREE.Vector3(...mine.dir), 0.0068, 0.05);
     const settlements = new Settlements(layout, terrain, this.quality.lite);
+    const roads = new RoadMesh(layout.roads, terrain);
     const labels = this.makeLabels(t, layout, terrain, settlements);
     const scene = new THREE.Scene();
     scene.add(terrain.group, settlements.group, labels.group);
-    return { key, look, layout, terrain, settlements, labels, scene };
+    if (roads.mesh) scene.add(roads.mesh);
+    return { key, look, layout, terrain, settlements, roads, labels, scene };
   }
 
   private makeLabels(t: SurfaceTarget, layout: SurfaceLayout, terrain: SurfaceTerrain, settlements: Settlements): SurfaceLabels {
     const labels = new SurfaceLabels();
-    const fmtPop = (m: number) => (m >= 1 ? `${m.toFixed(1)}M` : `${Math.round(m * 1000)}k`);
     layout.settlements.forEach((c, i) => {
       const at = new THREE.Vector3(...c.dir).multiplyScalar(terrain.radiusOf(c.level) + (c.kind === 'capital' ? 0.018 : 0.004));
-      const what = c.kind === 'capital' ? 'Capital' : c.kind === 'city' ? (t.colony?.owner === 'foreign' ? 'Foreign city' : 'City') : 'Town';
-      if (c.kind === 'town') labels.add('town', c.name, fmtPop(c.pop), at, (d, _dist, engaged) => engaged && d < 2.5, () => this.goSettlement(i));
-      else labels.add(c.kind === 'capital' ? 'capital' : 'city', c.name, `${what} · ${fmtPop(c.pop)}`, at, (_d, _dist, engaged) => engaged, () => this.goSettlement(i));
+      // Major cities (one per point of population) whenever the close-up drives the view; towns
+      // (scenery) once it is close enough not to crowd them.
+      if (!c.major) labels.add('town', c.name, 'Town', at, (d, _dist, engaged) => engaged && d < 1.2, () => this.goSettlement(i));
+      else if (i > 0) labels.add('city', c.name, 'City', at, (_d, _dist, engaged) => engaged, () => this.goSettlement(i));
+      else labels.add(c.kind === 'capital' ? 'capital' : 'city', c.name, c.kind === 'capital' ? 'Capital' : t.colony?.owner === 'foreign' ? 'Foreign city' : 'City', at, (_d, _dist, engaged) => engaged, () => this.goSettlement(i));
     });
     for (const s of settlements.buildings) {
       const name = BUILDINGS.find((x) => x.id === s.id)?.name ?? s.id;
@@ -344,10 +385,11 @@ export class SurfaceLayer implements MapLayer {
   // ── Camera trips ──────────────────────────────────────────────────
 
   private startLanding(): void {
-    const b = this.built;
-    if (!b || this.rig.flying) return;
-    this.pendingLand = false;
-    if (b.layout.settlements.length) this.goSettlement(0);
+    const b = this.built, at = this.pendingLand;
+    if (!b || !at || this.rig.flying) return;
+    this.pendingLand = null;
+    if ('building' in at && b.settlements.buildings.some((x) => x.id === at.building)) this.goBuilding(at.building);
+    else if (b.layout.settlements.length) this.goSettlement('city' in at ? Math.min(at.city, b.layout.settlements.length - 1) : 0);
     else this.glide(new THREE.Vector3(...b.layout.landing), uOfD(0.25), { tilt: 0.2 });
   }
 
@@ -450,6 +492,7 @@ export class SurfaceLayer implements MapLayer {
   private deactivate(): void {
     if (this.active) this.built?.labels.hide();
     this.active = false;
+    this.shot = null;
     this.u = -1;
     if (this.host.input.capture === this.capture) this.host.input.capture = null;
     this.host.hold(null);
@@ -461,6 +504,7 @@ export class SurfaceLayer implements MapLayer {
     if (!b) return;
     b.terrain.dispose();
     b.settlements.dispose();
+    b.roads.dispose();
     b.labels.dispose();
     this[which] = null;
     if (which === 'built' && this.sky && !this.next) {

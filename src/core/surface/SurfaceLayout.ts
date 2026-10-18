@@ -1,12 +1,14 @@
 import { BUILDINGS } from '../../content/buildings';
 import { TOWN_NAMES } from '../../content/surfaceNames';
 import { Rng, hashSeed } from '../rng/Rng';
+import { Road, roadNetwork } from './Roads';
 import { SurfaceLook, Vec3, distance, frameAt, isLand, normalize, offsetDir, rawHeight } from './Terrain';
 
 /**
- * Where things stand on a planet's surface: its main city, towns and special buildings. Pure and
- * deterministic: the same planet id, look and colony always give the same layout (seeded from
- * the planet id; no ambient randomness). Distances are in planet radii.
+ * Where things stand on a planet's surface: its main city, the cities and towns that grow with its
+ * population, the roads between them and its special buildings. Pure and deterministic: the same
+ * planet id, look and colony always give the same layout (seeded from the planet id; no ambient
+ * randomness). Distances are in planet radii.
  */
 
 export type SettlementKind = 'capital' | 'city' | 'town';
@@ -16,7 +18,12 @@ export interface Settlement {
   readonly kind: SettlementKind;
   /** Centre, a unit direction in the planet's frame. */
   readonly dir: Vec3;
-  /** Population in millions. */
+  /**
+   * A major city stands for one point of the colony's population (it is listed in the city
+   * locator); a town is scenery between them.
+   */
+  readonly major: boolean;
+  /** How big it looks: tower heights, urban radius and night glow (a visual weight, not a game stat). */
   readonly pop: number;
   /** Urban radius (chord, planet radii). */
   readonly radius: number;
@@ -43,7 +50,7 @@ export interface BuildingSite {
 
 /** Who holds the planet, as the surface shows it. */
 export interface SettlementInput {
-  /** 'own': the player's colony (city, towns, buildings); 'foreign': one generic city. */
+  /** 'own': the player's colony (cities, towns, roads, buildings); 'foreign': one generic city. */
   readonly owner: 'own' | 'foreign';
   /** The main city's name (the colony's name, or the owner's world). */
   readonly name: string;
@@ -52,18 +59,24 @@ export interface SettlementInput {
   readonly size: number;
   /** Building ids, as on the colony (repeats allowed). */
   readonly buildings: readonly string[];
+  /** Population (populationOf): one major city per point; ignored for a foreign world (one city). */
+  readonly pop: number;
 }
 
 export interface SurfaceLayout {
-  /** Main city first (when settled), then towns. */
+  /** Main city first (when settled), then the others, largest first. */
   readonly settlements: readonly Settlement[];
   readonly buildings: readonly BuildingSite[];
+  /** Roads between settlements (indices into `settlements`). */
+  readonly roads: readonly Road[];
   /** Where a landing goes: the main city, or the best site on an unsettled world. */
   readonly landing: Vec3;
 }
 
-/** Most towns a colony grows. */
-export const MAX_TOWNS = 7;
+/** Most settlements drawn, the main city included (the terrain shader draws this many). */
+export const MAX_SETTLEMENTS = 32;
+/** Most major cities drawn (a larger population still shows this many). */
+export const MAX_MAJORS = 24;
 /** Candidate sites tested on the sphere (a Fibonacci lattice). */
 const CANDIDATES = 2400;
 const GOLDEN = Math.PI * (3 - Math.sqrt(5));
@@ -73,13 +86,20 @@ const KNOWN_BUILDINGS = new Set(BUILDINGS.map((b) => b.id));
 
 interface Candidate { readonly d: Vec3; readonly h: number }
 
-/** Number of towns for a colony: grows with its size and buildings. */
-export function townCount(c: SettlementInput): number {
-  if (c.owner !== 'own') return 0;
-  return Math.min(MAX_TOWNS, Math.max(1, c.size) + Math.floor(c.buildings.length / 2) + (c.capital ? 1 : 0));
+/** Major cities on a colony's world, the main city included: one per point of population. */
+export function majorCount(c: SettlementInput): number {
+  if (c.owner !== 'own') return 1;
+  return Math.min(MAX_MAJORS, Math.max(1, Math.floor(c.pop)));
 }
 
-/** Population (millions) of the main city. */
+/** Towns scattered between the major cities (scenery): about one for every two cities. */
+export function townCount(c: SettlementInput): number {
+  if (c.owner !== 'own') return 0;
+  const majors = majorCount(c);
+  return Math.min(MAX_SETTLEMENTS - majors, Math.ceil(majors / 2));
+}
+
+/** Visual weight of the main city (tower heights, urban radius). */
 export function cityPopulation(c: SettlementInput): number {
   const n = c.owner === 'own' ? c.buildings.length : 0;
   return c.capital ? 3 + c.size * 0.9 + n * 0.35 : 0.8 + c.size * 0.45 + n * 0.3;
@@ -126,7 +146,7 @@ export function surfaceLayout(planetId: string, look: SurfaceLook, colony: Settl
     if (score > bestScore) { bestScore = score; best = c; }
   }
   if (!best) best = (cand.length ? cand : all).reduce((a, b) => (b.h > a.h ? b : a));
-  if (!colony) return { settlements: [], buildings: [], landing: best.d };
+  if (!colony) return { settlements: [], buildings: [], roads: [], landing: best.d };
 
   const level = (h: number) => (look.dry ? h : Math.min(Math.max(h, look.sea + 0.08), look.sea + 0.3));
   const seedOf = () => Math.floor(rng.next() * 2 ** 31);
@@ -137,7 +157,7 @@ export function surfaceLayout(planetId: string, look: SurfaceLook, colony: Settl
   const ground = modelledBuildings(colony).filter((id) => !BUILDINGS.find((b) => b.id === id)?.shipyard);
   const flatIn = ground.length ? ring + 0.022 : cityR * 1.35;
   const main: Settlement = {
-    name: colony.name, kind: capital ? 'capital' : 'city', dir: best.d, pop, radius: cityR, cell: capital ? 0.0032 : 0.0028,
+    name: colony.name, kind: capital ? 'capital' : 'city', major: true, dir: best.d, pop, radius: cityR, cell: capital ? 0.0032 : 0.0028,
     flatIn, flatOut: flatIn + (ground.length ? 0.03 : cityR), level: level(best.h), seed: seedOf(),
   };
   const settlements: Settlement[] = [main];
@@ -154,22 +174,44 @@ export function surfaceLayout(planetId: string, look: SurfaceLook, colony: Settl
     buildings.push({ id, dir: offsetDir(best!.d, k * 0.03, cityR + 0.011), heading: 0.4, orbital: true });
   });
 
-  // Towns: spread over the land, well apart, each with land all round it; smaller the further down the list.
+  // The other major cities spread over the land round the main city, nearest first (with a
+  // seeded jitter), each well apart from the rest and with land all round it; then towns fill in
+  // between them, closer together. A crowded world relaxes the spacing (up to three passes)
+  // before it gives up on a site.
   const names = shuffled(TOWN_NAMES, rng.fork('names'));
-  const order = shuffled(cand, rng.fork('towns'));
-  const want = townCount(colony);
-  const townPop = pop * 0.32;
-  for (const c of order) {
-    if (settlements.length > want) break;
-    const near = settlements.reduce((m, o) => Math.min(m, distance(o.dir, c.d) - (o === main ? main.flatOut : 0)), Infinity);
-    if (near < 0.24) continue;
-    if (ringLand(c.d, 0.025, 6) < 1) continue;
-    const i = settlements.length - 1;
-    const p = townPop * Math.pow(0.68, i) * (0.85 + rng.next() * 0.3);
-    const r = Math.min(0.02, 0.0072 + 0.0048 * Math.sqrt(p));
-    settlements.push({ name: names[i % names.length], kind: 'town', dir: c.d, pop: p, radius: r, cell: 0.0028, flatIn: r * 1.35, flatOut: r * 2.3, level: level(c.h), seed: seedOf() });
-  }
-  return { settlements, buildings, landing: best.d };
+  const majors = majorCount(colony), towns = townCount(colony);
+  const jitter = rng.fork('spread');
+  const order = shuffled(cand, rng.fork('towns'))
+    .map((c) => ({ c, k: distance(c.d, main.dir) * (0.65 + 0.7 * jitter.next()) }))
+    .sort((a, b) => a.k - b.k)
+    .map((x) => x.c);
+  const sizes = rng.fork('sizes');
+  const taken = new Set<Candidate>();
+  const place = (want: number, gap0: number, make: (i: number, c: Candidate) => Settlement) => {
+    let gap = gap0;
+    for (let pass = 0; pass < 3 && settlements.length < want; pass++, gap *= 0.75) {
+      for (const c of order) {
+        if (settlements.length >= want) break;
+        if (taken.has(c)) continue;
+        const near = settlements.reduce((m, o) => Math.min(m, distance(o.dir, c.d) - o.flatOut), Infinity);
+        if (near < gap) continue;
+        if (ringLand(c.d, 0.025, 6) < 1) continue;
+        taken.add(c);
+        settlements.push(make(settlements.length, c));
+      }
+    }
+  };
+  const site = (i: number, c: Candidate, kind: SettlementKind, p: number): Settlement => {
+    const r = Math.min(0.022, 0.0072 + 0.0048 * Math.sqrt(p));
+    return { name: names[(i - 1) % names.length], kind, major: kind !== 'town', dir: c.d, pop: p, radius: r, cell: 0.0028, flatIn: r * 1.35, flatOut: r * 2.3, level: level(c.h), seed: seedOf() };
+  };
+  const gap = Math.min(0.24, Math.max(0.1, 0.6 / Math.sqrt(majors)));
+  // Cities shrink down the list but stay cities; towns are small.
+  place(majors, gap, (i, c) => site(i, c, 'city', Math.max(1, pop * 0.55 / Math.pow(i, 0.5)) * (0.85 + sizes.next() * 0.3)));
+  const cities = settlements.length;
+  place(cities + towns, gap * 0.55, (i, c) => site(i, c, 'town', 0.25 + sizes.next() * 0.5));
+  const roads = roadNetwork(look, settlements, hashSeed(planetId, 'roads'));
+  return { settlements, buildings, roads, landing: best.d };
 }
 
 /** The planet a foreign empire's city stands on: the system's first world that is not a gas giant. */

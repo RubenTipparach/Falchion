@@ -119,6 +119,8 @@ export class MapView {
     this.lastView = view;
     this.layers.update(view);
     this.controller.refollow();
+    // A close-up that drives the view (a planet's surface) puts the map camera at its viewpoint.
+    this.layers.poseCamera(this.camera);
     this.opts.onFrame?.(view, dt);
     // A layer whose own view fills the screen (a planet's surface) replaces the map: skip drawing it, hide its labels.
     const covered = this.layers.covered();

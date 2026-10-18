@@ -45,6 +45,7 @@ import { TerritoryLayer } from '../render/map/TerritoryLayer';
 import { createDefaultShipFactory } from '../render/ships/defaultRegistries';
 import { Hud } from '../ui/Hud';
 import { StarInfoPanel } from '../ui/StarInfoPanel';
+import { CityLocator } from '../ui/CityLocator';
 import { TopBar } from '../ui/TopBar';
 import { ExplorePanel } from '../ui/panels/ExplorePanel';
 import { FleetsPanel } from '../ui/panels/FleetsPanel';
@@ -169,7 +170,7 @@ async function bootstrap(): Promise<void> {
   const hexGrid = map.layers.add(new HexGridLayer(galaxy.params.radius, lite));
   const nearStars = map.layers.add(new NearStarLayer(galaxy));
   nearStars.surveyed = controller.surveyedPercent;
-  const system = map.layers.add(new SystemLayer(galaxy, { isHome: (s) => s.id === world.home.id, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet) }));
+  const system = map.layers.add(new SystemLayer(galaxy, { colonyOf: (planet) => controller.surfaceTarget(planet)?.colony ?? null, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet) }));
   // Surface view: the focused planet's close-up, below planet view (draws its own scene when near).
   const surface = map.layers.add(new SurfaceLayer({ zoom: map.controller.zoom, input: map.controller, frame: (id) => system.planetFrame(id), hold: (id) => system.holdPlanet(id), canvas: map.canvas, lite }));
   const selection = map.layers.add(new SelectionLayer());
@@ -207,7 +208,11 @@ async function bootstrap(): Promise<void> {
     explore: new ExplorePanel(store, controller, controller, controller.planets, tree, thumb),
     fleets: new FleetsPanel(store, controller, controller),
   };
-  app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, dispatches.el, battleHud.el, ...Object.values(panels).map((p) => p.el));
+  // City locator: the focused planet's major cities, also while its card is closed.
+  const cityLocator = new CityLocator(store, controller, controller, starInfo);
+  starInfo.onCardChange = () => cityLocator.render();
+  controller.onFocusPlanet = () => starInfo.showPlanet();
+  app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, cityLocator.el, dispatches.el, battleHud.el, ...Object.values(panels).map((p) => p.el));
 
   controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system, surface, battle, battleMarkers });
   // Phones: the star, planet and fleet card is a bottom sheet; keep what you look at centred above it.

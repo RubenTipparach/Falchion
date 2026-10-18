@@ -891,3 +891,26 @@ button.chat-mention:hover { filter: brightness(1.25); }
 }
 /* While a battle is watched, the map's own panels step aside (the top bar and drawers stay). */
 body.battle-open .star-card, body.battle-open .dispatches, body.battle-open .hud, body.battle-open .ladder, body.battle-open .contact-banner { display: none !important; }
+/* ── City locator (a settled planet's major cities) and building chips ── */
+.city-locator { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); top: calc(72px + env(safe-area-inset-top, 0px)); z-index: 6; display: grid; justify-items: end; gap: 6px; max-width: calc(100vw - 32px); }
+.city-locator.hidden { display: none; }
+.city-toggle { background: rgba(5, 8, 15, 0.82); border-color: var(--brass-deep); color: var(--brass); }
+.city-toggle[aria-expanded="true"] { border-color: var(--brass); }
+.city-list { list-style: none; margin: 0; padding: 4px; width: 240px; max-width: 100%; max-height: min(52vh, 420px); overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 2px;
+  background: rgba(5, 8, 15, 0.92); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
+.city-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 8px; min-height: 34px; border: 0; border-radius: 5px; background: none; color: var(--text); text-align: left; cursor: pointer; }
+.city-item:hover, .city-item:focus-visible { background: var(--raise); }
+.city-item .city-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.city-item small { color: var(--muted); font: 500 10px var(--font-mono); }
+.city-mark { width: 7px; height: 7px; flex: none; border: 1.5px solid var(--brass); transform: rotate(45deg); }
+.city-item.capital .city-mark { width: 9px; height: 9px; background: var(--brass); }
+.city-item.capital .city-name { color: var(--brass); font-weight: 600; }
+.city-item.card { color: var(--chart); justify-content: center; border-top: 1px solid var(--line); border-radius: 0 0 5px 5px; }
+.building:not(.empty):not(.pending) { display: inline-flex; align-items: center; gap: 6px; padding: 2px 2px 2px 3px; }
+.building .thumb { flex: none; border-radius: 4px; background: rgba(255, 255, 255, 0.05); }
+.building .icon-btn.locate { width: 22px; height: 22px; min-width: 22px; min-height: 22px; padding: 2px; }
+@media (max-width: 720px) {
+  .city-locator { right: 8px; top: calc(var(--bar) + env(safe-area-inset-top, 0px) + 8px); }
+  .city-list { width: min(240px, calc(100vw - 16px)); max-height: 40vh; }
+  .building .icon-btn.locate { width: 32px; height: 32px; min-width: 32px; min-height: 32px; }
+}

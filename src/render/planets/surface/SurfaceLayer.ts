@@ -89,7 +89,7 @@ export class SurfaceLayer implements MapLayer {
   private built: Built | null = null;
   /** A rebuild for a changed colony, swapped in once its globe is baked. */
   private next: Built | null = null;
-  private building: { key: string; stage: number; data?: Built; compiling?: boolean } | null = null;
+  private building: { key: string; stage: number; data?: Built } | null = null;
   /** The map's renderer (from overlay): compiles a new close-up's shaders in the background. */
   private renderer: THREE.WebGLRenderer | null = null;
   private readonly rig = new SurfaceRig();
@@ -338,18 +338,12 @@ export class SurfaceLayer implements MapLayer {
       if (job.stage === 0) {
         job.data = this.create(t, want);
         job.stage = 1;
-      } else if (job.stage === 1 && job.data!.terrain.bakeStep()) {
-        job.stage = 2;
-        // Compile every shader of the close-up off the main thread (KHR_parallel_shader_compile)
-        // before it is first drawn: a first draw that compiles them blocks the game until the
-        // driver is done, which on Windows (Direct3D's compiler) could take seconds.
-        const r = this.renderer;
-        if (r) {
-          job.compiling = true;
-          r.compileAsync(job.data!.scene, this.camera).catch(() => undefined).finally(() => { job.compiling = false; });
-        }
-      }
-      if (job.stage === 2 && !job.compiling && this.building === job) {
+        // Start compiling the close-up's shaders in the background while its globe bakes
+        // (KHR_parallel_shader_compile where the browser has it), so the first frame that draws
+        // them has less or nothing left to wait for. Nothing waits on it: the close-up shows as
+        // soon as the globe is baked, compiled or not.
+        try { this.renderer?.compileAsync(job.data.scene, this.camera).catch(() => undefined); } catch { /* drawn and compiled on first use instead */ }
+      } else if (job.data!.terrain.bakeStep()) {
         if (this.built) this.next = job.data!;
         else this.built = job.data!;
         this.building = null;

@@ -55,7 +55,7 @@ export function technologicalAccent(kit: ShipKit): void {
 
 /**
  * A gothic tower with a gilt-tipped spire and pinnacles on the back, flying buttresses down the
- * flanks, a gilt beak on the bow and a gilt band amidships.
+ * flanks, a flat gilt-framed armour plate on the bow and a gilt band amidships.
  */
 export function classicAccent(kit: ShipKit): void {
   const { size, center } = kit.hullBox();
@@ -77,8 +77,8 @@ export function classicAccent(kit: ShipKit): void {
     }, 'detail', w * 0.75, center.y + w * 0.45, center.z + size.z * dz);
     kit.addMirrored(() => new THREE.Mesh(new THREE.ConeGeometry(0.015 + w * 0.04, 0.05 + w * 0.25, 4), kit.mat.gold), 'detail', w * 1.12, center.y + w * 0.25, center.z + size.z * dz);
   }
-  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.03 + w * 0.2, size.z * 0.12 + 0.1, 4).rotateX(Math.PI / 2), kit.mat.gold);
-  kit.add(beak, 'detail', center.x, center.y, front + size.z * 0.04);
+  kit.add(kit.box(w * 1.1 + 0.04, w * 0.9 + 0.04, 0.03, kit.mat.gold), 'detail', center.x, center.y, front + 0.01);
+  kit.add(kit.box(w * 0.9 + 0.02, w * 0.7 + 0.02, 0.03, kit.mat.detail), 'detail', center.x, center.y, front + 0.02);
   const band = new THREE.Mesh(new THREE.TorusGeometry(w * 1.05, 0.015 + w * 0.04, 6, 24), kit.mat.gold);
   kit.add(band, 'detail', center.x, center.y, center.z + size.z * 0.15);
 }

@@ -5,7 +5,7 @@ import { classicAccent } from './accents';
 
 /**
  * Classic: gothic cathedral warships, after Battlefleet Gothic, with Roman and art deco variants.
- * A long armoured hull behind a diamond ram, a nave of decks stepping up toward a spired bridge
+ * A long armoured hull behind a blunt armoured prow, a nave of decks stepping up toward a spired bridge
  * tower at the stern, flying buttresses down the flanks, broadside batteries on gun decks, gilt
  * bands and an eagle on the prow, a ribbed keel below and a bank of great nozzles astern. Four
  * archetypes, chosen per seed and by size: frigates, cruisers, grand cathedral battleships, and
@@ -38,6 +38,8 @@ interface Hull {
   readonly yt: number;
   readonly zStern: number;
   readonly zProw: number;
+  /** The flat face of the prow block, the front of the ship. */
+  readonly zBow: number;
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -66,6 +68,20 @@ function strut(kit: ShipKit, a: THREE.Vector3, b: THREE.Vector3, t: number, mate
   kit.add(m, 'detail', (a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
 }
 
+/**
+ * A block `w` by `h` by `len` along z whose front face is `taper` times the size of its back:
+ * a blunt armoured prow, flat-faced (no point).
+ */
+function taperedBlock(w: number, h: number, len: number, taper: number, material: THREE.Material): THREE.Mesh {
+  const geo = new THREE.BoxGeometry(w, h, len);
+  const pos = geo.getAttribute('position');
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getZ(i) > 0) pos.setXY(i, pos.getX(i) * taper, pos.getY(i) * taper);
+  }
+  geo.computeVertexNormals();
+  return new THREE.Mesh(geo, material);
+}
+
 /** A cone standing up: spires (8 sides) and pinnacles (4 sides). */
 function cone(r: number, h: number, sides: number, material: THREE.Material): THREE.Mesh {
   return new THREE.Mesh(new THREE.ConeGeometry(r, h, sides), material);
@@ -80,7 +96,7 @@ function column(r: number, h: number, material: THREE.Material): THREE.Mesh {
 
 /**
  * The armoured hull: a slab with a vertical prow face, its stern rounded up from the keel; a
- * diamond ram in front, gilt at its root; a keel spine with ribs below.
+ * blunt, flat-faced armoured prow block in front, gilt at its root; a keel spine with ribs below.
  */
 function hull(kit: ShipKit, W: number, yb: number, yt: number, ribs: number): Hull {
   const { L, B, mat } = kit;
@@ -91,18 +107,15 @@ function hull(kit: ShipKit, W: number, yb: number, yt: number, ribs: number): Hu
     [-W * 0.5, yt], [-W * 0.5, yb + H * 0.5], [-W * 0.28, yb], [W * 0.28, yb], [W * 0.5, yb + H * 0.5], [W * 0.5, yt],
   ], zProw - zStern), mat.hull);
   kit.add(body, 'hull', 0, 0, (zProw + zStern) / 2);
-  // The ram: a diamond in section, from the prow face to the bow.
-  const ramLen = L / 2 - zProw;
-  const ram = new THREE.Mesh(new THREE.ConeGeometry(1, ramLen, 4, 1).rotateX(Math.PI / 2), mat.hull);
-  ram.scale.set(W * 0.6, H * 0.64, 1);
-  kit.add(ram, 'hull', 0, yb + H * 0.5, zProw + ramLen / 2 - B * 0.01);
-  // The prow's armour: a block broader and taller than the hull, framed in gilt.
-  kit.add(kit.box(W * 1.2, H * 1.3, L * 0.06, mat.hull), 'hull', 0, yb + H * 0.5, zProw - L * 0.025);
-  kit.add(kit.box(W * 1.26, H * 1.36, L * 0.012, mat.gold), 'detail', 0, yb + H * 0.5, zProw - L * 0.055);
-  // The beak: a gilded tip.
-  const beak = new THREE.Mesh(new THREE.ConeGeometry(1, ramLen * 0.3, 4, 1).rotateX(Math.PI / 2), mat.gold);
-  beak.scale.set(W * 0.17, H * 0.155, 1);
-  kit.add(beak, 'detail', 0, yb + H * 0.5, L / 2 - ramLen * 0.15);
+  // The prow: a blunt armoured block, a little narrower at its flat face, which is armoured in
+  // a darker plate framed in gilt. No point: Classic prows are walls of armour.
+  const prowLen = L / 2 - zProw, yc = yb + H * 0.5;
+  kit.add(taperedBlock(W * 1.05, H * 1.1, prowLen, 0.82, mat.hull), 'hull', 0, yc, zProw + prowLen / 2 - B * 0.01);
+  kit.add(kit.box(W * 0.8, H * 0.84, B * 0.03, mat.gold), 'detail', 0, yc, L / 2 + B * 0.005);
+  kit.add(kit.box(W * 0.66, H * 0.7, B * 0.03, mat.detail), 'detail', 0, yc, L / 2 + B * 0.015);
+  // The prow's armour collar: a block broader and taller than the hull, framed in gilt.
+  kit.add(kit.box(W * 1.2, H * 1.3, L * 0.06, mat.hull), 'hull', 0, yc, zProw - L * 0.025);
+  kit.add(kit.box(W * 1.26, H * 1.36, L * 0.012, mat.gold), 'detail', 0, yc, zProw - L * 0.055);
   // Keel spine and ribs.
   kit.add(kit.box(B * 0.05, B * 0.07, zProw - zStern - L * 0.12, mat.detail), 'detail', 0, yb - B * 0.03, (zProw + zStern) / 2 - L * 0.02);
   for (let i = 0; i < ribs; i++) {
@@ -111,7 +124,7 @@ function hull(kit: ShipKit, W: number, yb: number, yt: number, ribs: number): Hu
   }
   // A gilt band round the stern.
   kit.add(kit.box(W * 1.03, H * 0.6, B * 0.03, mat.gold), 'detail', 0, yb + H * 0.6, zStern + L * 0.06);
-  return { W, yb, yt, zStern, zProw };
+  return { W, yb, yt, zStern, zProw, zBow: L / 2 + B * 0.03 };
 }
 
 /**
@@ -286,7 +299,7 @@ function citadel(kit: ShipKit, zBack: number, zFront: number, yBase: number, w: 
 const unit = (kit: ShipKit): number => kit.B * 0.5 + kit.L * 0.085;
 const width = (kit: ShipKit, k: number): number => Math.max(kit.B * k * 1.15, kit.L * 0.13);
 
-/** A frigate: a ram, a short two-step nave, one spired tower at the stern, a pair of buttresses. */
+/** A frigate: a blunt armoured prow, a short two-step nave, one spired tower at the stern, a pair of buttresses. */
 function buildFrigate(kit: ShipKit): void {
   const { L, mat } = kit;
   const U = unit(kit);
@@ -298,7 +311,7 @@ function buildFrigate(kit: ShipKit): void {
   buttresses(kit, hl, [-L * 0.1, L * 0.02], naveW / 2, top);
   const deck = gunDecks(kit, hl, -L * 0.3, L * 0.2);
   broadsides(kit, kit.design.weapons, deck, -L * 0.24, L * 0.17, { y: hl.yt, z: L * 0.2 });
-  aquila(kit, (hl.yt + hl.yb) / 2 + (hl.yt - hl.yb) * 0.15, hl.zProw + 0.012, hl.W * 0.95);
+  aquila(kit, (hl.yt + hl.yb) / 2 + (hl.yt - hl.yb) * 0.15, hl.zBow + 0.012, hl.W * 0.95);
   engineBank(kit, hl);
 }
 
@@ -316,7 +329,7 @@ function buildCruiser(kit: ShipKit): void {
   buttresses(kit, hl, [-L * 0.2, -L * 0.05, L * 0.1], naveW / 2, top);
   const deck = gunDecks(kit, hl, -L * 0.36, L * 0.22);
   broadsides(kit, kit.design.weapons, deck, -L * 0.3, L * 0.2, { y: hl.yt, z: L * 0.23 });
-  aquila(kit, (hl.yt + hl.yb) / 2 + (hl.yt - hl.yb) * 0.15, hl.zProw + 0.012, hl.W);
+  aquila(kit, (hl.yt + hl.yb) / 2 + (hl.yt - hl.yb) * 0.15, hl.zBow + 0.012, hl.W);
   engineBank(kit, hl);
 }
 
@@ -341,7 +354,7 @@ function buildBattleship(kit: ShipKit): void {
   buttresses(kit, hl, [-L * 0.26, -L * 0.13, L * 0.0, L * 0.13], naveW / 2, lower);
   const deck = gunDecks(kit, hl, -L * 0.38, L * 0.24);
   broadsides(kit, kit.design.weapons, deck, -L * 0.32, L * 0.22, { y: hl.yt, z: L * 0.25 });
-  aquila(kit, (hl.yt + hl.yb) / 2 + (hl.yt - hl.yb) * 0.15, hl.zProw + 0.012, hl.W * 1.05);
+  aquila(kit, (hl.yt + hl.yb) / 2 + (hl.yt - hl.yb) * 0.15, hl.zBow + 0.012, hl.W * 1.05);
   engineBank(kit, hl);
 }
 
@@ -395,6 +408,6 @@ function buildBasilica(kit: ShipKit, size: number): void {
   }
   const deck = gunDecks(kit, hl, -L * 0.34, -L * 0.02);
   broadsides(kit, kit.design.weapons, deck, -L * 0.3, -L * 0.04, { y: hl.yt, z: L * 0.24 });
-  aquila(kit, (hl.yt + hl.yb) / 2 + (hl.yt - hl.yb) * 0.15, hl.zProw + 0.012, hl.W * 0.95);
+  aquila(kit, (hl.yt + hl.yb) / 2 + (hl.yt - hl.yb) * 0.15, hl.zBow + 0.012, hl.W * 0.95);
   engineBank(kit, hl);
 }

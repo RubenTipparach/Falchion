@@ -22,6 +22,12 @@ import { fade } from './ZoomModel';
 
 /** Show the system below this visible width (ly). */
 export const SYSTEM_VIEW_WIDTH = 9;
+/**
+ * How far a drawn system reaches from its star (ly): planets orbit within about half a light-year,
+ * belts and megastructures a little further. Zooming toward anything inside it is free; outside
+ * it, zooming in is pulled onto the nearest star.
+ */
+export const SYSTEM_EXTENT = 1;
 const LABELS_BELOW = 3;
 /**
  * Planet spin (radians per second): a day of about seven minutes. A planet keeps this spin while

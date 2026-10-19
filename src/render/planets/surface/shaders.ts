@@ -70,17 +70,8 @@ float patchEdge(vec3 d) {
 }
 `;
 
-/**
- * The ground as drawn. Outside the detail patch it is the baked globe: the cube-sphere grid of
- * SurfaceTerrain (rebuilt here from the same noise), flat between its vertices. Inside the patch it
- * is the noise itself, with more octaves near the camera. The patch's outer ring morphs onto the
- * globe's own triangles (a geomorph), so the two meet exactly at the patch's edge: the globe's
- * coarse triangles turn sharp ridges into broad pyramids, and where the patch cut them off they
- * used to float above the horizon with sky beneath them.
- */
-const GROUND_GLSL = /* glsl */ `
-uniform float uBaseN, uOct;
-const float PI4 = 0.78539816;
+/** The cube face a direction falls on (normal, then the two axes across it). Needs nothing. */
+const FACE_GLSL = /* glsl */ `
 void faceOf(vec3 d, out vec3 n, out vec3 u, out vec3 v) {
   vec3 a = abs(d);
   if (a.x >= a.y && a.x >= a.z) {
@@ -94,6 +85,19 @@ void faceOf(vec3 d, out vec3 n, out vec3 u, out vec3 v) {
     if (d.z > 0.0) { n = vec3(0.0, 0.0, 1.0); u = vec3(1.0, 0.0, 0.0); } else { n = vec3(0.0, 0.0, -1.0); u = vec3(-1.0, 0.0, 0.0); }
   }
 }
+`;
+
+/**
+ * The ground as drawn. Outside the detail patch it is the baked globe: the cube-sphere grid of
+ * SurfaceTerrain (rebuilt here from the same noise), flat between its vertices. Inside the patch it
+ * is the noise itself, with more octaves near the camera. The patch's outer ring morphs onto the
+ * globe's own triangles (a geomorph), so the two meet exactly at the patch's edge: the globe's
+ * coarse triangles turn sharp ridges into broad pyramids, and where the patch cut them off they
+ * used to float above the horizon with sky beneath them.
+ */
+const GROUND_GLSL = /* glsl */ `
+uniform float uBaseN, uOct;
+const float PI4 = 0.78539816;
 float gridT(float i) { return tan((i / uBaseN * 2.0 - 1.0) * PI4); }
 vec3 globeCorner(vec3 n, vec3 u, vec3 v, float i, float j) {
   vec3 d = normalize(n + u * gridT(i) + v * gridT(j));
@@ -152,6 +156,8 @@ float bandNoise(vec3 d, float f, float off) {
   return mix(snoise(d * f0 + off), snoise(d * (f0 * 2.0) + off), w);
 }
 float lineAA(float g, float halfW) { float d = abs(g - floor(g + 0.5)); float fw = fwidth(g); return 1.0 - smoothstep(halfW - fw, halfW + fw, d); }
+/** lineAA with the pixel's width in g given, for use inside loops (no derivatives there: see the city loop). */
+float lineW(float g, float halfW, float fw) { float d = abs(g - floor(g + 0.5)); return 1.0 - smoothstep(halfW - fw, halfW + fw, d); }
 void main() {
   vec3 dir = normalize(vDir);
 #ifdef IS_BASE
@@ -250,6 +256,11 @@ void main() {
   spec *= 1.0 - caps;
 
   float urbanAll = 0.0;
+  // How much of the sphere one pixel covers, taken once here: the loop below must not take
+  // derivatives itself (change surface-perf). On Windows, Direct3D's shader compiler has to unroll
+  // any loop that does, and unrolled 32 times over every city the compile froze the game the first
+  // time a planet came into view.
+  float pxDir = length(fwidth(dir));
   // Settlements: concrete, a street grid that glows at night, the capital's avenues and ring road.
   for (int i = 0; i < ${MAX_SITES}; i++) {
     if (i >= uCityN) break;
@@ -268,17 +279,19 @@ void main() {
     float inCity = 1.0 - smoothstep(edge * 0.9, edge * 1.08, rr);
     float sprawl = 1.0 - smoothstep(R * 0.6, R * 1.7, rr);
     vec2 g = xy / cell;
-    float roads = max(lineAA(g.x, 0.1), lineAA(g.y, 0.1));
-    float major = max(lineAA(g.x * 0.25, 0.035), lineAA(g.y * 0.25, 0.035));
+    // One pixel, in cells (the tangent plane is the sphere this close to the city).
+    float fwG = pxDir / cell;
+    float roads = max(lineW(g.x, 0.1, fwG), lineW(g.y, 0.1, fwG));
+    float major = max(lineW(g.x * 0.25, 0.035, fwG * 0.25), lineW(g.y * 0.25, 0.035, fwG * 0.25));
     float avenue = 0.0;
     if (uCityC[i].x > 0.5) {
       float ang = atan(xy.y, xy.x);
       float dav = rr * abs(sin(4.0 * ang)) * 0.25 / cell;
-      float fwA = fwidth(dav);
+      float fwA = fwG;
       avenue = 1.0 - smoothstep(0.28 - fwA, 0.28 + fwA, dav);
       avenue *= step(cell * 1.6, rr);
       float ring1 = abs(rr - R * 0.55) / cell;
-      float fwR = fwidth(rr / cell);
+      float fwR = fwG;
       avenue = max(avenue, 1.0 - smoothstep(0.28 - fwR, 0.28 + fwR, ring1));
       float plaza = 1.0 - smoothstep(cell * 1.5, cell * 1.6, rr);
       col = mix(col, vec3(0.62, 0.6, 0.55), plaza * 0.9);
@@ -292,7 +305,7 @@ void main() {
     // Street detail where a pixel is small against a block (change city-life): pavements, lane
     // markings, crossings, and the pools of light under the lamps CityLife stands along the streets.
     vec2 gd = g - floor(g + 0.5);
-    float detail = (1.0 - smoothstep(0.015, 0.05, max(fwidth(g.x), fwidth(g.y)))) * inCity;
+    float detail = (1.0 - smoothstep(0.015, 0.05, fwG)) * inCity;
     vec2 wideAx = vec2(step(abs(mod(floor(g.x + 0.5), 4.0)), 0.5), step(abs(mod(floor(g.y + 0.5), 4.0)), 0.5));
     vec2 hw = mix(vec2(0.1), vec2(0.14), wideAx);
     // In the street that runs along y (its line is x = const), and the one along x.
@@ -380,6 +393,7 @@ varying vec3 vDir; varying vec3 vN; varying vec3 vW; varying float vH;
 ${NOISE_GLSL}
 ${TERRAIN_GLSL}
 ${PATCH_GLSL}
+${FACE_GLSL}
 ${GROUND_GLSL}
 vec3 pdir(vec2 uv) { return normalize(uPC + (uv.x * uPT1 + uv.y * uPT2) * uPSize); }
 void main() {
@@ -673,6 +687,7 @@ varying vec3 vW; varying vec3 vUp; varying float vAlong; varying float vBridge; 
 ${NOISE_GLSL}
 ${TERRAIN_GLSL}
 ${PATCH_GLSL}
+${FACE_GLSL}
 ${GROUND_GLSL}
 void main() {
   vec3 d = normalize(position);
@@ -736,10 +751,6 @@ const FLORA_GLSL = /* glsl */ `
 uniform float uSpacing, uK, uFill, uSalt, uFlora, uIce, uSnow;
 uniform float uELo[${MAX_FLORA_KINDS}], uEHi[${MAX_FLORA_KINDS}], uELiving[${MAX_FLORA_KINDS}], uEWet[${MAX_FLORA_KINDS}], uECluster[${MAX_FLORA_KINDS}], uEClusterFreq[${MAX_FLORA_KINDS}];
 uniform int uEN;
-${NOISE_GLSL}
-${TERRAIN_GLSL}
-${PATCH_GLSL}
-${GROUND_GLSL}
 uvec3 pcg3(uvec3 v) {
   v = v * 1664525u + 1013904223u;
   v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
@@ -757,6 +768,10 @@ void floraWindow(out vec3 n, out vec3 fu, out vec3 fv, out vec2 c, out vec2 orig
   origin = floor(c / uSpacing) - floor(uK * 0.5);
   face = uint(dot(abs(n), vec3(0.0, 2.0, 4.0)) + (dot(n, vec3(1.0)) > 0.0 ? 1.0 : 0.0));
 }
+`;
+
+/** Where a cell's prop stands (needs FLORA_TERRAIN_GLSL and FLORA_GLSL first). */
+const FLORA_PLACE_GLSL = /* glsl */ `
 // Where a cell's prop stands: xyz the ground point under it, w its kind plus how far it has grown
 // (0..0.999); w below zero when nothing grows there.
 vec4 placeCell(vec2 cell, uint face, vec3 n, vec3 fu, vec3 fv, vec2 c) {
@@ -796,12 +811,23 @@ vec4 placeCell(vec2 cell, uint face, vec3 n, vec3 fu, vec3 fv, vec2 c) {
 }
 `;
 
+/** The terrain as the patch draws it, for placing props on it. */
+const FLORA_TERRAIN_GLSL = /* glsl */ `
+${NOISE_GLSL}
+${TERRAIN_GLSL}
+${PATCH_GLSL}
+${FACE_GLSL}
+${GROUND_GLSL}
+`;
+
 /** The placement pass: a texel a cell of the window, as placeCell says. */
 export const FLORA_PLACE_VERT = /* glsl */ `
 void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 
 export const FLORA_PLACE_FRAG = /* glsl */ `
+${FLORA_TERRAIN_GLSL}
 ${FLORA_GLSL}
+${FLORA_PLACE_GLSL}
 void main() {
   if (uFlora <= 0.0 || uPatchOn < 0.5) { gl_FragColor = vec4(0.0, 0.0, 0.0, -1.0); return; }
   vec3 n, fu, fv; vec2 c, origin; uint face;
@@ -817,7 +843,17 @@ uniform float uEntry, uSizeA, uSizeB, uStretch, uSway, uTime, uDrift, uHover;
 uniform vec3 uColA, uColB;
 uniform sampler2D uPlace;
 varying vec3 vCol; varying vec3 vNw; varying vec3 vUp; varying vec3 vW; varying vec3 vLoc; varying vec3 vLocN; varying float vEmit; varying float vSeed;
+// Placed props read the placement pass and need none of the terrain: leaving it out of this
+// shader is most of its compile time (change surface-perf).
+#ifdef PLACED
+uniform float uPatchOn; uniform vec3 uPC;
+${FACE_GLSL}
 ${FLORA_GLSL}
+#else
+${FLORA_TERRAIN_GLSL}
+${FLORA_GLSL}
+${FLORA_PLACE_GLSL}
+#endif
 void hide() { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vCol = vec3(0.0); vNw = vec3(0.0, 1.0, 0.0); vUp = vNw; vW = vec3(0.0); vLoc = vec3(0.0); vLocN = vNw; vEmit = 0.0; vSeed = 0.0; }
 void main() {
   if (uFlora <= 0.0 || uPatchOn < 0.5) { hide(); return; }

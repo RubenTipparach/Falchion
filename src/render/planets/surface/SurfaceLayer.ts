@@ -89,7 +89,9 @@ export class SurfaceLayer implements MapLayer {
   private built: Built | null = null;
   /** A rebuild for a changed colony, swapped in once its globe is baked. */
   private next: Built | null = null;
-  private building: { key: string; stage: number; data?: Built } | null = null;
+  private building: { key: string; stage: number; data?: Built; compiling?: boolean } | null = null;
+  /** The map's renderer (from overlay): compiles a new close-up's shaders in the background. */
+  private renderer: THREE.WebGLRenderer | null = null;
   private readonly rig = new SurfaceRig();
   private readonly quality: SurfaceQuality;
   private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.001, 20);
@@ -274,6 +276,7 @@ export class SurfaceLayer implements MapLayer {
   }
 
   overlay(renderer: THREE.WebGLRenderer, labels: CSS2DRenderer, mapCamera: THREE.PerspectiveCamera): void {
+    this.renderer = renderer;
     // A host that does not pose the camera first (MapLayer.poseCamera is optional) still gets the view.
     if (!this.shot) this.poseCamera(mapCamera);
     const shot = this.shot, b = this.built;
@@ -335,7 +338,18 @@ export class SurfaceLayer implements MapLayer {
       if (job.stage === 0) {
         job.data = this.create(t, want);
         job.stage = 1;
-      } else if (job.data!.terrain.bakeStep()) {
+      } else if (job.stage === 1 && job.data!.terrain.bakeStep()) {
+        job.stage = 2;
+        // Compile every shader of the close-up off the main thread (KHR_parallel_shader_compile)
+        // before it is first drawn: a first draw that compiles them blocks the game until the
+        // driver is done, which on Windows (Direct3D's compiler) could take seconds.
+        const r = this.renderer;
+        if (r) {
+          job.compiling = true;
+          r.compileAsync(job.data!.scene, this.camera).catch(() => undefined).finally(() => { job.compiling = false; });
+        }
+      }
+      if (job.stage === 2 && !job.compiling && this.building === job) {
         if (this.built) this.next = job.data!;
         else this.built = job.data!;
         this.building = null;
@@ -357,7 +371,7 @@ export class SurfaceLayer implements MapLayer {
     if (mine) terrain.setPit(new THREE.Vector3(...mine.dir), 0.0068, 0.05);
     const settlements = new Settlements(layout, terrain, this.quality.lite);
     const roads = new RoadMesh(layout.roads, terrain);
-    const flora = new Flora(t.planet.biome, terrain, this.quality.lite);
+    const flora = new Flora(t.planet.biome, terrain, this.quality.lite, this.renderer ?? undefined);
     const labels = this.makeLabels(t, layout, terrain, settlements);
     const scene = new THREE.Scene();
     scene.add(terrain.group, settlements.group, flora.group, labels.group);

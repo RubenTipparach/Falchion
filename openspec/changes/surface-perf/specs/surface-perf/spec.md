@@ -20,3 +20,10 @@ Where Web Workers exist, the close-up's globe SHALL bake its six faces in parall
 #### Scenario: Zooming into a planet
 - **WHEN** the close-up starts building a planet's globe
 - **THEN** the main thread only merges the finished faces, and does not stall for the bake
+
+### Requirement: Shaders compile ahead and loop cheaply on every driver
+No shader loop SHALL take screen-space derivatives (`fwidth`, `dFdx`, `dFdy`), directly or through a helper. A loop that needs a pixel's size SHALL be given it from outside the loop. On Windows, Direct3D's compiler must unroll and flatten such a loop: every pixel then pays for every city, and the compile takes seconds. A planet's close-up SHALL compile its shaders in the background (`compileAsync`) before it is first drawn.
+
+#### Scenario: Zooming into a colony on a Windows PC
+- **WHEN** the close-up of a planet with many cities comes into view for the first time
+- **THEN** the game keeps drawing while its shaders compile, and a pixel far from every city does not run the city code

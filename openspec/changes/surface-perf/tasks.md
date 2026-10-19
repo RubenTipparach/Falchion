@@ -9,3 +9,8 @@
 
 ## 3. Globe
 - [x] 3.1 Pure bake in core (GlobeBake.ts); worker pool; sync fallback
+
+## 4. Shader compile and loops (after the city update)
+- [x] 4.1 No derivatives inside any shader loop (city streets, fractal streets, choir traces)
+- [x] 4.2 Close-up compiled in the background before it is shown; flora settles its placement path up front and puts the placement shader in the scene
+- [x] 4.3 The placed flora shader leaves the terrain out

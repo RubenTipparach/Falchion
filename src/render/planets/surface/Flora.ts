@@ -45,7 +45,11 @@ export class Flora {
   private readonly quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
   private readonly quadCam = new THREE.Camera();
 
-  constructor(biome: string, private readonly terrain: SurfaceTerrain, lite: boolean) {
+  /**
+   * `renderer`, when known, settles the placement path now, so the shaders the scene is compiled
+   * with ahead of time (SurfaceLayer, compileAsync) are the ones it draws with.
+   */
+  constructor(biome: string, private readonly terrain: SurfaceTerrain, lite: boolean, renderer?: THREE.WebGLRenderer) {
     this.quad.frustumCulled = false;
     for (const def of floraOf(biome)) {
       const grid = LAYERS[def.layer];
@@ -94,6 +98,7 @@ export class Flora {
       });
       this.layers.push({ def, k, uniforms, kinds, window: '', target: null });
     }
+    if (renderer) this.choosePath(renderer);
   }
 
   /**
@@ -154,9 +159,16 @@ export class Flora {
   private choosePath(renderer: THREE.WebGLRenderer): void {
     this.placed = renderer.capabilities.isWebGL2 && renderer.extensions.has('EXT_color_buffer_float');
     if (!this.placed) return;
-    for (const layer of this.layers) for (const { mesh } of layer.kinds) {
-      mesh.material.defines = { ...mesh.material.defines, PLACED: 1 };
-      mesh.material.needsUpdate = true;
+    for (const layer of this.layers) {
+      for (const { mesh } of layer.kinds) {
+        mesh.material.defines = { ...mesh.material.defines, PLACED: 1 };
+        mesh.material.needsUpdate = true;
+      }
+      // Never drawn: it puts the placement shader in the scene, so compiling the scene compiles it.
+      const holder = new THREE.Mesh(this.quad.geometry, placeMaterial(layer));
+      holder.visible = false;
+      holder.frustumCulled = false;
+      this.group.add(holder);
     }
   }
 

@@ -12,6 +12,9 @@ export const PATTERN_GLSL = /* glsl */ `
 float gridLine(float g, float halfW) { float fw = fwidth(g); float w = max(halfW, fw * 0.6); float d = abs(g - floor(g + 0.5)); return 1.0 - smoothstep(w - fw * 0.5, w + fw * 0.5, d); }
 /** How much of a pattern layer at this frequency can be drawn without aliasing (0..1). */
 float patternFade(vec2 g) { return 1.0 - smoothstep(0.35, 0.9, length(fwidth(g))); }
+/** gridLine and patternFade with the pixel's size in g given, for use inside loops (no derivatives there). */
+float gridLineW(float g, float halfW, float fw) { float w = max(halfW, fw * 0.6); float d = abs(g - floor(g + 0.5)); return 1.0 - smoothstep(w - fw * 0.5, w + fw * 0.5, d); }
+float patternFadeW(vec2 fw) { return 1.0 - smoothstep(0.35, 0.9, length(fw)); }
 
 /**
  * The pattern over a base colour: returns the colour, adds the pattern's own lights to patE and
@@ -39,14 +42,15 @@ vec3 surfacePattern(vec3 d, vec3 p, float h, vec3 col, float s, float near, floa
   // Fractal streets: at each finer level, a block whose hash says so is split by its midlines.
   float frac = 0.0;
   float lvl = 1.0;
+  vec2 fg = fwidth(g);
   for (int i = 1; i <= 4; i++) {
     lvl *= 2.0;
     vec2 gL = g * lvl;
     vec2 parent = floor(gL * 0.5);
     float split = step(0.32, hash13(vec3(parent, cu.z + float(i) * 7.0) + floor(uSeed)));
-    float fadeL = patternFade(gL);
+    float fadeL = patternFadeW(fg * lvl);
     vec2 odd = mod(floor(gL + 0.5), 2.0);
-    float mid = max(gridLine(gL.x, 0.09) * odd.x, gridLine(gL.y, 0.09) * odd.y);
+    float mid = max(gridLineW(gL.x, 0.09, fg.x * lvl) * odd.x, gridLineW(gL.y, 0.09, fg.y * lvl) * odd.y);
     frac = max(frac, mid * split * fadeL * (1.0 - 0.15 * float(i)));
   }
   // A district round a circular plaza: rings and spokes. Another cut by a diagonal boulevard.
@@ -111,17 +115,19 @@ vec3 surfacePattern(vec3 d, vec3 p, float h, vec3 col, float s, float near, floa
 #elif PATTERN == 3
   // Choir world: circuit traces over a pale dead crust, pulses running along them; finer traces close up.
   float trace = 0.0, pulse = 0.0;
+  // The pixel's size in the coarse traces' units, taken outside the loop (no derivatives inside).
+  vec2 fc = fwidth(cu.xy * 12.0 * s);
   for (int lv = 0; lv < 2; lv++) {
     float k = lv == 0 ? 12.0 * s : 12.0 * s * 7.0;
     vec2 g = cu.xy * k;
-    float fade = lv == 0 ? 1.0 : patternFade(g) * 0.8;
-    if (fade <= 0.0) continue;
+    vec2 fwg = lv == 0 ? fc : fc * 7.0;
+    float fade = lv == 0 ? 1.0 : patternFadeW(fwg) * 0.8;
     vec2 cid = floor(g);
     float o = float(lv) * 19.0;
     float hx = hash13(vec3(cid.x + 0.5, floor(g.y + 0.5), cu.z + o) + floor(uSeed));
     float hy = hash13(vec3(floor(g.x + 0.5), cid.y + 0.5, cu.z + 9.0 + o) + floor(uSeed));
-    float trX = gridLine(g.y, 0.05) * step(0.45, hx);
-    float trY = gridLine(g.x, 0.05) * step(0.45, hy);
+    float trX = gridLineW(g.y, 0.05, fwg.y) * step(0.45, hx);
+    float trY = gridLineW(g.x, 0.05, fwg.x) * step(0.45, hy);
     vec2 nd = g - floor(g + 0.5);
     float node = (1.0 - smoothstep(0.1, 0.16, length(nd))) * step(0.6, hash13(vec3(floor(g + 0.5), cu.z + 4.0 + o)));
     float t = max(max(trX, trY), node) * fade;

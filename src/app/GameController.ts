@@ -31,7 +31,7 @@ import type { ViewState } from '../render/map/MapLayer';
 import type { MapView } from '../render/map/MapView';
 import type { SectorOverlayLayer } from '../render/map/SectorOverlayLayer';
 import type { SelectionLayer } from '../render/map/SelectionLayer';
-import { SYSTEM_VIEW_WIDTH, SystemLayer, planetRadius } from '../render/map/SystemLayer';
+import { SYSTEM_EXTENT, SYSTEM_VIEW_WIDTH, SystemLayer, planetRadius } from '../render/map/SystemLayer';
 import type { SurfaceLayer, SurfaceTarget } from '../render/planets/surface/SurfaceLayer';
 import { foreignSeat, type SettlementInput } from '../core/surface/SurfaceLayout';
 import type { Drawer } from '../ui/Drawer';
@@ -130,11 +130,14 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     view.fleets.setTime(this.fleetTime());
     view.fleets.setFleets(this.fleetViews());
     this.refreshBattles();
-    // Zooming in close pulls the view onto the nearest star, so you land in its system.
+    // Zooming in close pulls the view onto the nearest star, so you land in its system. Once the
+    // system is drawn and the cursor is over it, the zoom goes where the cursor is instead: to a
+    // planet, a belt or a megastructure, not back to the star.
     view.map.controller.attractor = (ground, width, touch) => {
       if (width > 25) return null;
       const reach = Math.max(1, Math.round(width * 0.15));
       const star = this.deps.galaxy.nearestStar(worldToHex(ground.x, ground.z), reach);
+      if (star && width < SYSTEM_VIEW_WIDTH && Math.hypot(star.position.x - ground.x, star.position.z - ground.z) < SYSTEM_EXTENT) return null;
       // Pinch zoom (touch) also snaps to ships: whichever, star or ship, is closer to the fingers.
       const ship = touch ? view.fleets.nearest(ground.x, ground.z, reach) : null;
       const starDist = star ? Math.hypot(star.position.x - ground.x, star.position.z - ground.z) : Infinity;

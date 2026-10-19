@@ -14,6 +14,7 @@ import type { PlanetFrame } from '../../map/SystemLayer';
 import type { ZoomModel } from '../../map/ZoomModel';
 import { BACKDROP_FRAG, BACKDROP_VERT } from './shaders';
 import { Settlements } from './Settlements';
+import { Flora } from './Flora';
 import { S_ENTER, S_FLOOR, S_LEAVE, S_TOP, SurfaceRig, sOfU, uOfD, uOfS } from './SurfaceRig';
 import { SurfaceLabels } from './SurfaceLabels';
 import { FULL_QUALITY, LITE_QUALITY, SurfaceQuality, SurfaceTerrain } from './SurfaceTerrain';
@@ -68,6 +69,7 @@ interface Built {
   readonly terrain: SurfaceTerrain;
   readonly settlements: Settlements;
   readonly roads: RoadMesh;
+  readonly flora: Flora;
   readonly labels: SurfaceLabels;
   readonly scene: THREE.Scene;
 }
@@ -282,6 +284,7 @@ export class SurfaceLayer implements MapLayer {
     if (fade < 0.004) { b.labels.hide(); return; }
     b.terrain.update({ cam: this.camera.position, focus, d, alt: shot.alt, sun, time: this.time, fade });
     b.settlements.group.visible = u > -0.05;
+    b.flora.update(d);
     const pxAtOne = (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / Math.max(1, renderer.domElement.height);
     b.settlements.setPointScale(1 / pxAtOne);
     b.roads.setPixelSize(pxAtOne);
@@ -354,11 +357,12 @@ export class SurfaceLayer implements MapLayer {
     if (mine) terrain.setPit(new THREE.Vector3(...mine.dir), 0.0068, 0.05);
     const settlements = new Settlements(layout, terrain, this.quality.lite);
     const roads = new RoadMesh(layout.roads, terrain);
+    const flora = new Flora(t.planet.biome, terrain, this.quality.lite);
     const labels = this.makeLabels(t, layout, terrain, settlements);
     const scene = new THREE.Scene();
-    scene.add(terrain.group, settlements.group, labels.group);
+    scene.add(terrain.group, settlements.group, flora.group, labels.group);
     if (roads.mesh) scene.add(roads.mesh);
-    return { key, look, layout, terrain, settlements, roads, labels, scene };
+    return { key, look, layout, terrain, settlements, roads, flora, labels, scene };
   }
 
   private makeLabels(t: SurfaceTarget, layout: SurfaceLayout, terrain: SurfaceTerrain, settlements: Settlements): SurfaceLabels {
@@ -505,6 +509,7 @@ export class SurfaceLayer implements MapLayer {
     b.terrain.dispose();
     b.settlements.dispose();
     b.roads.dispose();
+    b.flora.dispose();
     b.labels.dispose();
     this[which] = null;
     if (which === 'built' && this.sky && !this.next) {

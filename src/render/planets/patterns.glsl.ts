@@ -2,8 +2,8 @@
  * Surface patterns (PlanetLook.pattern), one copy for the system view (PlanetMaterial) and the
  * close-up (surface/shaders.ts TERRAIN_FRAG), so a city world, a dead machine world, a choir world
  * or a bone world looks the same from orbit and from the ground (change planet-audit). `s` scales
- * the pattern (1: as from orbit; the close-up adds finer layers); `near` (0..1) brings in what is
- * only seen from close (the bones and fallen trunks on a bone world). Needs NOISE_GLSL,
+ * the pattern (1: as from orbit; the close-up adds finer layers); `near` (0..1) is how close the
+ * camera is (things on the ground are props now: content/flora.ts). Needs NOISE_GLSL,
  * ATMOSPHERE_GLSL (hash13, cubeUV) and the uniforms uC0..uC3, uGlow, uSeed and uTime.
  */
 export const PATTERN_GLSL = /* glsl */ `
@@ -90,28 +90,12 @@ vec3 surfacePattern(vec3 d, vec3 p, float h, vec3 col, float s, float near, floa
   patE += uGlow * (trace * 0.35 + pulse * 1.2) * breathe * (dusk * 1.3 + 0.8);
 #elif PATTERN == 4
   // Bone world: a dead world. From orbit, grey dead forests, pale ash plains and white salt flats
-  // where seas dried up; only close to the ground, the bones and fallen trunks that cover it.
+  // where seas dried up; on the ground its bones and dead trees are props (content/flora.ts).
   float forest = smoothstep(-0.05, 0.3, fbm(d * 5.0 + uSeed.yzx));
   float salt = 1.0 - smoothstep(-0.35, -0.15, h);
   col = mix(col, uC1 * 0.75, forest * 0.55);
   col = mix(col, vec3(0.9, 0.88, 0.82), salt * 0.8);
   col *= 0.9 + 0.15 * smoothstep(0.55, 0.95, ridged(p * 6.0));
-  if (near > 0.0) {
-    // Scattered debris: in each small cell, maybe a bone (pale) or a fallen trunk (dark), lying at an angle.
-    vec2 g = cu.xy * 900.0;
-    vec2 cid = floor(g);
-    float fade = patternFade(g) * near;
-    float r = hash13(vec3(cid, cu.z + 2.0) + floor(uSeed));
-    float a = hash13(vec3(cid, cu.z + 8.0)) * 6.2832;
-    vec2 q = (fract(g) - 0.5) * mat2(cos(a), -sin(a), sin(a), cos(a));
-    float len = 0.25 + 0.2 * hash13(vec3(cid, cu.z + 5.0));
-    float stick = (1.0 - smoothstep(0.03, 0.07, abs(q.y))) * (1.0 - smoothstep(len, len + 0.04, abs(q.x)));
-    float ribs = (1.0 - smoothstep(0.02, 0.05, abs(fract(q.x * 6.0) - 0.5) * 0.3)) * (1.0 - smoothstep(0.1, 0.14, abs(q.y))) * step(abs(q.x), len) * step(0.75, r);
-    float bone = max(stick, ribs) * step(0.45, r) * fade;
-    float trunk = stick * step(r, 0.25) * fade;
-    col = mix(col, vec3(0.93, 0.9, 0.82), bone);
-    col = mix(col, vec3(0.22, 0.19, 0.16), trunk * 0.9);
-  }
 #endif
   return col;
 }

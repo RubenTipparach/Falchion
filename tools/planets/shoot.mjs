@@ -35,7 +35,7 @@ let failed = false;
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 try {
   await mkdir(out, { recursive: true });
-  const page = await browser.newPage({ viewport: { width: 160 + 4 * (px + 8), height: 800 } });
+  const page = await browser.newPage({ viewport: { width: 160 + 5 * (px + 8), height: 800 } });
   page.on('console', (m) => (m.type() === 'error' || m.type() === 'warning') && console.error('page:', m.text()));
   page.on('pageerror', (e) => { failed = true; console.error('page:', e.message); });
   await page.goto(`http://localhost:${port}/tools/planets/audit.html?px=${px}${ids ? `&ids=${ids}` : ''}`, { timeout: 180_000 });

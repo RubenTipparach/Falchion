@@ -616,3 +616,128 @@ void main() {
   float far = mix(1.0, 0.55, uFar);
   gl_FragColor = vec4(lit, vAlpha * uFade * far);
 }`;
+
+/**
+ * Flora and props (change surface-flora): one instanced draw per prop kind. Each instance is a
+ * cell of a grid on the cube face under the detail patch's centre, anchored to the planet, so the
+ * same cell always holds the same prop; the cell's hash picks its kind, place, size, turn and
+ * colour, and noise gathers them into groves. Each stands on the ground exactly as drawn (the
+ * patch's own height), never in water, cities or (living things) on ice and snow.
+ */
+export const FLORA_VERT = /* glsl */ `
+attribute float aTint; attribute float aEmit;
+uniform float uSpacing, uK, uFill, uLo, uHi, uSizeA, uSizeB, uCluster, uClusterFreq, uSalt, uLiving, uStretch, uSway, uFlora, uIce, uSnow, uTime, uWet;
+uniform vec3 uColA, uColB;
+varying vec3 vCol; varying vec3 vNw; varying vec3 vUp; varying vec3 vW; varying vec3 vLoc; varying vec3 vLocN; varying float vEmit; varying float vSeed;
+${NOISE_GLSL}
+${TERRAIN_GLSL}
+${PATCH_GLSL}
+${GROUND_GLSL}
+uvec3 pcg3(uvec3 v) {
+  v = v * 1664525u + 1013904223u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  v ^= v >> 16u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  return v;
+}
+float rnd(uvec3 k, uint i) { return float(pcg3(k + uvec3(i * 7919u, i * 104729u, i * 31u)).x & 0xffffffu) / 16777216.0; }
+void hide() { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vCol = vec3(0.0); vNw = vec3(0.0, 1.0, 0.0); vUp = vNw; vW = vec3(0.0); vLoc = vec3(0.0); vLocN = vNw; vEmit = 0.0; vSeed = 0.0; }
+void main() {
+  if (uFlora <= 0.0 || uPatchOn < 0.5) { hide(); return; }
+  vec3 n, fu, fv;
+  faceOf(uPC, n, fu, fv);
+  float dn = dot(uPC, n);
+  vec2 c = vec2(dot(uPC, fu), dot(uPC, fv)) / dn;
+  float id = float(gl_InstanceID);
+  vec2 cell = floor(c / uSpacing) + vec2(mod(id, uK), floor(id / uK)) - floor(uK * 0.5);
+  uint face = uint(dot(abs(n), vec3(0.0, 2.0, 4.0)) + (dot(n, vec3(1.0)) > 0.0 ? 1.0 : 0.0));
+  uvec3 key = uvec3(ivec3(int(cell.x), int(cell.y), int(face) * 977 + int(uSalt)));
+  // The cell's kind: every kind in a layer reads the same roll, so they share the cells.
+  float pick = rnd(key, 1u);
+  if (pick < uLo || pick >= uHi) { hide(); return; }
+  vec2 st = (cell + 0.15 + 0.7 * vec2(rnd(key, 2u), rnd(key, 3u))) * uSpacing;
+  vec3 dir = normalize(n + fu * st.x + fv * st.y);
+  // Shrinks away toward the window's edge and as the layer fades with height, never popping.
+  float edgeW = length(st - c) / (uK * 0.5 * uSpacing);
+  float keep = uFill * uFlora * (1.0 - smoothstep(0.7, 1.0, edgeW));
+  if (uCluster > 0.0) keep *= mix(1.0, smoothstep(-0.1, 0.35, snoise(dir * uClusterFreq + vec3(uSalt * 0.37))), uCluster);
+  float grow = clamp((keep - rnd(key, 4u)) / 0.12, 0.0, 1.0);
+  if (grow <= 0.0) { hide(); return; }
+  float edge = patchEdge(dir);
+  if (patchMorph(edge) > 0.0) { hide(); return; }
+  float h = shapedH(dir, patchOctaves(edge));
+  // Out of the water, unless it grows in the shallows (it then stands on the bed, up through the water).
+  if (uDry < 0.5 && h < uSea + 0.004 && (uWet <= 0.0 || h < uSea - uWet)) { hide(); return; }
+  if (uLiving > 0.5) {
+    if (abs(dir.y) > uIce - 0.03) { hide(); return; }
+    if (uSnow > 0.5 && h > uSea + 0.5) { hide(); return; }
+    if (uLocked > 0.0 && dir.x < uLocked - 0.25) { hide(); return; }
+  }
+  for (int i = 0; i < ${MAX_SITES}; i++) {
+    if (i >= uCityN) break;
+    if (length(dir - uCityA[i].xyz) < uCityB[i].y * 1.05) { hide(); return; }
+  }
+  float r = radiusOf(h);
+  float size = mix(uSizeA, uSizeB, pow(rnd(key, 6u), 2.0)) * grow;
+  float ys = mix(1.0, uStretch, pow(rnd(key, 7u), 1.5));
+  float yaw = rnd(key, 5u) * 6.2831853;
+  vec3 up = dir;
+  vec3 ax = normalize(cross(up, abs(up.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+  vec3 az = cross(ax, up);
+  vec3 x = ax * cos(yaw) + az * sin(yaw);
+  vec3 z = cross(x, up);
+  vec3 p = position;
+  p.y *= ys;
+  // Wind: the tops sway, each prop in its own time.
+  float seed = rnd(key, 8u);
+  p.x += uSway * p.y * p.y * sin(uTime * 1.6 + seed * 6.2831);
+  vec3 w = dir * (r - size * 0.06) + (x * p.x + up * p.y + z * p.z) * size;
+  vW = w;
+  vUp = up;
+  vNw = normalize(x * normal.x + up * (normal.y / ys) + z * normal.z);
+  vLoc = p * size;
+  vLocN = normal;
+  vec3 inst = mix(uColA, uColB, rnd(key, 9u)) * (0.85 + 0.3 * rnd(key, 10u));
+  vCol = mix(color, color * inst, aTint);
+  vEmit = aEmit;
+  vSeed = seed;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(w, 1.0);
+}`;
+
+export const FLORA_FRAG = /* glsl */ `
+uniform vec3 uSun, uCam, uAtmo, uGlowCol; uniform float uClose, uAtmoStrength, uNightGlow;
+varying vec3 vCol; varying vec3 vNw; varying vec3 vUp; varying vec3 vW; varying vec3 vLoc; varying vec3 vLocN; varying float vEmit; varying float vSeed;
+float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+void main() {
+  vec3 n = normalize(vNw);
+  if (!gl_FrontFacing) n = -n;
+  float sunUp = dot(vUp, uSun);
+  float day = smoothstep(-0.1, 0.25, sunUp);
+  float night = 1.0 - smoothstep(-0.16, 0.1, sunUp);
+  // Wrapped light: leaves and blades catch some light from behind.
+  float diff = clamp(dot(n, uSun) * 0.75 + 0.25, 0.0, 1.0);
+  float sky = 0.5 + 0.5 * dot(n, vUp);
+  vec3 col = vCol * (day * (0.3 * sky + 0.85 * diff) + 0.03 + 0.03 * sky + night * 0.05);
+  vec3 em = vec3(0.0);
+  if (vEmit > 0.0) {
+    if (uNightGlow > 0.5) {
+      // Windows on the walls, half of them lit at night.
+      if (abs(vLocN.y) < 0.5) {
+        float hc = abs(vLocN.x) > 0.5 ? vLoc.z : vLoc.x;
+        vec2 g = vec2(hc / 0.00008, vLoc.y / 0.0001);
+        vec2 f = fract(g);
+        float win = step(0.25, f.x) * step(f.x, 0.75) * step(0.3, f.y) * step(f.y, 0.8);
+        float on = step(0.5, hash12(floor(g) + vSeed * 97.0));
+        float k = smoothstep(0.3, 0.8, max(fwidth(g).x, fwidth(g).y));
+        em += uGlowCol * mix(win * on, 0.2, k) * night * 1.4;
+      }
+    } else {
+      em += uGlowCol * vEmit * (0.6 + 0.8 * night);
+    }
+  }
+  vec3 lit = col + em;
+  float dist = length(uCam - vW);
+  vec3 airCol = uAtmo * (0.12 + 0.88 * smoothstep(-0.3, 0.6, sunUp));
+  lit = mix(lit, airCol * 0.8, clamp((1.0 - exp(-dist / 0.3)) * 0.55 * uClose * 0.75 * uAtmoStrength, 0.0, 0.85));
+  gl_FragColor = vec4(lit, 1.0);
+}`;

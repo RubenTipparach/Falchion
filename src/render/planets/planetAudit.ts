@@ -10,6 +10,7 @@ import type { StarSystem } from '../../core/galaxy/GalaxyModel';
 import { createMegaVisual } from '../megastructures/MegaVisuals';
 import { createStarVisual } from '../stars/StarVisuals';
 import { PlanetThumbnails } from './PlanetThumbnails';
+import { Flora } from './surface/Flora';
 
 /**
  * Planet type audit (tools/planets/audit.html, `npm run planets`): every planet type four ways side
@@ -37,7 +38,7 @@ export async function planetAudit(root: HTMLElement): Promise<void> {
   };
   const header = document.createElement('div');
   header.className = 'row head';
-  header.append(cell('Type'), cell('System view'), cell('Surface · orbit 2.6 R'), cell('Surface · mid 1.25 R'), cell('Surface · close'));
+  header.append(cell('Type'), cell('System view'), cell('Surface · orbit 2.6 R'), cell('Surface · mid 1.25 R'), cell('Surface · close'), cell('Ground · flora'));
   root.append(header);
 
   for (const biome of BIOMES.filter((b) => !b.megastructure && (!ids || ids.includes(b.id)))) {
@@ -52,11 +53,11 @@ export async function planetAudit(root: HTMLElement): Promise<void> {
     const images: string[] = [];
     try {
       images.push(systemView(look, seed, camera, shot));
-      images.push(...await surfaceViews(look, seed, camera, shot));
+      images.push(...await surfaceViews(look, seed, camera, shot, biome.id));
     } catch (e) {
       console.warn('audit', biome.id, e);
     }
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       const img = document.createElement('img');
       img.width = img.height = px;
       if (images[i]) img.src = images[i];
@@ -155,11 +156,12 @@ function systemView(look: typeof PLANET_LOOKS[string], seed: number, camera: THR
 }
 
 /** The surface terrain (the close-up's globe and detail patch) from orbit, mid range and the ground. */
-async function surfaceViews(look: typeof PLANET_LOOKS[string], seed: number, camera: THREE.PerspectiveCamera, shot: (s: THREE.Scene) => string): Promise<string[]> {
+async function surfaceViews(look: typeof PLANET_LOOKS[string], seed: number, camera: THREE.PerspectiveCamera, shot: (s: THREE.Scene) => string, biome: string): Promise<string[]> {
   const terrain = new SurfaceTerrain(surfaceLookOf(look, seed), [], FULL_QUALITY, null);
   while (!terrain.bakeStep()) await new Promise((r) => setTimeout(r, 0));
   const scene = new THREE.Scene();
-  scene.add(terrain.group);
+  const flora = new Flora(biome, terrain, false);
+  scene.add(terrain.group, flora.group);
   const ground = (d: THREE.Vector3) => terrain.surfaceRadius(d.clone().normalize());
   const pose = (cam: THREE.Vector3, target: THREE.Vector3, up: THREE.Vector3): string => {
     camera.position.copy(cam);
@@ -174,6 +176,7 @@ async function surfaceViews(look: typeof PLANET_LOOKS[string], seed: number, cam
     camera.updateMatrixWorld();
     const focus = target.clone();
     terrain.update({ cam: camera.position, focus, d: cam.distanceTo(focus), alt, sun: SUN, time: 0, fade: 1 });
+    flora.update(cam.distanceTo(focus));
     return shot(scene);
   };
   const out: string[] = [];
@@ -195,6 +198,11 @@ async function surfaceViews(look: typeof PLANET_LOOKS[string], seed: number, cam
   const ahead = Q.clone().add(tQ.clone().multiplyScalar(0.05)).normalize();
   const closeTarget = ahead.clone().multiplyScalar(ground(ahead));
   out.push(pose(closeCam, closeTarget, Q));
+  // On the ground: just above it, looking a little ahead, where grass and stones show.
+  const groundCam = Q.clone().multiplyScalar(rq + 0.0012);
+  const near = Q.clone().add(tQ.clone().multiplyScalar(0.008)).normalize();
+  out.push(pose(groundCam, near.clone().multiplyScalar(ground(near)), Q));
+  flora.dispose();
   terrain.dispose();
   return out;
 }

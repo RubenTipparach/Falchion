@@ -12,6 +12,8 @@ import type { ShipDesign } from '../core/ships/ShipDesign';
 import type { FleetView } from '../render/map/FleetLayer';
 import type { CommerceState } from '../core/economy/Commerce';
 import type { GovernorState } from '../core/empire/Governor';
+import type { MissionsState } from '../core/missions/Missions';
+import type { CourtState } from '../core/empire/Court';
 
 /** Policy side of the economy; the stockpile lives on the empire. */
 export type EconomySettings = Omit<EconomyState, 'stock'>;
@@ -66,6 +68,10 @@ export interface GameState {
   readonly commerce?: CommerceState;
   /** The empire governor's settings (change empire-governor); missing: no governor. */
   readonly governor?: GovernorState;
+  /** Story missions and faction quests (change missions-and-court); missing in older saves. */
+  readonly missions?: MissionsState;
+  /** The ruler's level and the advisors (change missions-and-court); missing in older saves. */
+  readonly court?: CourtState;
 }
 
 export interface Relations {

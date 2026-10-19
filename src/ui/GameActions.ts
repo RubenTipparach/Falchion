@@ -17,8 +17,10 @@ import type { Market } from '../core/economy/Trade';
 import type { ExchangeInfo, StockView } from '../sim/EmpireSim';
 import type { DiplomacyView, FieldReport } from '../sim/EmpireSim';
 import type { DiplomaticAction } from '../core/diplomacy/Diplomacy';
+import type { Seat } from '../content/advisors';
+import type { MissionDef, ObjectiveProgress, QuestDef } from '../core/missions/Missions';
 
-export type PanelId = 'shipyard' | 'research' | 'empire' | 'war' | 'explore' | 'fleets' | 'search';
+export type PanelId = 'shipyard' | 'research' | 'empire' | 'war' | 'explore' | 'fleets' | 'search' | 'missions';
 
 /** A group of the player's ships in one place: the home dock or a deployed fleet. */
 export interface FleetGroup {
@@ -81,6 +83,11 @@ export type LandingSpot = { readonly city: number } | { readonly building: strin
 
 /** Read-only game queries the panels use (implemented by the app layer). */
 export interface GameQueries {
+  /** A mission by id (story, accepted quest or offer) and how far along it is. */
+  missionDef(id: string): MissionDef | QuestDef | null;
+  missionProgress(id: string): { objectives: ObjectiveProgress[]; complete: boolean } | null;
+  /** The ruler's title and name. */
+  rulerName(): string;
   /** The hex at the centre of the view (where a search starts). */
   viewHex(): Hex;
   /** A planet's major cities, capital first (empty when nobody has settled it). */
@@ -285,6 +292,14 @@ export interface GameActions {
   foundFaith(name: string, tenets: string[]): void;
   toggleMission(empire: string): void;
   toggleSpy(empire: string): void;
+  /** Missions and the court (change missions-and-court). */
+  claimMission(id: string): void;
+  acceptQuest(id: string): void;
+  declineQuest(id: string): void;
+  appointAdvisor(candidateId: string): void;
+  dismissAdvisor(seat: Seat): void;
+  delegate(seat: Seat, on: boolean): void;
+  seekAdvisor(seat: Seat): void;
   /** Fight with ships from a group on station at the target. */
   engage(targetId: string, ships: Squadron[], groupId: string): CombatOutcome | null;
   /** Development aid: advance one year now. */

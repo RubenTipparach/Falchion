@@ -1,4 +1,10 @@
 import { RESOURCES, Resource } from '../content/resources';
+import { MISSIONS, MISSION_BY_ID } from '../content/missions';
+import { SEAT_BY_ID, SEEK_COST, type Seat } from '../content/advisors';
+import { isMegastructure } from '../content/megastructures';
+import { DEFAULT_RESERVE } from '../content/governor';
+import { ADVISOR_MAX, LEADER_MAX, MAX_CANDIDATES, NEW_COURT, addXp, appoint, courtBoons, drawCandidate, openSeats, withCandidate, type CourtState } from '../core/empire/Court';
+import { MAX_OFFERS, NEW_MISSIONS, QUEST_YEARS, baseOf, progressOf, questOffer, unlocked, type MissionDef, type MissionView, type MissionsState, type QuestDef } from '../core/missions/Missions';
 import { BUILDINGS, slotsOf } from '../content/buildings';
 import { buildYears, hasWarships, isSurveyClass, isWarship, REPAIR, specOf, warshipsOf, type RepairSite } from '../content/logistics';
 import { SHIP_CLASSES, ShipClassDef } from '../content/shipClasses';
@@ -1835,6 +1841,15 @@ export class EmpireSim {
       }
     }
     if (!g.build) return news;
+    return [...news, ...this.autoBuild(g.focus, g.reserve, 'Governor')];
+  }
+
+  /**
+   * The best building for a focus on every colony with a free slot and nothing under construction,
+   * while the credits last above `reserve` (the governor's, or a Steward's when delegated).
+   */
+  protected autoBuild(focus: GovernorFocus, reserve: number, who: string): string[] {
+    const news: string[] = [];
     const caps = this.caps();
     const stock = this.state.empire.materials;
     const nearlyFull = RESOURCES.filter((r) => caps[r.id] !== undefined && stock[r.id] >= caps[r.id]! * 0.8).length;
@@ -1845,10 +1860,371 @@ export class EmpireSim {
       if (have.length >= slotsOf(c.size ?? 3, c.capital)) continue;
       const site = { biomeYields: BIOME_YIELDS[c.biome] ?? {}, buildings: have, foodIncome, nearlyFull };
       const m = this.state.empire.materials;
-      const pick = pickBuilding(BUILDINGS, g.focus, site, (b) => this.isBuildingUnlocked(b.id) && canAfford(m, b.cost) && m.credits - (b.cost.credits ?? 0) >= g.reserve);
+      const pick = pickBuilding(BUILDINGS, focus, site, (b) => this.isBuildingUnlocked(b.id) && canAfford(m, b.cost) && m.credits - (b.cost.credits ?? 0) >= reserve);
       if (!pick) continue;
       this.build(c.planetId, pick.id, true);
-      news.push(`Governor: ${pick.name} started on ${c.name}`);
+      news.push(`${who}: ${pick.name} started on ${c.name}`);
+    }
+    return news;
+  }
+
+  // ── Missions and the court (change missions-and-court) ─────────────
+
+  get missions(): MissionsState {
+    return this.state.missions ?? NEW_MISSIONS;
+  }
+
+  get court(): CourtState {
+    return this.state.court ?? NEW_COURT;
+  }
+
+  private surveyCache: { explored: GameState['explored'] | null; home: string; view: Pick<MissionView, 'surveyed' | 'surveyedOf' | 'surveyedDistances' | 'megaTypes'> } | null = null;
+
+  /** What surveying has found, by type and distance (cached until the next survey). */
+  private surveyView(): Pick<MissionView, 'surveyed' | 'surveyedOf' | 'surveyedDistances' | 'megaTypes'> {
+    const s = this.state;
+    const c = this.surveyCache;
+    if (c && c.explored === s.explored && c.home === s.home.id) return c.view;
+    const surveyedOf: Record<string, number> = {};
+    const surveyedDistances: number[] = [];
+    const mega = new Set<string>();
+    const seed = this.deps.galaxy.params.seed;
+    const byStar = new Map<string, Planet[]>();
+    for (const id of Object.keys(s.explored)) {
+      const starId = id.slice(0, id.lastIndexOf('/'));
+      let planets = byStar.get(starId);
+      if (!planets) {
+        const star = this.starById(starId);
+        planets = star ? planetsOf(star, seed) : [];
+        byStar.set(starId, planets);
+      }
+      const p = planets.find((x) => x.id === id);
+      if (!p) continue;
+      surveyedOf[p.biome] = (surveyedOf[p.biome] ?? 0) + 1;
+      if (isMegastructure(p.biome)) {
+        surveyedOf.megastructure = (surveyedOf.megastructure ?? 0) + 1;
+        mega.add(p.biome);
+      }
+      const star = this.starById(starId);
+      if (star) surveyedDistances.push(hexDistance(star.hex, s.home.hex));
+    }
+    const view = { surveyed: Object.keys(s.explored).length, surveyedOf, surveyedDistances, megaTypes: [...mega] };
+    this.surveyCache = { explored: s.explored, home: s.home.id, view };
+    return view;
+  }
+
+  /** The empire as missions measure it. */
+  missionView = (): MissionView => {
+    const s = this.state;
+    const buildings: Record<string, number> = {};
+    for (const c of s.economy.colonies) for (const b of c.buildings ?? []) buildings[b] = (buildings[b] ?? 0) + 1;
+    let miners = 0, warships = 0;
+    for (const [id, n] of Object.entries(s.economy.roster)) {
+      const c = this.classById.get(id);
+      if (!c || !n) continue;
+      if (c.mines) miners += n;
+      if (c.role === 'combat' || c.role === 'capital') warships += n;
+    }
+    const standings: Record<string, number> = {};
+    for (const n of this.knownNpcs()) standings[n.def.id] = this.standingWith(n.def.id);
+    const stationed = this.groups().filter((g) => g.stationed && g.star && shipTotal(g.ships) > 0).map((g) => g.star!.id);
+    return {
+      turn: s.turn, ...this.surveyView(), colonies: s.economy.colonies.length, buildings, miners, warships,
+      researched: s.empire.research.researched.length, stock: s.empire.materials, income: s.lastReport?.income ?? {},
+      contacts: this.knownNpcs().length, standings, depots: s.depots.length, stationed, leaderLevel: this.court.leader.level,
+    };
+  };
+
+  /** A mission by id: a story mission, an accepted quest or an offer. */
+  missionDef = (id: string): MissionDef | QuestDef | null =>
+    MISSION_BY_ID[id] ?? this.missions.active.find((a) => a.id === id)?.quest ?? this.missions.offers.find((o) => o.id === id) ?? null;
+
+  /** A mission's progress, now. */
+  missionProgress = (id: string): ReturnType<typeof progressOf> | null => {
+    const def = this.missionDef(id);
+    return def ? progressOf(def, this.missions.active.find((a) => a.id === id), this.missionView()) : null;
+  };
+
+  protected updateMissions(fn: (m: MissionsState) => MissionsState): void {
+    this.deps.store.update((st) => ({ missions: fn(st.missions ?? NEW_MISSIONS) }));
+  }
+
+  protected updateCourt(fn: (c: CourtState) => CourtState): void {
+    this.deps.store.update((st) => ({ court: fn(st.court ?? NEW_COURT) }));
+    this.refreshBoons();
+  }
+
+  /** The ruler's name and title, for the court's boons and news. */
+  rulerName = (): string => {
+    const id = this.state.identity;
+    return id ? `${id.title} ${id.ruler}`.trim() : this.state.playerName;
+  };
+
+  /** The economy counts the court's bonuses and the accords in force (EconomyState.boons). */
+  protected refreshBoons(): void {
+    const turn = this.state.turn;
+    const boons = [
+      ...courtBoons(this.court, this.rulerName()),
+      ...this.missions.accords.filter((a) => a.until > turn).map((a) => ({ name: a.name, effects: a.effects, until: a.until })),
+    ];
+    this.deps.store.update((st) => ({ economy: { ...st.economy, boons } }));
+  }
+
+  /** Claim a finished mission: hand over what it asks, take its rewards. */
+  claimMission(id: string): void {
+    const active = this.missions.active.find((a) => a.id === id);
+    const def = active && (active.quest ?? MISSION_BY_ID[id]);
+    if (!active || !def) return;
+    if (!progressOf(def, active, this.missionView()).complete) return this.dispatch(`${def.title} is not done yet`, 'bad');
+    const before = this.state.empire.materials;
+    let materials = { ...before };
+    for (const o of def.objectives) if (o.kind === 'deliver' && o.resource) materials[o.resource] = Math.max(0, (materials[o.resource] ?? 0) - o.n);
+    for (const [r, n] of Object.entries(def.rewards.materials ?? {})) materials = { ...materials, [r]: (materials[r as Resource] ?? 0) + (n ?? 0) };
+    this.deps.store.update((st) => ({ empire: { ...st.empire, materials } }));
+    this.noteFlow(before, `Mission: ${def.title}`);
+    const quest = active.quest;
+    this.updateMissions((m) => ({
+      ...m,
+      active: m.active.filter((a) => a.id !== id),
+      done: quest ? m.done : [...m.done, id],
+      questsDone: m.questsDone + (quest ? 1 : 0),
+      record: [{ turn: this.state.turn, title: def.title, chapter: def.chapter }, ...m.record].slice(0, 40),
+    }));
+    const extra = this.rewardsOf(def, quest);
+    this.dispatch(`${def.title} complete${def.epilogue ? `: ${def.epilogue}` : ''}${extra.length ? ` (${extra.join('; ')})` : ''}`, 'good');
+    for (const n of this.unlockStory()) this.dispatch(n, 'good');
+  }
+
+  /** Everything but materials: experience, shards, a candidate, standing, an accord. Returns what was given. */
+  protected rewardsOf(def: MissionDef, quest?: QuestDef): string[] {
+    const r = def.rewards;
+    const out: string[] = [];
+    if (r.leaderXp) out.push(...this.leaderXp(r.leaderXp));
+    if (r.advisorXp) {
+      const seat: Seat | undefined = def.giver === 'faction' ? 'chancellor' : def.giver === 'council' ? undefined : def.giver;
+      if (seat) out.push(...this.advisorXp(seat, r.advisorXp));
+    }
+    if (r.shards) {
+      const node = this.state.economy.focus ?? pickResearch(this.deps.tree, this.state.empire.research, 'balanced');
+      if (node) {
+        this.grantShards(node, 'missions', r.shards);
+        out.push(`${r.shards} shards toward ${this.deps.tree.node(node).name}`);
+      }
+    }
+    if (r.candidate) {
+      const c = drawCandidate(hashSeed(this.me, 'court'), r.candidate, this.court.drawn, quest ? quest.npcName : undefined);
+      this.updateCourt((court) => withCandidate(court, c));
+      out.push(`${c.name} offers to serve as ${SEAT_BY_ID[c.seat].name}`);
+    }
+    if (quest && r.standing) {
+      this.changeStanding(quest.npc, r.standing);
+      out.push(`standing with the ${quest.npcName} +${r.standing}`);
+    }
+    if (quest && r.accord) {
+      const accord = { name: `Trade accord with the ${quest.npcName}`, effects: { tradePct: r.accord.tradePct }, until: this.state.turn + r.accord.years };
+      this.updateMissions((m) => ({ ...m, accords: [...m.accords.filter((a) => a.name !== accord.name && a.until > this.state.turn), accord] }));
+      this.refreshBoons();
+      out.push(`+${r.accord.tradePct}% trade for ${r.accord.years} years`);
+    }
+    return out;
+  }
+
+  /** Experience for the ruler; news of levels gained and seats opened. */
+  protected leaderXp(xp: number): string[] {
+    const was = this.court.leader;
+    const { next, gained } = addXp(was, xp, LEADER_MAX, true);
+    this.updateCourt((c) => ({ ...c, leader: next }));
+    if (!gained) return [];
+    const seats = openSeats(next.level) > openSeats(was.level) ? `, and can keep ${openSeats(next.level)} advisors` : '';
+    return [`${this.rulerName()} rises to level ${next.level}${seats}`];
+  }
+
+  /** Experience for the advisor in a seat, if there is one. */
+  protected advisorXp(seat: Seat, xp: number): string[] {
+    const a = this.court.seats[seat];
+    if (!a) return [];
+    const { next, gained } = addXp(a, xp, ADVISOR_MAX);
+    this.updateCourt((c) => ({ ...c, seats: { ...c.seats, [seat]: next } }));
+    return gained ? [`${SEAT_BY_ID[seat].name} ${a.name} rises to level ${next.level}`] : [];
+  }
+
+  /** Take up a faction's quest. */
+  acceptQuest(id: string): void {
+    const offer = this.missions.offers.find((o) => o.id === id);
+    if (!offer) return;
+    const turn = this.state.turn;
+    const view = this.missionView();
+    this.updateMissions((m) => ({
+      ...m,
+      offers: m.offers.filter((o) => o.id !== id),
+      active: [...m.active, { id, started: turn, expires: turn + QUEST_YEARS, base: baseOf(offer, view), quest: offer }],
+    }));
+    this.dispatch(`Quest accepted: ${offer.title} (for the ${offer.npcName})`, 'good');
+  }
+
+  /** Turn a faction's offer down (no ill will; it may ask again another time). */
+  declineQuest(id: string): void {
+    if (!this.missions.offers.some((o) => o.id === id)) return;
+    this.updateMissions((m) => ({ ...m, offers: m.offers.filter((o) => o.id !== id), declined: [...(m.declined ?? []), id].slice(-30) }));
+  }
+
+  /** Appoint a candidate to their seat. */
+  appointAdvisor(candidateId: string): void {
+    const r = appoint(this.court, candidateId);
+    if ('error' in r) return this.dispatch(`Cannot appoint: ${r.error}`, 'bad');
+    this.updateCourt(() => r.court);
+    const c = Object.values(r.court.seats).find((a) => a?.id === candidateId);
+    if (c) this.dispatch(`${c.name} is appointed ${SEAT_BY_ID[c.seat].name}`, 'good');
+  }
+
+  /** Send an advisor back to the candidates. */
+  dismissAdvisor(seat: Seat): void {
+    const a = this.court.seats[seat];
+    if (!a) return;
+    this.updateCourt((c) => {
+      const seats = { ...c.seats };
+      delete seats[seat];
+      return { ...c, seats, candidates: [...c.candidates, { ...a, delegate: false }].slice(-MAX_CANDIDATES) };
+    });
+  }
+
+  /** Let an advisor make their seat's decisions each year (or take them back). */
+  delegate(seat: Seat, on: boolean): void {
+    const a = this.court.seats[seat];
+    if (!a) return;
+    this.updateCourt((c) => ({ ...c, seats: { ...c.seats, [seat]: { ...a, delegate: on } } }));
+  }
+
+  /** Spend influence to find a candidate for a seat. */
+  seekAdvisor(seat: Seat): void {
+    const s = this.state;
+    if ((s.empire.materials.influence ?? 0) < SEEK_COST) return this.dispatch(`Seeking an advisor needs ${SEEK_COST} influence`, 'bad');
+    const before = s.empire.materials;
+    this.deps.store.update({ empire: { ...s.empire, materials: { ...before, influence: before.influence - SEEK_COST } } });
+    this.noteFlow(before, `Sought a ${SEAT_BY_ID[seat].name}`);
+    const c = drawCandidate(hashSeed(this.me, 'court'), seat, this.court.drawn);
+    this.updateCourt((court) => withCandidate(court, c));
+    this.dispatch(`${c.name} answers your call: a candidate for ${SEAT_BY_ID[seat].name}`, 'good');
+  }
+
+  /**
+   * The year for missions and the court: lapsed offers and quests go, story missions begin as
+   * they are uncovered, factions make offers, finished missions are claimed, advisors grow and
+   * the delegated ones decide. Returns the news.
+   */
+  protected missionYear(): string[] {
+    const news: string[] = [];
+    const turn = this.state.turn;
+    // Lapsed offers and quests.
+    const lapsed = this.missions.active.filter((a) => a.expires !== undefined && a.expires <= turn);
+    for (const a of lapsed) news.push(`Quest lapsed: ${a.quest?.title ?? a.id}`);
+    this.updateMissions((m) => ({ ...m, active: m.active.filter((a) => !lapsed.includes(a)), offers: m.offers.filter((o) => o.offerEnds > turn) }));
+    // Anything finished is claimed (a hand-over only once it can be paid), and the story goes on.
+    for (const a of [...this.missions.active]) {
+      const def = a.quest ?? MISSION_BY_ID[a.id];
+      if (def && progressOf(def, a, this.missionView()).complete) this.claimMission(a.id);
+    }
+    news.push(...this.unlockStory());
+    // Faction offers.
+    for (const { def } of this.knownNpcs()) {
+      if (this.missions.offers.length >= MAX_OFFERS) break;
+      const offer = questOffer({ id: def.id, name: def.name, archetype: def.archetype.id, tier: def.tier, standing: this.standingWith(def.id), home: { id: def.home.id, name: def.home.name } }, this.me, turn);
+      if (!offer) continue;
+      const m = this.missions;
+      if (m.offers.some((o) => o.id === offer.id) || m.active.some((a) => a.id === offer.id) || m.declined?.includes(offer.id) || m.taken?.includes(offer.id)) continue;
+      this.updateMissions((x) => ({ ...x, offers: [...x.offers, offer], taken: [...(x.taken ?? []), offer.id].slice(-60) }));
+      news.push(`The ${def.name} ask a favour: ${offer.title}`);
+    }
+    // The advisors grow with the years, and the delegated ones decide.
+    news.push(...this.advise());
+    this.refreshBoons();
+    return news;
+  }
+
+  /** Story missions whose time has come (their requirements done, their trigger met) begin. Returns the news. */
+  protected unlockStory(): string[] {
+    const turn = this.state.turn;
+    const fresh = unlocked(MISSIONS, this.missions, this.missionView());
+    if (!fresh.length) return [];
+    this.updateMissions((m) => ({ ...m, active: [...m.active, ...fresh.map((d) => ({ id: d.id, started: turn }))] }));
+    return fresh.map((d) => `New mission: ${d.title}${d.chapter > 1 && !d.requires?.length ? ' (uncovered by exploring)' : ''}`);
+  }
+
+  /** Each seated advisor gains a little; each delegated one acts in their seat. */
+  protected advise(): string[] {
+    const news: string[] = [];
+    for (const seat of Object.keys(this.court.seats) as Seat[]) news.push(...this.advisorXp(seat, 4));
+    const act = (seat: Seat, did: string[]): void => {
+      if (!did.length) return;
+      const a = this.court.seats[seat]!;
+      news.push(...did.map((d) => `${SEAT_BY_ID[seat].name} ${a.name}: ${d}`), ...this.advisorXp(seat, 6));
+    };
+    const on = (seat: Seat) => this.court.seats[seat]?.delegate ? this.court.seats[seat] : undefined;
+    const steward = on('steward');
+    if (steward) {
+      const trait = SEAT_BY_ID.steward.traits.find((t) => t.id === steward.trait);
+      act('steward', this.autoBuild(trait?.focus ?? 'balanced', DEFAULT_RESERVE, '').map((x) => `started ${x.replace(/^: /, '').replace(' started on ', ' on ')}`));
+    }
+    if (on('science') && !this.state.economy.focus) {
+      const id = pickResearch(this.deps.tree, this.state.empire.research, 'science');
+      if (id) {
+        this.setFocus(id);
+        act('science', [`research ${this.deps.tree.node(id).name} next`]);
+      }
+    }
+    if (on('chancellor')) {
+      const did: string[] = [];
+      // Take a quest whose hand-over is already in the vaults, one a year.
+      const stock = this.state.empire.materials;
+      const easy = this.missions.offers.find((o) => o.objectives.every((x) => x.kind !== 'deliver' || (stock[x.resource!] ?? 0) >= x.n * 1.5));
+      if (easy) {
+        this.acceptQuest(easy.id);
+        did.push(`accepted ${easy.title}`);
+      }
+      // Tribute to a faction turning hostile, while credits allow (once every 20 years).
+      const last = this.court.lastTribute ?? -Infinity;
+      if (this.state.turn - last >= 20) {
+        const sour = this.knownNpcs().find((n) => this.standingWith(n.def.id) < -10);
+        const cost = STANDING.tributeCost;
+        if (sour && stock.credits - cost.credits >= DEFAULT_RESERVE && stock.influence >= cost.influence) {
+          this.sendTribute(sour.def.id);
+          this.deps.store.update((st) => ({ court: { ...(st.court ?? NEW_COURT), lastTribute: this.state.turn } }));
+          did.push(`sent tribute to the ${sour.def.name}`);
+        }
+      }
+      act('chancellor', did);
+    }
+    if (on('admiral')) {
+      const did: string[] = [];
+      for (const g of this.groups()) {
+        if (did.length >= 2) break;
+        if (g.id === 'dock' || g.company || g.battle || !g.stationed || g.repair || (g.hull ?? 1) >= 0.6 || g.orders?.trade) continue;
+        const here = g.star ? g.star.hex : null;
+        if (!here) continue;
+        const refuge = this.nearestFriendly(here);
+        if (hexEquals(refuge.hex, here)) continue;
+        this.moveFleet(g.id, refuge, true);
+        did.push(`sent ${g.name} to ${refuge.name} for repairs`);
+      }
+      act('admiral', did);
+    }
+    const faith = this.state.economy.faith;
+    if (on('prelate') && faith && faith.missions.length < 3) {
+      const next = this.knownEmpires().find((e) => !faith.missions.includes(e.name));
+      if (next) {
+        this.toggleMission(next.name);
+        act('prelate', [`sent missionaries to the ${next.name}`]);
+      }
+    }
+    if (on('spymaster')) {
+      const nets = this.state.economy.spyNetworks;
+      if (nets.length < maxSpies(this.deps.economy, this.state.empire.research)) {
+        const next = this.knownEmpires().find((e) => !nets.includes(e.name));
+        if (next) {
+          this.toggleSpy(next.name);
+          act('spymaster', [`planted a spy network in the ${next.name}`]);
+        }
+      }
     }
     return news;
   }
@@ -2683,7 +3059,7 @@ export class EmpireSim {
       this.resolveRaids(r.raids);
     }
     // Construction finishing this year, then fleets acting on standing orders.
-    const done = [...growth, ...this.completeConstruction(), ...this.govern(), ...this.followOrders()];
+    const done = [...growth, ...this.completeConstruction(), ...this.govern(), ...this.followOrders(), ...this.missionYear()];
     if (!quiet && done.length) this.deps.store.update((st) => ({ dispatches: [...done.map((text) => ({ turn: next, text, tone: 'good' as const })), ...st.dispatches].slice(0, 40) }));
     return { income: report.income, arrivals: [...arrivals, ...done] };
   }

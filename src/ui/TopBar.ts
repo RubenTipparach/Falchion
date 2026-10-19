@@ -24,6 +24,8 @@ export class TopBar {
   private readonly lootBadge = h('span', { class: 'badge', hidden: true });
   /** Attacks on us since the battle log was last read. */
   private readonly warBadge = h('span', { class: 'badge hot', hidden: true });
+  /** Missions ready to claim and offers waiting on an answer. */
+  private readonly missionBadge = h('span', { class: 'badge', hidden: true });
   private readonly empireBtn: HTMLButtonElement;
   private readonly nav: HTMLElement;
 
@@ -35,7 +37,8 @@ export class TopBar {
     this.viewBtn = h('button', { class: 'tab', title: 'Toggle hex / galaxy view (G)', onclick: () => actions.toggleView() }, icon('galaxy'), this.viewLabel);
     const tab = (id: PanelId, label: string, ic: IconName) =>
       h('button', { class: 'tab', 'data-tab': id, title: label, 'aria-label': label, onclick: () => actions.openPanel(id) }, icon(ic), h('span', { class: 'tab-label' }, label));
-    this.tabs = { shipyard: tab('shipyard', 'Shipyard', 'shipyard'), research: tab('research', 'Research', 'research'), empire: tab('empire', 'Empire', 'empire'), war: tab('war', 'War Room', 'battle'), explore: tab('explore', 'Explore', 'explore'), fleets: tab('fleets', 'Fleets', 'fleet'), search: tab('search', 'Search', 'search') };
+    this.tabs = { shipyard: tab('shipyard', 'Shipyard', 'shipyard'), research: tab('research', 'Research', 'research'), empire: tab('empire', 'Empire', 'empire'), war: tab('war', 'War Room', 'battle'), explore: tab('explore', 'Explore', 'explore'), fleets: tab('fleets', 'Fleets', 'fleet'), search: tab('search', 'Search', 'search'), missions: tab('missions', 'Missions', 'missions') };
+    this.tabs.missions.append(this.missionBadge);
     this.tabs.explore.append(this.lootBadge);
     this.tabs.war.append(this.warBadge);
     this.empireBtn = h('button', { class: 'empire-chip', title: 'Your empire: click to change its name, colours and flag', onclick: () => actions.editEmpire() });
@@ -46,7 +49,7 @@ export class TopBar {
       h('div', { class: 'turn' },
         h('div', { class: 'turn-dial' }, h('span', { class: 'turn-label' }, 'Year'), this.turnNum),
         this.clockEl),
-      (this.nav = h('nav', { class: 'tabs' }, this.viewBtn, this.tabs.shipyard, this.tabs.research, this.tabs.empire, this.tabs.fleets, this.tabs.explore, this.tabs.war, this.tabs.search)),
+      (this.nav = h('nav', { class: 'tabs' }, this.viewBtn, this.tabs.shipyard, this.tabs.research, this.tabs.empire, this.tabs.fleets, this.tabs.explore, this.tabs.missions, this.tabs.war, this.tabs.search)),
       h('div', { class: 'identity', title: identity.provider === 'discord' ? 'Signed in with Discord: your empire is saved on the server' : 'Guest: your empire is saved in this browser only' },
         identity.avatar ? h('img', { class: 'avatar', src: identity.avatar, alt: '' }) : h('span', { class: 'avatar' }, identity.displayName.slice(0, 1)),
         h('span', { class: 'who' }, h('b', {}, identity.displayName),
@@ -59,9 +62,11 @@ export class TopBar {
       if (s.explored !== prev.explored || s.openedCrates !== prev.openedCrates) this.renderLoot(s);
       if (s.identity !== prev.identity) this.renderEmpire(s);
       if (s.battleLog !== prev.battleLog) this.renderWar(s);
+      if (s.missions !== prev.missions) this.renderMissions(s);
     });
     window.addEventListener(BATTLE_LOG_SEEN_EVENT, () => this.renderWar(store.state));
     this.renderWar(store.state);
+    this.renderMissions(store.state);
     this.renderEmpire(store.state);
     this.renderStats(store.state);
     this.renderTurn(store.state.turn);
@@ -124,6 +129,15 @@ export class TopBar {
     this.warBadge.hidden = n === 0;
     this.warBadge.textContent = String(n);
     this.warBadge.title = `Attacked ${n} time${n === 1 ? '' : 's'} since you last opened the battle log`;
+  }
+
+  private renderMissions(s: GameState): void {
+    const m = s.missions;
+    // Offers waiting on an answer, and missions that began in the last few years.
+    const n = m ? m.offers.length + m.active.filter((a) => !a.quest && s.turn - a.started <= 3).length : 0;
+    this.missionBadge.hidden = n === 0;
+    this.missionBadge.textContent = String(n);
+    this.missionBadge.title = `${m?.offers.length ?? 0} faction offers; new missions`;
   }
 
   private renderLoot(s: GameState): void {

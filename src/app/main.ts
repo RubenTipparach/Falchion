@@ -57,6 +57,7 @@ import { FleetsPanel } from '../ui/panels/FleetsPanel';
 import { ResearchPanel } from '../ui/panels/ResearchPanel';
 import { ShipyardPanel } from '../ui/panels/ShipyardPanel';
 import { SearchPanel } from '../ui/panels/SearchPanel';
+import { MissionsPanel } from '../ui/panels/MissionsPanel';
 import type { PanelId } from '../ui/GameActions';
 import { GameController } from './GameController';
 import { SharedWorldClient } from './SharedWorldClient';
@@ -230,6 +231,7 @@ async function bootstrap(): Promise<void> {
     explore: new ExplorePanel(store, controller, controller, controller.planets, tree, thumb),
     fleets: new FleetsPanel(store, controller, controller),
     search: new SearchPanel(store, controller, controller, galaxy, controller.planets, thumb),
+    missions: new MissionsPanel(store, controller, controller),
   };
   // City locator: the focused planet's major cities, also while its card is closed.
   const cityLocator = new CityLocator(store, controller, controller, starInfo);

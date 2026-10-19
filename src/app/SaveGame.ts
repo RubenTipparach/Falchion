@@ -7,7 +7,7 @@ import type { Loadout } from '../core/fleet/Presence';
 /** Fields that persist between sessions; the rest is view state or derived from the world. */
 export const SAVED = [
   'turn', 'empire', 'economy', 'designs', 'shipyardClass', 'hiddenTraits', 'explored', 'openedCrates', 'collectedCaches',
-  'fleets', 'loadouts', 'dockSpent', 'depots', 'construction', 'lastReport', 'dispatches', 'engaged', 'identity', 'home', 'relations', 'battleLog', 'flows', 'commerce', 'governor',
+  'fleets', 'loadouts', 'dockSpent', 'depots', 'construction', 'lastReport', 'dispatches', 'engaged', 'identity', 'home', 'relations', 'battleLog', 'flows', 'commerce', 'governor', 'missions', 'court',
 ] as const satisfies ReadonlyArray<keyof GameState>;
 
 /** The persistent fields of a save, as a patch for the game state (view state untouched). */

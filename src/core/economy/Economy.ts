@@ -32,6 +32,11 @@ export interface EconomyState {
   /** Node that science shards go to each turn. */
   readonly focus: string | null;
   readonly colonies: readonly Colony[];
+  /**
+   * Bonuses beside government, policies and faith (change missions-and-court): the ruler's and the
+   * advisors', and timed accords from quests. Kept current by the simulation.
+   */
+  readonly boons?: ReadonlyArray<{ readonly name: string; readonly effects: Effects; readonly until?: number }>;
 }
 
 /** A settled planet. Buildings fill its slots and add to its output. */
@@ -192,7 +197,7 @@ export function hasGrant(tree: TechTree, research: ResearchState, partId: string
   return tree.grantsOf(research).some((g) => g.kind === 'part' && g.id === partId);
 }
 
-/** Effects from government + policies + faith tenets, each with what it comes from. */
+/** Effects from government + policies + faith tenets + boons (court, accords), each with what it comes from. */
 export function activeSources(e: EconomyState, t: EconomyTables): Array<{ name: string; effects: Effects }> {
   const gov = t.governments.find((g) => g.id === e.government);
   const pols = t.policies.filter((p) => e.policies.includes(p.id));
@@ -201,6 +206,7 @@ export function activeSources(e: EconomyState, t: EconomyTables): Array<{ name: 
     ...(gov ? [{ name: gov.name, effects: gov.effects }] : []),
     ...pols.map((p) => ({ name: p.name, effects: p.effects })),
     ...tenets.map((x) => ({ name: `Tenet: ${x.id.replace(/-/g, ' ')}`, effects: x.effects })),
+    ...(e.boons ?? []).map((b) => ({ name: b.name, effects: b.effects })),
   ];
 }
 

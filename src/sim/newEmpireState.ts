@@ -1,3 +1,6 @@
+import { hashSeed } from '../core/rng/Rng';
+import { NEW_MISSIONS } from '../core/missions/Missions';
+import { NEW_COURT, drawCandidate, withCandidate } from '../core/empire/Court';
 import { settleable as canSettle } from '../content/biomes';
 import { CAPITAL_START_POP } from '../core/economy/Population';
 import { specOf } from '../content/logistics';
@@ -67,6 +70,10 @@ export function newEmpireState({ galaxy, tree, world, playerName, t0 }: NewEmpir
     shipyardClass: 'prospector', hiddenTraits: [], home: world.home,
     selected: null, selectedFleet: null, selectedPlanet: null, explored: {}, openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0 }, depots: [], construction: [], playerName: playerName,
     lastReport: null, engaged: [], identity: null,
+    // The story opens with its first tutorial mission, and two people offer to serve.
+    missions: { ...NEW_MISSIONS, active: [{ id: 'know-your-home', started: t0 }] },
+    court: [drawCandidate(hashSeed(playerName, 'court'), 'steward', 0), drawCandidate(hashSeed(playerName, 'court'), 'science', 1)]
+      .reduce(withCandidate, NEW_COURT),
     dispatches: [{ turn: t0, text: 'Welcome, Commander. One year passes every minute. Survey Group Alpha is on station nearby: explore its planets and collect what you find. Ships need supply to explore, which refills in friendly systems, where damaged ships also repair.' }],
   };
 }

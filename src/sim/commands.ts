@@ -12,6 +12,7 @@ import { DIPLOMATIC_ACTIONS, type DiplomaticAction } from '../core/diplomacy/Dip
 import { EXCHANGE_RESOURCES } from '../content/commerce';
 import { FOCI, type GovernorFocus } from '../content/governor';
 import type { Resource } from '../content/resources';
+import { SEATS, type Seat } from '../content/advisors';
 
 /**
  * Every order a player can give, as a command the server applies to its copy of the empire.
@@ -70,6 +71,8 @@ const fieldId: ArgCodec<string> = { encode: (v) => v, decode: (raw) => (typeof r
 const fleetKey: ArgCodec<string> = { encode: (v) => v, decode: (raw) => (typeof raw === 'string' && /^[\w-]{1,40}:[\w:,./+-]{1,80}$/.test(raw) ? raw : fail('bad fleet')) };
 const playerId: ArgCodec<string> = { encode: (v) => v, decode: (raw) => (typeof raw === 'string' && /^[\w-]{1,40}$/.test(raw) ? raw : fail('bad player')) };
 const diplomaticAction: ArgCodec<DiplomaticAction> = { encode: (v) => v, decode: (raw) => ((DIPLOMATIC_ACTIONS as readonly unknown[]).includes(raw) ? (raw as DiplomaticAction) : fail('bad action')) };
+const SEAT_IDS = new Set<unknown>(SEATS.map((s) => s.id));
+const seat: ArgCodec<Seat> = { encode: (v) => v, decode: (raw) => (SEAT_IDS.has(raw) ? (raw as Seat) : fail('bad seat')) };
 const CLASS_IDS = new Set(SHIP_CLASSES.map((c) => c.id));
 const squadrons: ArgCodec<Squadron[]> = {
   encode: (ships) => ships.map((s) => ({ classId: s.classId, count: s.count })),
@@ -168,6 +171,13 @@ export const COMMANDS = {
   toggleMission: [string(60)],
   toggleSpy: [string(60)],
   engage: [id, squadrons, id],
+  claimMission: [id],
+  acceptQuest: [id],
+  declineQuest: [id],
+  appointAdvisor: [id],
+  dismissAdvisor: [seat],
+  delegate: [seat, bool],
+  seekAdvisor: [seat],
 } satisfies Record<string, ReadonlyArray<ArgCodec<never> | { encode(v: never): unknown; decode(raw: unknown, sim: EmpireSim): unknown }>>;
 
 export type CommandName = keyof typeof COMMANDS;

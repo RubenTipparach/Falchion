@@ -37,8 +37,9 @@ const PINCH_POWER = 1.8;
  * Turns pointer/wheel input into camera focus, exponential zoom, yaw and tilt.
  *
  * Mouse: drag pans, right-drag (or shift-drag) turns and tilts, wheel zooms, right-click
- * orders. Touch: one finger pans, two fingers pinch to zoom (and pan); a long press is the
- * right-click. Touch never turns or tilts the view: on a phone it only got in the way.
+ * orders. Touch: one finger pans, two fingers only zoom (toward where the pinch began; moving
+ * both fingers together does not pan); a long press is the right-click. Touch never turns or tilts
+ * the view: on a phone it only got in the way.
  *
  * Floating origin: the galaxy spans 70,000 ly but a planet is ~0.005 ly, far
  * below float32 resolution at that range. The camera therefore lives near (0,0,0)
@@ -83,6 +84,8 @@ export class MapCameraController {
   private consumed = false;
   /** Both fingers where the last two-finger step left them; each finger reports on its own, so steps run once a frame. */
   private pinchFrom: Array<{ x: number; y: number }> | null = null;
+  /** Where the pinch began (the fingers' midpoint): it zooms toward here, wherever the fingers go. */
+  private pinchAnchor: { x: number; y: number } | null = null;
   private pinchFrame: number | null = null;
   private readonly raycaster = new THREE.Raycaster();
   private readonly plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -257,7 +260,9 @@ export class MapCameraController {
       this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.touches.size >= 2) {
         this.pinchFrom = null;
-        // A second finger: pinch, twist and tilt from here on; no tap, no long press.
+        const [a, b] = [...this.touches.values()];
+        this.pinchAnchor ??= { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        // A second finger: zoom from here on; no pan, no tap, no long press.
         this.cancelLongPress();
         this.consumed = true;
         this.drag = null;
@@ -301,12 +306,15 @@ export class MapCameraController {
     });
   }
 
-  /** Two fingers moved from a0, b0 to a1, b1: zoom and pan about their midpoint, keeping the ground under them. */
+  /**
+   * Two fingers moved from a0, b0 to a1, b1: zoom by how far apart they are, toward where the pinch
+   * began. Only the spread counts: the fingers moving together do not pan.
+   */
   private pinchStep(a0: { x: number; y: number }, b0: { x: number; y: number }, a1: { x: number; y: number }, b1: { x: number; y: number }): void {
     const d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y), d1 = Math.hypot(b1.x - a1.x, b1.y - a1.y);
     if (d0 < 1 || d1 < 1) return;
-    const m0 = { x: (a0.x + b0.x) / 2, y: (a0.y + b0.y) / 2 }, m1 = { x: (a1.x + b1.x) / 2, y: (a1.y + b1.y) / 2 };
-    const before = this.groundAt(m0.x, m0.y);
+    const m = this.pinchAnchor ?? { x: (a0.x + b0.x) / 2, y: (a0.y + b0.y) / 2 };
+    const before = this.groundAt(m.x, m.y);
     this.zoom.setAltitude(this.zoom.altitude * (d0 / d1) ** PINCH_POWER);
     this.place();
     if (this.capture) return; // a close-up is in charge: the fingers only zoom
@@ -320,8 +328,8 @@ export class MapCameraController {
       }
     }
     if (this.flyTarget) return; // already gliding onto a star: the fingers only zoom
-    // Keep the ground that was under the fingers under them (unless following a ship: then just zoom).
-    const after = this.groundAt(m1.x, m1.y);
+    // Keep the ground at the pinch's anchor where it was on screen (unless following a ship: then just zoom).
+    const after = this.groundAt(m.x, m.y);
     if (before && after && !this.follow) {
       this.focus.x += before.x - after.x;
       this.focus.y += before.z - after.z;
@@ -375,6 +383,7 @@ export class MapCameraController {
       this.touches.delete(e.pointerId);
       this.cancelLongPress();
       this.pinchFrom = null;
+      if (this.touches.size < 2) this.pinchAnchor = null;
       if (this.touches.size === 1) {
         // One finger left after a pinch: it carries on panning from where it is.
         const [rest] = [...this.touches.values()];
@@ -406,6 +415,7 @@ export class MapCameraController {
   private readonly handleCancel = (e: PointerEvent): void => {
     this.touches.delete(e.pointerId);
     this.cancelLongPress();
+    if (this.touches.size < 2) this.pinchAnchor = null;
     if (!this.touches.size) this.drag = null;
   };
 

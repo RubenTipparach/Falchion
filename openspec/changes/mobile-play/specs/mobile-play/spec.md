@@ -1,14 +1,19 @@
 ## ADDED Requirements
 
 ### Requirement: The map responds to touch like a maps app
-On a touch screen the map SHALL pan with one finger and zoom with a two-finger pinch about the
-fingers, a pinch covering more zoom than the fingers spread so the whole range (planet to galaxy)
-takes a few gestures. Touch SHALL NOT turn or tilt the view. A long press SHALL act as a
+On a touch screen the map SHALL pan with one finger and zoom with a two-finger pinch toward
+where the pinch began, a pinch covering more zoom than the fingers spread so the whole range
+(planet to galaxy) takes a few gestures. Two fingers SHALL only zoom: moving them together SHALL
+NOT pan, on the map or in the battle view. Touch SHALL NOT turn or tilt the view. A long press SHALL act as a
 right-click, so it gives the selected fleet a move order.
 
 #### Scenario: Pinch to zoom
 - **WHEN** the player spreads two fingers apart on the map
-- **THEN** the view zooms in, keeping the ground under the fingers under them
+- **THEN** the view zooms in toward where the pinch began
+
+#### Scenario: Two fingers do not pan
+- **WHEN** the player moves two fingers together across the map or the battle view without spreading them
+- **THEN** the view stays where it is
 
 #### Scenario: Twisting does not turn the view
 - **WHEN** the player twists two fingers on the map

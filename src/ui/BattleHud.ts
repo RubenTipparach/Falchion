@@ -148,18 +148,18 @@ export class BattleHud {
     el.innerHTML = html;
   }
 
-  /** Drag to turn (right-drag or shift to pan), wheel or pinch to zoom, two fingers to pan. */
+  /** Drag to turn (right-drag or shift to pan), wheel or pinch to zoom. Two fingers only zoom: they never pan. */
   private bindInput(): void {
     const el = this.input;
     const pointers = new Map<number, { x: number; y: number; pan: boolean }>();
-    let pinch: { d: number; mx: number; my: number } | null = null;
+    let pinch: { d: number } | null = null;
     el.addEventListener('pointerdown', (e) => {
       try { el.setPointerCapture(e.pointerId); } catch { /* not capturable (already gone): still tracked */ }
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.shiftKey });
       el.classList.add('dragging');
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
-        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) };
       }
     });
     el.addEventListener('pointermove', (e) => {
@@ -169,10 +169,9 @@ export class BattleHud {
       p.x = e.clientX; p.y = e.clientY;
       if (pointers.size >= 2 && pinch) {
         const [a, b] = [...pointers.values()];
-        const d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
         if (d > 0 && pinch.d > 0) this.controls.zoom(pinch.d / d);
-        this.controls.drag(mx - pinch.mx, my - pinch.my, true);
-        pinch = { d, mx, my };
+        pinch = { d };
         return;
       }
       this.controls.drag(dx, dy, p.pan);

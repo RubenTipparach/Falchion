@@ -4,7 +4,7 @@ const clamp = (x: number, a: number, b: number) => (x < a ? a : x > b ? b : x);
 
 /**
  * The battle view's camera: it orbits the fleets' centroid and pulls back as they stand apart.
- * Drag turns it, the wheel or a pinch zooms, a right-drag (or two fingers) pans; left alone for a
+ * Drag turns it, the wheel or a pinch zooms, a right-drag pans (two fingers only zoom); left alone for a
  * few seconds it drifts slowly round the battle.
  */
 export class BattleRig {

@@ -5,6 +5,7 @@ import { Vec3, frameAt } from '../../../core/surface/Terrain';
 import { BUILDING_MODELS, BuildingModel, capitolModel, paint } from './BuildingModels';
 import { SMOKE_FRAG, SMOKE_VERT, STRUCT_FRAG, STRUCT_VERT } from './shaders';
 import type { SurfaceTerrain } from './SurfaceTerrain';
+import { CityLife } from './CityLife';
 
 const v3 = (d: Vec3) => new THREE.Vector3(d[0], d[1], d[2]);
 
@@ -33,8 +34,9 @@ const GREYS = ['#9aa3ad', '#7d8792', '#b9b2a2', '#6f7a86', '#a59a85', '#c8ccd0',
 
 /**
  * Everything built on a planet: instanced towers for every settlement (lit windows at night), the
- * capitol, one model per special building round the main city, smoke from the Manufactory and the
- * Orbital Shipyard in low orbit. One shader (STRUCT_*) lights it all.
+ * capitol, one model per special building round the main city, smoke from the Manufactory, the
+ * Orbital Shipyard in low orbit, and the city's life (CityLife: traffic, people, lamps). One
+ * fragment shader (STRUCT_FRAG) lights it all.
  */
 export class Settlements {
   readonly group = new THREE.Group();
@@ -44,6 +46,8 @@ export class Settlements {
   private readonly material: THREE.ShaderMaterial;
   private readonly smokeMaterial: THREE.ShaderMaterial;
   private readonly rings: THREE.Mesh[] = [];
+  /** Traffic, people and street lamps (change city-life). */
+  readonly life: CityLife;
 
   constructor(layout: SurfaceLayout, private readonly terrain: SurfaceTerrain, lite: boolean) {
     const U = terrain.uniforms;
@@ -59,11 +63,14 @@ export class Settlements {
     this.towers = this.buildTowers(layout.settlements, lite);
     const main = layout.settlements[0];
     if (main) this.buildSpecials(layout, main);
+    this.life = new CityLife(layout, terrain, lite);
+    this.group.add(this.life.group);
   }
 
   /** Pixels per unit at distance 1 (smoke particle size), from the screen height and field of view. */
   setPointScale(scale: number): void {
     this.smokeMaterial.uniforms.uScale.value = scale;
+    this.life.setPointScale(scale);
   }
 
   update(time: number): void {
@@ -72,7 +79,7 @@ export class Settlements {
 
   private buildTowers(sites: readonly Settlement[], lite: boolean): number {
     type Item = { m: THREE.Matrix4; c: THREE.Color };
-    const boxes: Item[] = [], cyls: Item[] = [], beacons: Item[] = [];
+    const boxes: Item[] = [], cyls: Item[] = [], beacons: Item[] = [], plain: Item[] = [];
     for (const city of sites) {
       const rng = new Rng(city.seed);
       const { radius: R, cell } = city;
@@ -110,13 +117,29 @@ export class Settlements {
           const m = orientAt(at, t1, rC - 0.0003);
           const round = h > 0.0022 && rng.next() < 0.14;
           (round ? cyls : boxes).push({ m: m.clone().multiply(new THREE.Matrix4().makeScale(w, h + 0.0003, d)), c: tint });
-          let top = h;
+          let top = h, roofW = w, roofD = d;
           if (!round && h > 0.0034 && rng.next() < 0.55) {
             const sm = orientAt(at, t1, rC + h - 0.0001);
             boxes.push({ m: sm.multiply(new THREE.Matrix4().makeScale(w * 0.6, h * 0.32, d * 0.6)), c: tint.clone().multiplyScalar(1.08) });
             top = h - 0.0001 + h * 0.32;
+            roofW = w * 0.6; roofD = d * 0.6;
           }
-          if (h > 0.0042) beacons.push({ m: orientAt(at, t1, rC + top + 0.00008).multiply(new THREE.Matrix4().makeScale(0.00016, 0.00016, 0.00016)), c: new THREE.Color('#ff5040') });
+          // Roof plant on the flat roofs, and a mast with a beacon on the tall towers (change city-life).
+          const roof = rC + top;
+          if (!round && h > 0.0011) {
+            const units = 1 + Math.floor(rng.next() * 3);
+            for (let u = 0; u < units; u++) {
+              const ux = (rng.next() - 0.5) * roofW * 0.5, uz = (rng.next() - 0.5) * roofD * 0.5;
+              const uw = roofW * (0.12 + 0.14 * rng.next()), uh = 0.00005 + 0.00009 * rng.next();
+              const ud = at.clone().addScaledVector(t1, ux).addScaledVector(t2, uz).normalize();
+              plain.push({ m: orientAt(ud, t1, roof).multiply(new THREE.Matrix4().makeScale(uw, uh, uw * (0.7 + 0.6 * rng.next()))), c: new THREE.Color(rng.pick(['#6a7078', '#8a8e94', '#4e545c'])) });
+            }
+          }
+          if (h > 0.0028 && rng.next() < 0.6) {
+            const mast = 0.0003 + 0.0009 * rng.next();
+            plain.push({ m: orientAt(at, t1, roof).multiply(new THREE.Matrix4().makeScale(0.000022, mast, 0.000022)), c: new THREE.Color('#9aa0a8') });
+            beacons.push({ m: orientAt(at, t1, roof + mast).multiply(new THREE.Matrix4().makeScale(0.00009, 0.00009, 0.00009)), c: new THREE.Color('#ff5040') });
+          } else if (h > 0.0042) beacons.push({ m: orientAt(at, t1, rC + top + 0.00008).multiply(new THREE.Matrix4().makeScale(0.00016, 0.00016, 0.00016)), c: new THREE.Color('#ff5040') });
         }
       }
     }
@@ -124,6 +147,7 @@ export class Settlements {
       [paint(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), '#ffffff', 1), boxes],
       [paint(new THREE.CylinderGeometry(0.5, 0.5, 1, 10).translate(0, 0.5, 0), '#ffffff', 1), cyls],
       [paint(new THREE.BoxGeometry(1, 1, 1), '#ffffff', 3), beacons],
+      [paint(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), '#ffffff', 0), plain],
     ];
     for (const [geo, list] of kinds) {
       if (!list.length) { geo.dispose(); continue; }
@@ -134,7 +158,7 @@ export class Settlements {
       im.frustumCulled = false;
       this.group.add(im);
     }
-    return boxes.length + cyls.length + beacons.length;
+    return boxes.length + cyls.length + beacons.length + plain.length;
   }
 
   private buildSpecials(layout: SurfaceLayout, main: Settlement): void {
@@ -197,5 +221,6 @@ export class Settlements {
     this.group.traverse((o) => { if (o instanceof THREE.Mesh || o instanceof THREE.Points) o.geometry.dispose(); });
     this.material.dispose();
     this.smokeMaterial.dispose();
+    this.life.dispose();
   }
 }

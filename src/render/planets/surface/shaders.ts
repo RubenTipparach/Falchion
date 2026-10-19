@@ -289,9 +289,34 @@ void main() {
     col = mix(col, vec3(0.4, 0.4, 0.36), sprawl * (1.0 - inCity) * 0.18);
     float street = max(max(roads * 0.8, major), avenue) * inCity;
     col = mix(col, vec3(0.09, 0.1, 0.11), street * 0.85);
+    // Street detail where a pixel is small against a block (change city-life): pavements, lane
+    // markings, crossings, and the pools of light under the lamps CityLife stands along the streets.
+    vec2 gd = g - floor(g + 0.5);
+    float detail = (1.0 - smoothstep(0.015, 0.05, max(fwidth(g.x), fwidth(g.y)))) * inCity;
+    vec2 wideAx = vec2(step(abs(mod(floor(g.x + 0.5), 4.0)), 0.5), step(abs(mod(floor(g.y + 0.5), 4.0)), 0.5));
+    vec2 hw = mix(vec2(0.1), vec2(0.14), wideAx);
+    // In the street that runs along y (its line is x = const), and the one along x.
+    float inSY = step(abs(gd.x), hw.x), inSX = step(abs(gd.y), hw.y);
+    vec2 pave = step(hw, abs(gd)) * step(abs(gd), hw + 0.035);
+    float onPave = max(pave.x * (1.0 - inSX), pave.y * (1.0 - inSY));
+    col = mix(col, vec3(0.46, 0.46, 0.45), detail * onPave * 0.8);
+    // A dashed centre line along each street, solid lane lines on the wide ones, zebra crossings.
+    float alongY = (step(abs(gd.x), 0.006) * step(0.5, fract(g.y * 5.0)) + wideAx.x * step(abs(abs(gd.x) - 0.07), 0.004)) * inSY * (1.0 - inSX);
+    float alongX = (step(abs(gd.y), 0.006) * step(0.5, fract(g.x * 5.0)) + wideAx.y * step(abs(abs(gd.y) - 0.07), 0.004)) * inSX * (1.0 - inSY);
+    float crossY = inSY * step(hw.y + 0.01, abs(gd.y)) * step(abs(gd.y), hw.y + 0.06) * step(0.5, fract(gd.x * 40.0));
+    float crossX = inSX * step(hw.x + 0.01, abs(gd.x)) * step(abs(gd.x), hw.x + 0.06) * step(0.5, fract(gd.y * 40.0));
+    float marks = clamp(alongY + alongX + crossY + crossX, 0.0, 1.0);
+    col = mix(col, vec3(0.78, 0.76, 0.66), detail * marks * street * 0.75);
+    // Lamps every half block on both pavements, midway between crossings.
+    vec2 lampOff = hw + 0.004;
+    float dyl = (fract(g.y * 2.0) - 0.5) * 0.5, dxl = (fract(g.x * 2.0) - 0.5) * 0.5;
+    float px1 = min(abs(gd.x - lampOff.x * 0.8), abs(gd.x + lampOff.x * 0.8));
+    float py1 = min(abs(gd.y - lampOff.y * 0.8), abs(gd.y + lampOff.y * 0.8));
+    float pools = exp(-(px1 * px1 + dyl * dyl) / 0.006) + exp(-(py1 * py1 + dxl * dxl) / 0.006);
     vec3 lamp = mix(uCityGlow, vec3(1.0, 0.86, 0.6), avenue);
-    em += lamp * night * inCity * (roads * 0.16 + major * 0.28 + avenue * 0.3);
-    em += uCityGlow * night * inCity * 0.035;
+    em += vec3(1.0, 0.84, 0.58) * night * inCity * pools * 0.42 * mix(0.35, 1.0, detail);
+    em += lamp * night * inCity * (roads * 0.03 + major * 0.06 + avenue * 0.14) * (1.0 - detail * 0.6);
+    em += uCityGlow * night * inCity * 0.02;
     spec *= 1.0 - inCity;
     urbanAll = max(urbanAll, max(inCity, sprawl * 0.9));
   }
@@ -510,13 +535,21 @@ void main() {
       vec2 fw = fwidth(g);
       vec2 f = fract(g);
       float win = step(0.22, f.x) * step(f.x, 0.78) * step(0.3, f.y) * step(f.y, 0.82);
+      // Every eighth storey a plant floor with no windows, and a glazed lobby at street level
+      // (the towers stand 1.5 storeys into the ground) (change city-life).
+      float storey = floor(g.y);
+      float plant = step(6.5, mod(storey, 8.0)) * step(2.5, storey);
+      float lobby = step(1.0, storey) * step(storey, 2.0);
+      win *= 1.0 - plant;
+      win = max(win, lobby * step(0.08, f.x) * step(f.x, 0.92));
       vec2 cellId = floor(g);
-      float on = step(0.5, hash12(cellId + vSeed * 97.0));
+      float on = max(step(0.5, hash12(cellId + vSeed * 97.0)), lobby);
       float k = smoothstep(0.3, 0.8, max(fw.x, fw.y));
       float w = mix(win * on, 0.17, k);
       vec3 wc = mix(vec3(1.0, 0.78, 0.48), vec3(0.72, 0.9, 1.0), step(0.82, hash12(cellId * 1.7 + 3.1)));
       em += wc * w * night * 1.5;
       col = mix(col, col * 0.55 + vec3(0.04, 0.06, 0.09) * day, win * (1.0 - k) * 0.7);
+      col *= 1.0 - plant * 0.18 * (1.0 - k);
     }
   } else if (vEmit > 1.5 && vEmit < 2.5) {
     em += vCol * (0.25 + 0.75 * night);
@@ -530,6 +563,72 @@ void main() {
   vec3 airCol = uAtmo * (0.12 + 0.88 * smoothstep(-0.3, 0.6, sunUp));
   lit = mix(lit, airCol * 0.8, clamp((1.0 - exp(-dist / 0.3)) * 0.55 * uClose * 0.75 * uAtmoStrength, 0.0, 0.85));
   gl_FragColor = vec4(lit, 1.0);
+}`;
+
+/**
+ * City life (change city-life): cars, flying cars, shuttles, freighters, people and street lamps,
+ * each kind one instanced draw moved entirely on the GPU by the clock. An instance follows a path
+ * in its city's tangent plane (aCity: centre and ground radius; aT1: the plane's first axis):
+ * a straight segment (aPath.x 0: angle, side offset, half length; aAux.x the segment's middle), a
+ * circle (1: radius), or a climb from a pad to orbit (2: pad xy, aAux xy the point under the
+ * top, aAux.z its height). aMove: speed (signed, per second), phase, height above the street,
+ * size. Anything under half a pixel is not drawn, so a whole city of them costs nothing from orbit.
+ * Lit with STRUCT_FRAG.
+ */
+export const LIFE_VERT = /* glsl */ `
+attribute float aEmit;
+attribute vec4 aCity; attribute vec3 aT1; attribute vec4 aPath; attribute vec4 aMove; attribute vec4 aAux; attribute vec3 aTint;
+uniform float uTime, uPxScale;
+varying vec3 vCol; varying vec3 vNw; varying vec3 vUp; varying vec3 vLoc; varying vec3 vLocN; varying float vEmit; varying float vSeed; varying vec3 vW;
+void main() {
+  vec3 c = aCity.xyz;
+  vec3 t1 = aT1, t2 = cross(c, aT1);
+  float s = aMove.y + aMove.x * uTime;
+  float alt = aMove.z, fade = 1.0, climb = 0.0;
+  vec2 p, fwd;
+  if (aPath.x < 0.5) {
+    float L = aPath.w;
+    float u = mod(s + L, 2.0 * L) - L;
+    vec2 ax = vec2(cos(aPath.y), sin(aPath.y));
+    p = ax * (u + aAux.x) + vec2(-ax.y, ax.x) * aPath.z;
+    fwd = ax * (aMove.x < 0.0 ? -1.0 : 1.0);
+    fade = 1.0 - smoothstep(L * 0.86, L, abs(u));
+  } else if (aPath.x < 1.5) {
+    float r = aPath.z, th = s / r;
+    p = r * vec2(cos(th), sin(th));
+    fwd = vec2(-sin(th), cos(th)) * (aMove.x < 0.0 ? -1.0 : 1.0);
+  } else {
+    float t = fract(s);
+    vec2 pad = aPath.yz, top = aAux.xy;
+    p = mix(pad, top, smoothstep(0.12, 1.0, t));
+    alt = mix(aMove.z, aAux.z, pow(t, 1.7));
+    fwd = normalize(top - pad + vec2(1e-7));
+    fade = smoothstep(0.0, 0.03, t) * (1.0 - smoothstep(0.88, 1.0, t));
+    climb = 1.0 - smoothstep(0.04, 0.35, t);
+  }
+  vec3 up = normalize(c + t1 * p.x + t2 * p.y);
+  vec3 f3 = t1 * fwd.x + t2 * fwd.y;
+  f3 = normalize(f3 - up * dot(f3, up));
+  // A shuttle leaves its pad nose up and levels out as it climbs.
+  if (climb > 0.0) f3 = normalize(mix(f3, up, climb * 0.85));
+  vec3 side = normalize(cross(f3, up));
+  vec3 yv = normalize(cross(side, f3));
+  vec3 base = up * (aCity.w + alt);
+  float size = aMove.w * fade;
+  vec4 mvB = viewMatrix * vec4(base, 1.0);
+  float px = size * uPxScale / max(-mvB.z, 1e-7);
+  if (px < 0.5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vCol = vec3(0.0); vNw = up; vUp = up; vLoc = vec3(0.0); vLocN = up; vEmit = 0.0; vSeed = 0.0; vW = base; return; }
+  size *= smoothstep(0.5, 1.4, px);
+  vec3 w = base + (f3 * position.x + yv * position.y + side * position.z) * size;
+  vW = w;
+  vUp = up;
+  vNw = normalize(f3 * normal.x + yv * normal.y + side * normal.z);
+  vLoc = position * size;
+  vLocN = normal;
+  vSeed = fract(aMove.y * 7.31 + aPath.z * 913.0);
+  vCol = aEmit > 0.5 ? color : color * aTint;
+  vEmit = aEmit;
+  gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
 }`;
 
 /** Manufactory smoke: points that rise, drift and fade. */
@@ -714,7 +813,7 @@ export const FLORA_VERT = /* glsl */ `
 attribute float aTint; attribute float aEmit;
 // The cell this instance draws: x, y and its cube face (floraCells.ts).
 attribute vec3 aCell;
-uniform float uEntry, uSizeA, uSizeB, uStretch, uSway, uTime;
+uniform float uEntry, uSizeA, uSizeB, uStretch, uSway, uTime, uDrift, uHover;
 uniform vec3 uColA, uColB;
 uniform sampler2D uPlace;
 varying vec3 vCol; varying vec3 vNw; varying vec3 vUp; varying vec3 vW; varying vec3 vLoc; varying vec3 vLocN; varying float vEmit; varying float vSeed;
@@ -740,10 +839,23 @@ void main() {
   float size = mix(uSizeA, uSizeB, pow(rnd(key, 6u), 2.0)) * grow;
   float ys = mix(1.0, uStretch, pow(rnd(key, 7u), 1.5));
   float yaw = rnd(key, 5u) * 6.2831853;
+  vec3 lane = vec3(0.0);
+  if (uDrift > 0.0) {
+    // Traffic (change city-life): it flies along the grid's lanes (the face's axes), each its own
+    // way and height, round a stretch of six cells, fading in and out at the ends.
+    float alongU = step(0.5, rnd(key, 11u));
+    lane = mix(fv, fu, alongU) * (rnd(key, 12u) < 0.5 ? -1.0 : 1.0);
+    float span = uSpacing * 6.0;
+    float t = fract(rnd(key, 13u) + uTime * uDrift / span);
+    dir = normalize(dir + lane * (t - 0.5) * span);
+    r += uHover * (1.0 + rnd(key, 14u));
+    size *= smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.9, 1.0, t));
+  }
   vec3 up = dir;
   vec3 ax = normalize(cross(up, abs(up.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
   vec3 az = cross(ax, up);
   vec3 x = ax * cos(yaw) + az * sin(yaw);
+  if (uDrift > 0.0) x = normalize(lane - up * dot(lane, up));
   vec3 z = cross(x, up);
   vec3 p = position;
   p.y *= ys;

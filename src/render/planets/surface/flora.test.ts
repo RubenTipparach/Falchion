@@ -33,7 +33,8 @@ describe('surface flora (change surface-flora)', () => {
       expect(l.fill, biome).toBeLessThanOrEqual(1);
       for (const e of l.entries) {
         expect(e.size[0], `${biome} ${e.kind}`).toBeLessThanOrEqual(e.size[1]);
-        expect(e.size[1], `${biome} ${e.kind}`).toBeLessThan(l.layer === 'large' ? 0.003 : 0.0003);
+        // Heights; the far layer's megatowers are tall and slim (about a fifth as wide), on cells 0.004 across.
+        expect(e.size[1], `${biome} ${e.kind}`).toBeLessThan({ large: 0.003, small: 0.0003, far: 0.013 }[l.layer]);
       }
     }
     expect(floraOf('jungle').flatMap((l) => l.entries).some((e) => e.living)).toBe(true);

@@ -238,6 +238,27 @@ const BUILDERS: Readonly<Record<PropKind, () => THREE.BufferGeometry[]>> = {
     part(at(new THREE.BoxGeometry(0.55, 1, 0.55), 0, 0.5, 0), '', { tint: true, emit: 1 }),
     part(at(new THREE.BoxGeometry(0.3, 0.12, 0.3), 0.06, 1.06, -0.04), '', { tint: true }),
   ],
+  // A city world (change city-life). A megatower: setbacks narrowing to a crown and a mast.
+  megatower: () => [
+    part(at(new THREE.BoxGeometry(0.2, 0.42, 0.2), 0, 0.21, 0), '', { tint: true, emit: 1 }),
+    part(at(new THREE.BoxGeometry(0.15, 0.3, 0.15), 0, 0.57, 0, 0, Math.PI / 4, 0), '', { tint: true, emit: 1 }),
+    part(at(new THREE.BoxGeometry(0.1, 0.2, 0.1), 0, 0.82, 0), '', { tint: true, emit: 1 }),
+    part(at(new THREE.CylinderGeometry(0.04, 0.055, 0.05, 8), 0, 0.945, 0), '', { tint: true }),
+    part(at(new THREE.BoxGeometry(0.008, 0.2, 0.008), 0, 1.07, 0), '#9aa0a8'),
+  ],
+  // Traffic: a sky car and a skyship, nose along x (they fly along their lane).
+  flyer: () => [
+    part(at(new THREE.BoxGeometry(1, 0.16, 0.42), 0, 0.5, 0), '', { tint: true }),
+    part(at(new THREE.BoxGeometry(0.42, 0.13, 0.32), 0.12, 0.63, 0), '#1a2a3c'),
+    part(at(new THREE.BoxGeometry(0.28, 0.05, 0.9), -0.2, 0.52, 0), '', { tint: true }),
+    part(at(new THREE.BoxGeometry(0.7, 0.03, 0.3), 0, 0.41, 0), '#ffffff', { emit: 1 }),
+  ],
+  skyship: () => [
+    part(at(new THREE.CylinderGeometry(0.1, 0.16, 1, 8), 0, 0.5, 0, 0, 0, -Math.PI / 2), '', { tint: true }),
+    part(at(new THREE.BoxGeometry(0.5, 0.05, 0.8), -0.12, 0.47, 0), '', { tint: true }),
+    part(at(new THREE.BoxGeometry(0.18, 0.12, 0.16), 0.2, 0.62, 0), '#1a2a3c'),
+    part(at(new THREE.BoxGeometry(0.05, 0.2, 0.26), -0.53, 0.5, 0), '#ffffff', { emit: 1 }),
+  ],
 };
 
 /** One prop kind's merged geometry. */

@@ -23,6 +23,8 @@ import type { SurfaceTerrain } from './SurfaceTerrain';
 const LAYERS: Readonly<Record<FloraLayer['layer'], { spacing: number; k: number; lite: number; fade: readonly [number, number]; salt: number }>> = {
   large: { spacing: 0.0012, k: 96, lite: 56, fade: [0.07, 0.13], salt: 11 },
   small: { spacing: 0.00026, k: 76, lite: 44, fade: [0.014, 0.026], salt: 23 },
+  // A city world's megatowers and skyships, out to the horizon (change city-life).
+  far: { spacing: 0.004, k: 120, lite: 64, fade: [0.28, 0.5], salt: 37 },
 };
 
 interface Layer {
@@ -72,6 +74,7 @@ export class Flora {
           uniforms: {
             ...uniforms,
             uEntry: { value: i }, uSizeA: { value: e.size[0] }, uSizeB: { value: e.size[1] }, uStretch: { value: e.stretch ?? 1 }, uSway: { value: e.sway ?? 0 },
+            uDrift: { value: e.drift ?? 0 }, uHover: { value: e.hover ?? 0 },
             uColA: { value: new THREE.Color(e.colors[0]) }, uColB: { value: new THREE.Color(e.colors[1]) },
             uGlowCol: { value: new THREE.Color(e.glow ?? '#000000') }, uNightGlow: { value: e.nightGlow ? 1 : 0 },
           },

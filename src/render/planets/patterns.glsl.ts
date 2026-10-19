@@ -20,7 +20,14 @@ float patternFade(vec2 g) { return 1.0 - smoothstep(0.35, 0.9, length(fwidth(g))
 vec3 surfacePattern(vec3 d, vec3 p, float h, vec3 col, float s, float near, float dusk, inout float spec, inout vec3 patE) {
   vec3 cu = cubeUV(d);
 #if PATTERN == 1
-  // City world: blocks of grey and metal, streets and avenues; gold lights over the whole night.
+  // City world (change city-life, after Coruscant): districts on a grid of avenues, each split
+  // into blocks, and blocks split again and again where a hash says so (a fractal of streets);
+  // some districts are laid out round a circular plaza, some cut by a diagonal boulevard. Gold
+  // lights over the whole night from orbit; up close the streets are threads of light and the
+  // blocks dark, under the towers.
+  vec2 gA = cu.xy * 3.0 * s;
+  vec2 dA = floor(gA);
+  float dh = hash13(vec3(dA, cu.z + 19.0) + floor(uSeed));
   vec2 g = cu.xy * 9.0 * s;
   vec2 bid = floor(g);
   float bh = hash13(vec3(bid, cu.z) + floor(uSeed));
@@ -28,18 +35,54 @@ vec3 surfacePattern(vec3 d, vec3 p, float h, vec3 col, float s, float near, floa
   vec3 block = mix(uC1, uC3, bh) * (0.8 + 0.35 * hash13(vec3(floor(g * 3.0), cu.z + 7.0)));
   block = mix(block, mix(uC2, vec3(0.62, 0.6, 0.55), 0.4), smoothstep(0.1, 0.5, dist) * 0.5);
   float street = max(gridLine(g.x, 0.07), gridLine(g.y, 0.07));
-  float avenue = max(gridLine(cu.x * 3.0 * s, 0.03), gridLine(cu.y * 3.0 * s, 0.03));
+  float avenue = max(gridLine(gA.x, 0.03), gridLine(gA.y, 0.03));
+  // Fractal streets: at each finer level, a block whose hash says so is split by its midlines.
+  float frac = 0.0;
+  float lvl = 1.0;
+  for (int i = 1; i <= 4; i++) {
+    lvl *= 2.0;
+    vec2 gL = g * lvl;
+    vec2 parent = floor(gL * 0.5);
+    float split = step(0.32, hash13(vec3(parent, cu.z + float(i) * 7.0) + floor(uSeed)));
+    float fadeL = patternFade(gL);
+    vec2 odd = mod(floor(gL + 0.5), 2.0);
+    float mid = max(gridLine(gL.x, 0.09) * odd.x, gridLine(gL.y, 0.09) * odd.y);
+    frac = max(frac, mid * split * fadeL * (1.0 - 0.15 * float(i)));
+  }
+  // A district round a circular plaza: rings and spokes. Another cut by a diagonal boulevard.
+  vec2 fA = fract(gA) - 0.5;
+  float rA = length(fA);
+  float circ = step(0.6, dh);
+  float ringW = fwidth(rA) * 1.2 + 0.006;
+  float rings = max(1.0 - smoothstep(ringW * 0.5, ringW, abs(rA - 0.18)), 1.0 - smoothstep(ringW * 0.5, ringW, abs(rA - 0.34)));
+  float spokes = (1.0 - smoothstep(0.0, 0.03 + fwidth(fA.x) * 2.0, abs(sin(atan(fA.y, fA.x) * 4.0)) * rA)) * step(0.08, rA) * step(rA, 0.46);
+  float plazaA = 1.0 - smoothstep(0.08, 0.085, rA);
+  float radial = circ * max(rings, spokes);
+  float diag = step(dh, 0.25) * max(gridLine((gA.x + gA.y) * 1.0, 0.025), gridLine((gA.x - gA.y) * 1.0, 0.025));
+  // Inside a circular district the plain grid gives way to the rings and spokes.
+  street *= 1.0 - circ * smoothstep(0.42, 0.3, rA);
+  frac *= 1.0 - circ * smoothstep(0.42, 0.3, rA);
   // Close up, every block is itself a grid of towers and alleys.
   vec2 g2 = g * 8.0;
   float fine = patternFade(g2);
   float alley = max(gridLine(g2.x, 0.08), gridLine(g2.y, 0.08)) * fine;
   float tower = hash13(vec3(floor(g2), cu.z + 13.0));
   block *= mix(1.0, 0.75 + 0.5 * tower, fine);
-  col = mix(block, uC0, max(max(street * 0.8, avenue), alley * 0.7));
+  block = mix(block, mix(uC3, vec3(0.7, 0.68, 0.62), 0.5), circ * plazaA);
+  float roads = max(max(max(street * 0.8, avenue), max(radial, diag)), max(alley * 0.7, frac));
+  col = mix(block, uC0, roads);
   spec = 0.25;
   float windows = step(0.45, hash13(vec3(floor(g * 4.0), cu.z + 3.0)));
   float dense = 0.55 + 0.45 * smoothstep(-0.4, 0.4, dist);
-  patE += uGlow * (windows * 0.35 * dense + street * 0.7 + avenue * 1.3 + alley * 0.4 + step(0.8, tower) * fine * 0.5) * (dusk * 1.6 + 0.06);
+  // From orbit the whole night side glows; close in, the glow draws in to the streets and plazas.
+  float far = 1.0 - near * 0.8;
+  // Seen close, a wide road is dark tarmac with threads of light down its lanes, not a glowing
+  // plain: the roads' glow narrows to their centres and edges as the camera comes down.
+  float threads = max(max(gridLine(g.x, 0.003), gridLine(g.y, 0.003)) * (1.0 - circ * smoothstep(0.42, 0.3, rA)),
+    max(max(gridLine(gA.x, 0.002), gridLine(gA.y, 0.002)), max(abs(abs(fract(gA.x + 0.5) - 0.5) - 0.022), abs(abs(fract(gA.y + 0.5) - 0.5) - 0.022)) < 0.0015 ? 1.0 : 0.0));
+  float wideGlow = street * 0.7 + avenue * 0.9 + (radial + diag) * 0.9;
+  float lanes = mix(wideGlow, threads * 1.2 + (radial + diag) * 0.25, near) + frac * 0.5 + alley * 0.25;
+  patE += uGlow * (windows * 0.35 * dense * far + lanes * mix(1.0, 0.5, near) + step(0.8, tower) * fine * 0.35 * far + circ * plazaA * 0.6) * (dusk * 1.6 + 0.06);
 #elif PATTERN == 2
   // Dead machine world: rusting plates, seams and dead blocks; a few dying lights.
   vec2 g = cu.xy * 11.0 * s;

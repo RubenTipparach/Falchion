@@ -4,12 +4,14 @@
  * placement is the GPU's (Flora.ts), on a grid anchored to the planet, so every visit and every
  * player sees the same groves in the same places.
  *
- * Two layers: `large` (trees, boulders, ruins, city blocks) on a wide grid seen from higher up,
- * and `small` (grass, reeds, stones, bone fragments) on a fine grid only seen close to the ground.
+ * Three layers: `large` (trees, boulders, ruins, city blocks) on a wide grid seen from higher up,
+ * `small` (grass, reeds, stones, bone fragments) on a fine grid only seen close to the ground, and
+ * `far` (a city world's megatowers) on a coarse grid seen far off, so a city runs to the horizon.
  */
 export type PropKind =
   | 'broadleaf' | 'conifer' | 'palm' | 'jungle' | 'swamptree' | 'deadtree' | 'shrub' | 'fern' | 'grass' | 'reeds' | 'cactus'
-  | 'rock' | 'boulder' | 'crag' | 'lavarock' | 'fungus' | 'crystal' | 'bones' | 'ribcage' | 'skeleton' | 'tusk' | 'spire' | 'wreck' | 'block';
+  | 'rock' | 'boulder' | 'crag' | 'lavarock' | 'fungus' | 'crystal' | 'bones' | 'ribcage' | 'skeleton' | 'tusk' | 'spire' | 'wreck' | 'block'
+  | 'megatower' | 'flyer' | 'skyship';
 
 export interface FloraEntry {
   readonly kind: PropKind;
@@ -35,16 +37,20 @@ export interface FloraEntry {
   readonly sway?: number;
   /** Grows in shallow water down to this depth below the shore (reeds, mangroves): height units. */
   readonly wet?: number;
+  /** Traffic (change city-life): flies along the grid's lanes at this speed (planet radii a second)... */
+  readonly drift?: number;
+  /** ...this high above the ground (planet radii, at most twice this). */
+  readonly hover?: number;
 }
 
 export interface FloraLayer {
-  readonly layer: 'large' | 'small';
+  readonly layer: 'large' | 'small' | 'far';
   /** Share of the grid's cells that hold a prop at all. */
   readonly fill: number;
   readonly entries: readonly FloraEntry[];
 }
 
-const L = 'large' as const, S = 'small' as const;
+const L = 'large' as const, S = 'small' as const, F = 'far' as const;
 
 // Shared kits.
 const STONES: FloraEntry = { kind: 'rock', weight: 1, size: [0.00005, 0.00012], colors: ['#77706a', '#9a948c'] };
@@ -211,10 +217,18 @@ export const FLORA: Readonly<Record<string, readonly FloraLayer[]>> = {
     ] },
     { layer: S, fill: 0.5, entries: [{ ...STONES, colors: ['#6a6670', '#a8a4b0'] }] },
   ],
+  // A city world (change city-life): megatowers to the horizon, blocks and spires between them,
+  // and sky lanes of traffic and ships, after Coruscant.
   ecumenopolis: [
-    { layer: L, fill: 0.85, entries: [
+    { layer: F, fill: 0.7, entries: [
+      { kind: 'megatower', weight: 5, size: [0.003, 0.0065], colors: ['#6f7a86', '#b4ad9e'], stretch: 2.4, glow: '#ffc860', nightGlow: true },
+      { kind: 'spire', weight: 1, size: [0.006, 0.012], colors: ['#5f7d99', '#8a9aa8'], glow: '#ffd890', nightGlow: true },
+      { kind: 'skyship', weight: 1, size: [0.0018, 0.0032], colors: ['#9aa4b0', '#c8c0b0'], glow: '#8fe0ff', drift: 0.004, hover: 0.012 },
+    ] },
+    { layer: L, fill: 0.92, entries: [
       { kind: 'block', weight: 4, size: [0.0004, 0.0008], colors: ['#7d8792', '#b9b2a2'], stretch: 6, glow: '#ffc860', nightGlow: true },
       { kind: 'spire', weight: 1, size: [0.0012, 0.0024], colors: ['#5f7d99', '#8a9aa8'], glow: '#ffd890', nightGlow: true },
+      { kind: 'flyer', weight: 3, size: [0.00028, 0.0004], colors: ['#c8d0d8', '#3a4450'], glow: '#5fd0ff', drift: 0.0026, hover: 0.0022 },
     ] },
   ],
 };

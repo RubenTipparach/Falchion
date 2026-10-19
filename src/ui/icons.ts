@@ -12,6 +12,7 @@ export const ICONS = {
   research: svg('<circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6 8v2a4 4 0 0 0 4 4h0M18 8v2a4 4 0 0 1-4 4h0M12 14v2"/>'),
   explore: svg('<circle cx="12" cy="12" r="5"/><ellipse cx="12" cy="12" rx="10" ry="3.2" transform="rotate(-20 12 12)"/>'),
   endTurn: svg('<path d="M5 6l6 6-6 6"/><path d="M13 6l6 6-6 6"/>'),
+  search: svg('<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
   focus: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>'),
   fleet: svg('<path d="M4 12l14-6-4 6 4 6z"/>'),

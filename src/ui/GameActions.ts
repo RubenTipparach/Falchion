@@ -1,3 +1,4 @@
+import type { Hex } from '../core/hex/Hex';
 import type { AssaultResult, BattleResult, Damage, PlanetTarget, Squadron } from '../core/combat/Combat';
 import type { RepairSite } from '../content/logistics';
 import type { Planet } from '../core/galaxy/Planets';
@@ -17,7 +18,7 @@ import type { ExchangeInfo, StockView } from '../sim/EmpireSim';
 import type { DiplomacyView, FieldReport } from '../sim/EmpireSim';
 import type { DiplomaticAction } from '../core/diplomacy/Diplomacy';
 
-export type PanelId = 'shipyard' | 'research' | 'empire' | 'war' | 'explore' | 'fleets';
+export type PanelId = 'shipyard' | 'research' | 'empire' | 'war' | 'explore' | 'fleets' | 'search';
 
 /** A group of the player's ships in one place: the home dock or a deployed fleet. */
 export interface FleetGroup {
@@ -80,6 +81,8 @@ export type LandingSpot = { readonly city: number } | { readonly building: strin
 
 /** Read-only game queries the panels use (implemented by the app layer). */
 export interface GameQueries {
+  /** The hex at the centre of the view (where a search starts). */
+  viewHex(): Hex;
   /** A planet's major cities, capital first (empty when nobody has settled it). */
   citiesOf(planet: Planet): readonly CityEntry[];
   /** How much of a system has been surveyed: explored or settled planets out of all. */

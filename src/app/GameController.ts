@@ -347,6 +347,11 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
    * Fly to a star. closeUp dives into its system view; otherwise the camera pans there,
    * coming in only as far as a regional view when it is zoomed far out.
    */
+  viewHex(): Hex {
+    const f = this.view.map.controller.focus;
+    return worldToHex(f.x, f.y);
+  }
+
   flyTo(star: StarSystem, closeUp = false): void {
     const cam = this.view.map.controller;
     cam.flyTo(star.position.x, star.position.z, closeUp ? SYSTEM_ALTITUDE : cam.zoom.targetAltitude > LOCATE_ALTITUDE ? LOCATE_ALTITUDE : undefined);

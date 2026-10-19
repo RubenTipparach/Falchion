@@ -55,6 +55,7 @@ import { ExplorePanel } from '../ui/panels/ExplorePanel';
 import { FleetsPanel } from '../ui/panels/FleetsPanel';
 import { ResearchPanel } from '../ui/panels/ResearchPanel';
 import { ShipyardPanel } from '../ui/panels/ShipyardPanel';
+import { SearchPanel } from '../ui/panels/SearchPanel';
 import type { PanelId } from '../ui/GameActions';
 import { GameController } from './GameController';
 import { SharedWorldClient } from './SharedWorldClient';
@@ -218,6 +219,7 @@ async function bootstrap(): Promise<void> {
     war: new WarRoomPanel(store, controller, controller),
     explore: new ExplorePanel(store, controller, controller, controller.planets, tree, thumb),
     fleets: new FleetsPanel(store, controller, controller),
+    search: new SearchPanel(store, controller, controller, galaxy, controller.planets, thumb),
   };
   // City locator: the focused planet's major cities, also while its card is closed.
   const cityLocator = new CityLocator(store, controller, controller, starInfo);
@@ -272,6 +274,7 @@ async function bootstrap(): Promise<void> {
     if (e.key === 'Escape' && battle.isOpen) { controller.leaveBattle(); return; }
     if (battle.isOpen) return;
     if (e.key === 'g' || e.key === 'G') controller.toggleView();
+    if (e.key === '/') { e.preventDefault(); controller.openPanel('search'); return; }
     if (e.key === 'Escape' && store.state.selectedFleet) { controller.selectFleet(null); return; }
     if (e.key === 'Escape' && surface.status.active) { controller.leaveSurface(); return; }
     if (e.key === 'Escape') { if (store.state.selectedPlanet && store.state.selected) controller.focusPlanet(store.state.selected, null); else controller.select(null); }

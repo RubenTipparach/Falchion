@@ -35,7 +35,7 @@ export class TopBar {
     this.viewBtn = h('button', { class: 'tab', title: 'Toggle hex / galaxy view (G)', onclick: () => actions.toggleView() }, icon('galaxy'), this.viewLabel);
     const tab = (id: PanelId, label: string, ic: IconName) =>
       h('button', { class: 'tab', 'data-tab': id, title: label, 'aria-label': label, onclick: () => actions.openPanel(id) }, icon(ic), h('span', { class: 'tab-label' }, label));
-    this.tabs = { shipyard: tab('shipyard', 'Shipyard', 'shipyard'), research: tab('research', 'Research', 'research'), empire: tab('empire', 'Empire', 'empire'), war: tab('war', 'War Room', 'battle'), explore: tab('explore', 'Explore', 'explore'), fleets: tab('fleets', 'Fleets', 'fleet') };
+    this.tabs = { shipyard: tab('shipyard', 'Shipyard', 'shipyard'), research: tab('research', 'Research', 'research'), empire: tab('empire', 'Empire', 'empire'), war: tab('war', 'War Room', 'battle'), explore: tab('explore', 'Explore', 'explore'), fleets: tab('fleets', 'Fleets', 'fleet'), search: tab('search', 'Search', 'search') };
     this.tabs.explore.append(this.lootBadge);
     this.tabs.war.append(this.warBadge);
     this.empireBtn = h('button', { class: 'empire-chip', title: 'Your empire: click to change its name, colours and flag', onclick: () => actions.editEmpire() });
@@ -46,7 +46,7 @@ export class TopBar {
       h('div', { class: 'turn' },
         h('div', { class: 'turn-dial' }, h('span', { class: 'turn-label' }, 'Year'), this.turnNum),
         this.clockEl),
-      (this.nav = h('nav', { class: 'tabs' }, this.viewBtn, this.tabs.shipyard, this.tabs.research, this.tabs.empire, this.tabs.fleets, this.tabs.explore, this.tabs.war)),
+      (this.nav = h('nav', { class: 'tabs' }, this.viewBtn, this.tabs.shipyard, this.tabs.research, this.tabs.empire, this.tabs.fleets, this.tabs.explore, this.tabs.war, this.tabs.search)),
       h('div', { class: 'identity', title: identity.provider === 'discord' ? 'Signed in with Discord: your empire is saved on the server' : 'Guest: your empire is saved in this browser only' },
         identity.avatar ? h('img', { class: 'avatar', src: identity.avatar, alt: '' }) : h('span', { class: 'avatar' }, identity.displayName.slice(0, 1)),
         h('span', { class: 'who' }, h('b', {}, identity.displayName),

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { citiesNear, groundHeight, megaGround, octavesAt, wrapX, type MegaCity, type MegaGroundDef, type MegaSurfaceType } from '../../../core/mega/MegaGround';
+import { citiesNear, groundHeight, isTube, megaGround, octavesAt, wrapX, type MegaCity, type MegaGroundDef, type MegaSurfaceType } from '../../../core/mega/MegaGround';
 import { smoothstep } from '../../../core/surface/Noise';
 import type { InputCapture } from '../../map/MapCameraController';
 import type { MapLayer, ViewState } from '../../map/MapLayer';
@@ -51,6 +51,7 @@ const TRIP: Readonly<Record<MegaSurfaceType, { maxKm: number; minKm: number; sta
   'dyson-sphere': { maxKm: 6e5, minKm: 0.004, startKm: 9000, landKm: 2.8, yaw: 0.6 },
   'alderson-disk': { maxKm: 3e5, minKm: 0.004, startKm: 8000, landKm: 1.6, yaw: Math.PI },
   'dyson-swarm': { maxKm: 3.4, minKm: 0.004, startKm: 3, landKm: 0.3, yaw: Math.PI / 2 },
+  topopolis: { maxKm: 36, minKm: 0.004, startKm: 30, landKm: 1.4, yaw: Math.PI / 2 },
 };
 
 interface Built {
@@ -248,9 +249,9 @@ export class MegaSurfaceLayer implements MapLayer {
     if (!def) return;
     const roam = def.roamKm;
     let x = THREE.MathUtils.clamp(this.focus[0] + dx, -roam, roam);
-    const zMax = def.widthKm > 0 ? Math.min(roam, def.widthKm / 2 - (def.type === 'dyson-swarm' ? 1.2 : 2000)) : roam;
+    const zMax = def.widthKm > 0 ? Math.min(roam, def.widthKm / 2 - (isTube(def) ? 1.2 : 2000)) : roam;
     const z = THREE.MathUtils.clamp(this.focus[1] + dz, -zMax, zMax);
-    if (def.type === 'dyson-swarm') x = wrapX(def, this.focus[0] + dx);
+    if (isTube(def)) x = wrapX(def, this.focus[0] + dx);
     this.focus = [x, z];
   }
 
@@ -264,7 +265,7 @@ export class MegaSurfaceLayer implements MapLayer {
     if (!hit) return;
     const def = this.built!.def;
     const to: [number, number] = [this.focus[0] + hit.x, this.focus[1] + hit.z];
-    if (def.type !== 'dyson-swarm') { to[0] = THREE.MathUtils.clamp(to[0], -def.roamKm, def.roamKm); to[1] = THREE.MathUtils.clamp(to[1], -def.roamKm, def.roamKm); }
+    if (!isTube(def)) { to[0] = THREE.MathUtils.clamp(to[0], -def.roamKm, def.roamKm); to[1] = THREE.MathUtils.clamp(to[1], -def.roamKm, def.roamKm); }
     this.fly = { from: [...this.focus], to, t: 0 };
     this.host.zoom.setTargetAltitude(Math.max(this.host.zoom.targetAltitude * 0.6, this.host.zoom.floor));
   }
@@ -285,7 +286,7 @@ export class MegaSurfaceLayer implements MapLayer {
   private pitch(): number {
     const def = this.built!.def, trip = TRIP[def.type];
     const s = Math.log(this.altKm / trip.minKm) / Math.log(trip.maxKm / trip.minKm);
-    const base = def.type === 'dyson-swarm' ? 1.25 : THREE.MathUtils.lerp(1.38, 0.25, Math.pow(THREE.MathUtils.clamp(s, 0, 1), 1.6));
+    const base = isTube(def) ? 1.25 : THREE.MathUtils.lerp(1.38, 0.25, Math.pow(THREE.MathUtils.clamp(s, 0, 1), 1.6));
     return THREE.MathUtils.clamp(base + this.pitchOffset, 0.02, Math.PI - 0.35);
   }
 
@@ -303,7 +304,7 @@ export class MegaSurfaceLayer implements MapLayer {
     cam.y = Math.max(cam.y, hF + this.altKm * 0.98);
     // Never under the ground (or, in a habitat, outside its hull).
     const hC = groundHeight(def, this.focus[0] + cam.x, this.focus[1] + cam.z, octavesAt(def, this.altKm), this.cities);
-    if (def.type === 'dyson-swarm') {
+    if (isTube(def)) {
       const R = def.radiusKm;
       const r = Math.hypot(cam.x, cam.y - R);
       const maxR = R - Math.max(hC, 0) - 0.004;
@@ -316,7 +317,7 @@ export class MegaSurfaceLayer implements MapLayer {
     // Lens as the map's; clipping to the land round the camera (the sky is inside it).
     b.uniforms.uCamGround.value = Math.max(hC, 0);
     b.terrain.update({ focus: this.focus, cam, alt });
-    const far = Math.max(b.terrain.extent * 2.2, alt * 8, def.type === 'dyson-swarm' ? 60 : 0);
+    const far = Math.max(b.terrain.extent * 2.2, alt * 8, def.type === 'dyson-swarm' ? 60 : def.type === 'topopolis' ? 500 : 0);
     this.camera.fov = mapCamera.fov;
     this.camera.aspect = mapCamera.aspect;
     this.camera.near = Math.max(alt * 0.25, 0.0002);
@@ -379,6 +380,13 @@ export class MegaSurfaceLayer implements MapLayer {
       day = smoothstep(-0.015, 0.03, bob);
       dawn = 1 - smoothstep(0.02, 0.12, bob);
       col.multiplyScalar(1.6);
+    } else if (def.type === 'topopolis') {
+      // A topopolis turns once in five minutes: a window faces the star for a day, then turns away.
+      const spin = (2 * Math.PI * t) / 300 + this.focus[0] / def.radiusKm;
+      su.uSpin.value = spin;
+      su.uStarPos.value.set(1, 0, 0.15);
+      su.uStarRad.value = 0.012;
+      day = smoothstep(-0.3, 0.3, Math.cos(spin) + 0.35);
     } else {
       // A habitat: its mirrors open and close on a day; the habitat spins once in two minutes.
       day = smoothstep(-0.35, 0.25, Math.sin((2 * Math.PI * t) / 180) + 0.25);
@@ -414,7 +422,7 @@ export class MegaSurfaceLayer implements MapLayer {
     const terrain = new MegaTerrain(uniforms, this.host.lite ? 12 : 15);
     const towers = new MegaTowers(uniforms, this.host.lite);
     const trees = new MegaTrees(uniforms, this.host.lite);
-    const habitat = t.type === 'dyson-swarm' ? new MegaHabitat(def, uniforms) : null;
+    const habitat = isTube(def) ? new MegaHabitat(def, uniforms) : null;
     scene.add(sky.mesh, terrain.group, towers.mesh, trees.group);
     if (habitat) scene.add(habitat.group);
     this.citiesKey = '';

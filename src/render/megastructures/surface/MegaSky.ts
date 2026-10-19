@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { MegaGroundDef } from '../../../core/mega/MegaGround';
+import { isTube, type MegaGroundDef } from '../../../core/mega/MegaGround';
 import { MEGA_GROUND_GLSL } from './megaGround.glsl';
 
 /**
@@ -16,7 +16,7 @@ import { MEGA_GROUND_GLSL } from './megaGround.glsl';
  * Far units: the structure's radius (ring, sphere) or 10^8 km (disk); the focus is the origin.
  */
 
-export const SKY_MODE = { ringworld: 0, 'dyson-sphere': 1, 'alderson-disk': 2, 'dyson-swarm': 3 } as const;
+export const SKY_MODE = { ringworld: 0, 'dyson-sphere': 1, 'alderson-disk': 2, 'dyson-swarm': 3, topopolis: 3 } as const;
 /** Shadow squares round a ring, their orbit (ring radii) and how much of each gap they fill. */
 export const SQUARES = { n: 10, radius: 0.35, cover: 0.4 } as const;
 /** The disc's far unit (km) and its star's distance in it. */
@@ -44,6 +44,7 @@ uniform float uStarRad;
 uniform float uNearKm;
 uniform float uSpin;
 uniform float uPixelAngle;
+uniform float uStrands;
 varying vec3 vDir;
 const float PI = 3.14159265359;
 float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
@@ -184,13 +185,26 @@ void main() {
     float cs = cos(uSpin), sn = sin(uSpin);
     vec3 r = vec3(d.x * cs - d.y * sn, d.x * sn + d.y * cs, d.z);
     col = vec3(0.004, 0.006, 0.012) + vec3(0.85, 0.9, 1.0) * starField(r);
-    // The swarm's other collectors: glints all round.
-    vec3 q = r * 40.0;
-    float g = hash13(floor(q));
-    col += vec3(1.0, 0.85, 0.55) * step(0.992, g) * smoothstep(0.45, 0.1, length(fract(q) - 0.5)) * 1.4;
+    if (uStrands > 0.5) {
+      // A topopolis: its other loops round the star cross the sky as lit bands, green with land.
+      for (int i = 0; i < 3; i++) {
+        float a = float(i) * 2.1 + 0.4;
+        vec3 n = normalize(vec3(sin(a) * 0.35, cos(a), 0.3 + 0.2 * float(i)));
+        float band = smoothstep(0.012, 0.0, abs(dot(r, n)) - 0.002 * float(i));
+        float stripes = 0.6 + 0.4 * step(0.5, fract(atan(r.y, r.x) * 3.0 / 6.2832 + float(i) * 0.3));
+        col += mix(vec3(0.25, 0.4, 0.22), vec3(0.6, 0.66, 0.7), step(0.5, fract(atan(r.z, r.x) * 30.0))) * band * stripes * 0.9;
+      }
+    } else {
+      // The swarm's other collectors: glints all round.
+      vec3 q = r * 40.0;
+      float g = hash13(floor(q));
+      col += vec3(1.0, 0.85, 0.55) * step(0.992, g) * smoothstep(0.45, 0.1, length(fract(q) - 0.5)) * 1.4;
+    }
     vec3 s = normalize(uStarPos);
     float sd = dot(r, s);
     col += uSunCol * (smoothstep(cos(uStarRad), cos(uStarRad * 0.85), sd) * 4.0 + pow(max(sd, 0.0), 300.0) * 1.2);
+    // Down an endless tube, past the land drawn near, it goes on into its own haze.
+    if (uStrands > 0.5) col = mix(col, mix(vec3(0.03, 0.04, 0.07), vec3(0.62, 0.72, 0.84), uDay), smoothstep(0.93, 0.995, abs(d.z)));
     gl_FragColor = vec4(col, 1.0);
     return;
   }
@@ -209,7 +223,7 @@ export class MegaSky {
   readonly unitKm: number;
 
   constructor(readonly def: MegaGroundDef, uniforms: Record<string, THREE.IUniform>) {
-    this.unitKm = def.type === 'alderson-disk' ? DISK_UNIT_KM : def.type === 'dyson-swarm' ? 1 : def.radiusKm;
+    this.unitKm = def.type === 'alderson-disk' ? DISK_UNIT_KM : isTube(def) ? 1 : def.radiusKm;
     const mat = new THREE.ShaderMaterial({
       vertexShader: SKY_VERT, fragmentShader: SKY_FRAG, side: THREE.BackSide, depthWrite: false, depthTest: false,
       uniforms: {
@@ -217,7 +231,7 @@ export class MegaSky {
         uMode: { value: SKY_MODE[def.type] }, uFarCam: { value: new THREE.Vector3() }, uUnit: { value: this.unitKm },
         uRingZ: { value: 0 }, uHalfW: { value: def.widthKm / 2 / this.unitKm }, uWall: { value: 6000 / this.unitKm },
         uSquarePhase: { value: 0 }, uStarPos: { value: new THREE.Vector3(0, 1, 0) }, uStarRad: { value: 0.012 },
-        uNearKm: { value: 0 }, uSpin: { value: 0 }, uPixelAngle: { value: 0.002 },
+        uNearKm: { value: 0 }, uSpin: { value: 0 }, uPixelAngle: { value: 0.002 }, uStrands: { value: def.type === 'topopolis' ? 1 : 0 },
       },
     });
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), mat);

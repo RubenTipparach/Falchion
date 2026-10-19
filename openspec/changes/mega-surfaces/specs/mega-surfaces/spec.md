@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Megastructures can be landed on
-The ringworld, the Dyson sphere, the Alderson disk and the Dyson swarm SHALL each offer a Land action. Landing SHALL fade from the system view to the structure's ground and glide down. Zooming out past the top of the close-up, or Escape, SHALL fade back to the system view framed on the structure.
+The ringworld, the Dyson sphere, the Alderson disk, the Dyson swarm and the topopolis SHALL each offer a Land action. Landing SHALL fade from the system view to the structure's ground and glide down. Zooming out past the top of the close-up, or Escape, SHALL fade back to the system view framed on the structure.
 
 #### Scenario: Landing on a ringworld
 - **WHEN** the player presses Land on a ringworld's card
@@ -16,7 +16,8 @@ The ground SHALL follow the structure's shape:
 - **ringworld:** the inner face of a ring, rising along its spin into an arch, bounded by rim walls;
 - **Dyson sphere:** the inside of a shell, curving up all round;
 - **Alderson disk:** flat;
-- **Dyson swarm:** the inside of a spinning cylinder habitat, land strips between windows.
+- **Dyson swarm:** the inside of a spinning cylinder habitat, land strips between windows;
+- **topopolis:** the inside of an endless spinning tube, land strips between windows running on along it.
 
 #### Scenario: Looking along a ringworld
 - **WHEN** the camera on a ringworld's land looks along the spin
@@ -26,7 +27,11 @@ The ground SHALL follow the structure's shape:
 The star SHALL be where the shape puts it:
 - **ringworld and Dyson sphere:** overhead;
 - **Alderson disk:** low on the horizon, rising and setting;
-- **swarm habitat:** outside its windows.
+- **swarm habitat and topopolis:** outside its windows, turning past them as the habitat spins.
+
+#### Scenario: Looking across a topopolis
+- **WHEN** the camera on a topopolis's land looks up through a window
+- **THEN** the opposite land strip is overhead and the tube's other loops cross the sky as lit bands
 
 #### Scenario: Looking up from a Dyson sphere's land
 - **WHEN** the camera on a Dyson sphere's inner land tilts up

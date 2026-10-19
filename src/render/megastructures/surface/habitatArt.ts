@@ -56,6 +56,6 @@ export function habitatArt(): HabitatArt {
       });
     });
   });
-  art = { land: texture('oneill_land', false), landDetail, dome: texture('oneill_dome', false), mirror: texture('oneill_mirror', true), detailMean, clouds };
+  art = { land: texture('oneill_land', true), landDetail, dome: texture('oneill_dome', false), mirror: texture('oneill_mirror', true), detailMean, clouds };
   return art;
 }

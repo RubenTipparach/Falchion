@@ -50,7 +50,17 @@ describe('megastructure ground (change mega-surfaces)', () => {
     for (const city of citiesNear(def, 0, 0, 40)) expect(onHabitatLand(def, city.x)).toBe(true);
   });
 
+  it('a topopolis is an endless tube: land strips round it, cities on them all along', () => {
+    const def = megaGround('topopolis', 21);
+    expect(def.widthKm).toBe(0);
+    expect(onHabitatLand(def, 0)).toBe(true);
+    const far = citiesNear(def, 0, 900, 200);
+    expect(far.length).toBeGreaterThan(0);
+    for (const city of far) expect(onHabitatLand(def, city.x)).toBe(true);
+  });
+
   it('knows which structures can be landed on', () => {
+    expect(hasMegaSurface('topopolis')).toBe(true);
     expect(hasMegaSurface('ringworld')).toBe(true);
     expect(hasMegaSurface('matrioshka-brain')).toBe(false);
   });

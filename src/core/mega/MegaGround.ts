@@ -10,9 +10,15 @@ import { smoothstep, snoise } from '../surface/Noise';
  * Coordinates are km on the land, from the landing site: x along the spin (round a ring, a
  * habitat), z across it. The ground is bent to the structure's shape only when it is drawn.
  */
-export type MegaSurfaceType = 'ringworld' | 'dyson-sphere' | 'alderson-disk' | 'dyson-swarm';
+export type MegaSurfaceType = 'ringworld' | 'dyson-sphere' | 'alderson-disk' | 'dyson-swarm' | 'topopolis';
 
-export const MEGA_SURFACE_TYPES: readonly MegaSurfaceType[] = ['ringworld', 'dyson-sphere', 'alderson-disk', 'dyson-swarm'];
+export const MEGA_SURFACE_TYPES: readonly MegaSurfaceType[] = ['ringworld', 'dyson-sphere', 'alderson-disk', 'dyson-swarm', 'topopolis'];
+
+/**
+ * Lived in inside a spinning tube: land on three strips round it, windows between (a swarm's
+ * habitat, closed at both ends; a topopolis, a tube that never ends).
+ */
+export const isTube = (def: Pick<MegaGroundDef, 'type'>): boolean => def.type === 'dyson-swarm' || def.type === 'topopolis';
 
 export const hasMegaSurface = (type: string): type is MegaSurfaceType => (MEGA_SURFACE_TYPES as readonly string[]).includes(type);
 
@@ -59,6 +65,9 @@ const SHAPES: Readonly<Record<MegaSurfaceType, ShapeTable>> = {
   // One habitat of the swarm: a spinning cylinder, land strips between windows. Its land is the
   // painted O'Neill stripe (the render side): the height here only rolls it gently, with no seas.
   'dyson-swarm': { radiusKm: 4, widthKm: 32, featureKm: 7, reliefKm: 0.05, sea: -0.6, cityCellKm: 5, cityKm: [0.5, 1.1], roamKm: 16 },
+  // A topopolis: the same tube, forty km round and with no end (it loops round its star again and
+  // again); towns and cities along its strips.
+  topopolis: { radiusKm: 40, widthKm: 0, featureKm: 70, reliefKm: 0.3, sea: -0.6, cityCellKm: 34, cityKm: [1.5, 6], roamKm: 1500 },
 };
 
 /** The ground of a megastructure: its shape and where on the noise its land is. */
@@ -84,7 +93,7 @@ export function octavesAt(def: MegaGroundDef, distKm: number): number {
 
 /** A habitat is round: its land repeats once round (the seam falls in a window). Elsewhere x as is. */
 export function wrapX(def: MegaGroundDef, x: number): number {
-  if (def.type !== 'dyson-swarm') return x;
+  if (!isTube(def)) return x;
   const c = 2 * Math.PI * def.radiusKm;
   return x - c * Math.floor((x + c / 2) / c);
 }
@@ -159,7 +168,7 @@ export function citiesNear(def: MegaGroundDef, x: number, z: number, reach: numb
       const c = cityIn(def, i, j);
       if (!c || Math.hypot(c.x - x, c.z - z) >= reach) continue;
       // A habitat's cities stand on its land strips, clear of the windows and the end caps.
-      if (def.type === 'dyson-swarm' && (!onHabitatLand(def, c.x - c.r) || !onHabitatLand(def, c.x + c.r) || Math.abs(c.z) + c.r > def.widthKm / 2 - 1)) continue;
+      if (isTube(def) && (!onHabitatLand(def, c.x - c.r) || !onHabitatLand(def, c.x + c.r) || (def.widthKm > 0 && Math.abs(c.z) + c.r > def.widthKm / 2 - 1))) continue;
       out.push(c);
     }
   }
@@ -179,7 +188,7 @@ export function cityIn(def: MegaGroundDef, i: number, j: number): MegaCity | nul
   const x = (i + rng.range(0.25, 0.75)) * cell, z = (j + rng.range(0.25, 0.75)) * cell;
   const land = groundNoise(def, x, z, 6) - def.sea;
   // On land, and not up in the mountains.
-  if (def.type !== 'dyson-swarm' && (land < 0.03 || land > 0.32)) return null;
+  if (!isTube(def) && (land < 0.03 || land > 0.32)) return null;
   const size = rng.next();
   const r = def.cityKm[0] + (def.cityKm[1] - def.cityKm[0]) * size * size;
   return { x, z, r, level: Math.max(rawHeight(def, x, z, 7), def.reliefKm * 0.02), size };

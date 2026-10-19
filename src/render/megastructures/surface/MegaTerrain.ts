@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { MegaCity, MegaGroundDef } from '../../../core/mega/MegaGround';
+import { isTube, type MegaCity, type MegaGroundDef } from '../../../core/mega/MegaGround';
 import { habitatArt } from './habitatArt';
 import { MAX_MEGA_CITIES, MEGA_GROUND_GLSL } from './megaGround.glsl';
 
@@ -47,20 +47,22 @@ export function landUniforms(def: MegaGroundDef): Record<string, THREE.IUniform>
     uDay: { value: 1 },
     uDawn: { value: 0 },
     uCamAlt: { value: 1 },
-    uHazeKm: { value: def.type === 'dyson-swarm' ? 30 : 110 },
-    uAtmKm: { value: def.type === 'dyson-swarm' ? 6 : 14 },
+    uHazeKm: { value: def.type === 'dyson-swarm' ? 30 : def.type === 'topopolis' ? 80 : 110 },
+    uAtmKm: { value: def.type === 'dyson-swarm' ? 6 : def.type === 'topopolis' ? 12 : 14 },
     uDetailOrigin: { value: new THREE.Vector2() },
     uTime: { value: 0 },
     uHalfWidth: { value: def.widthKm > 0 ? def.widthKm / 2 : 1e12 },
-    uHabitat: { value: def.type === 'dyson-swarm' ? 1 : 0 },
-    ...(def.type === 'dyson-swarm' ? habitatUniforms() : {}),
+    uHabitat: { value: isTube(def) ? 1 : 0 },
+    ...(isTube(def) ? habitatUniforms(def) : {}),
   };
 }
 
 /** A habitat's painted land (Star Crew's O'Neill stripe, its rivers and its close-up detail). */
-function habitatUniforms(): Record<string, THREE.IUniform> {
+function habitatUniforms(def: MegaGroundDef): Record<string, THREE.IUniform> {
   const art = habitatArt();
-  return { uLandMap: { value: art.land }, uLandDetail: { value: art.landDetail }, uDetailMean: { value: art.detailMean } };
+  // A closed habitat has the stripe once along; an endless tube repeats it, as long as four strips are wide.
+  const period = def.widthKm > 0 ? 0 : (4 * 2 * Math.PI * def.radiusKm) / 6;
+  return { uLandMap: { value: art.land }, uLandDetail: { value: art.landDetail }, uDetailMean: { value: art.detailMean }, uLandPeriod: { value: period } };
 }
 
 /** Shader switches for the structure the uniforms are for. */
@@ -75,12 +77,13 @@ export const HABITAT_LAND_GLSL = /* glsl */ `
 uniform sampler2D uLandMap;
 uniform sampler2D uLandDetail;
 uniform vec3 uDetailMean;
+uniform float uLandPeriod;
 vec2 habitatUv(vec2 site) {
   vec2 ws = wrapSite(site);
   float t6 = fract(ws.x / (6.28318530718 * uRadius) + 1.0 / 12.0) * 6.0;
   float u = fract(t6);
   if (mod(floor(t6), 4.0) > 1.5) u = 1.0 - u;
-  return vec2(u, clamp(ws.y / (2.0 * uHalfWidth) + 0.5, 0.0, 1.0));
+  return vec2(u, uLandPeriod > 0.0 ? ws.y / uLandPeriod + 0.5 : clamp(ws.y / (2.0 * uHalfWidth) + 0.5, 0.0, 1.0));
 }
 #endif
 `;

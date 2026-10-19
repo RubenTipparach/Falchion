@@ -9,9 +9,11 @@ import { MEGA_GROUND_GLSL } from './megaGround.glsl';
  * Bridge Simulator (its spacedock mockup: the mirrors, the clouds, the dome machinery, the light
  * down the axis):
  * - glass in a frame over the window strips between the land, space beyond;
- * - the two end caps: machinery and rings of lit windows (Star Crew's dome map);
- * - three mirrors outside the windows, hinged at the end away from the star, open by day to
- *   throw its light in and nearly shut at night;
+ * - a closed habitat (the swarm's): the two end caps, machinery and rings of lit windows (Star
+ *   Crew's dome map), and three mirrors outside the windows, hinged at the end away from the
+ *   star, open by day to throw its light in and nearly shut at night;
+ * - an endless tube (a topopolis): no caps and no mirrors, its windows turning to the star and
+ *   away as it spins; its glass, clouds and axis light follow the camera along it, repeating;
  * - cloud puffs over the land where Star Crew's cloud map gathers them;
  * - a thin line of light down the axis.
  * The mirrors, clouds and axis are built round the habitat's axis and turned to the camera's
@@ -23,6 +25,7 @@ ${MEGA_GROUND_GLSL}
 uniform vec2 uFocus;
 uniform float uLength;
 uniform float uPart;
+uniform float uFollow;
 varying vec2 vSite;
 varying float vH;
 varying vec3 vPos;
@@ -31,7 +34,7 @@ void main() {
   vec2 site; float h;
   if (uPart < 0.5) {
     // Glass: round the whole habitat, its full length, a little below the land.
-    site = vec2(uFocus.x + position.x * circ * 0.5, position.z * uLength * 0.5);
+    site = vec2(uFocus.x + position.x * circ * 0.5, uFollow * uFocus.y + position.z * uLength * 0.5);
     h = -0.004;
   } else {
     // An end cap: from the rim (h = 0) to the axis.
@@ -175,12 +178,20 @@ export class MegaHabitat {
   private readonly axisMat: THREE.ShaderMaterial;
   private disposed = false;
 
+  /** Closed at both ends (a swarm's habitat), or a tube without end (a topopolis). */
+  private readonly closed: boolean;
+  /** An endless tube's repeat along its length, km (its clouds, as its land, repeat with it). */
+  private readonly tile: number;
+
   constructor(private readonly def: MegaGroundDef, uniforms: Record<string, THREE.IUniform>) {
     const art = habitatArt();
+    this.closed = def.widthKm > 0;
+    this.tile = (4 * 2 * Math.PI * def.radiusKm) / 6;
+    const span = this.closed ? def.widthKm : this.tile * 3;
     const make = (part: number, geo: THREE.BufferGeometry, transparent: boolean): void => {
       const mat = new THREE.ShaderMaterial({
         vertexShader: PART_VERT, fragmentShader: PART_FRAG, side: THREE.DoubleSide, transparent, depthWrite: !transparent,
-        uniforms: { ...uniforms, uLength: { value: def.widthKm }, uPart: { value: part }, uDome: { value: art.dome } },
+        uniforms: { ...uniforms, uLength: { value: span }, uPart: { value: part }, uDome: { value: art.dome }, uFollow: { value: this.closed ? 0 : 1 } },
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.frustumCulled = false;
@@ -192,7 +203,7 @@ export class MegaHabitat {
     // Glass: x round the habitat (-1..1), z along it (-1..1).
     make(0, new THREE.PlaneGeometry(2, 2, 192, 64).rotateX(-Math.PI / 2), true);
     // Caps: x round (-1..1), y from the rim to the axis (0..1).
-    for (const part of [1, 2]) make(part, new THREE.PlaneGeometry(2, 1, 192, 24).translate(0, 0.5, 0), false);
+    if (this.closed) for (const part of [1, 2]) make(part, new THREE.PlaneGeometry(2, 1, 192, 24).translate(0, 0.5, 0), false);
 
     this.group.add(this.hull);
     const R = def.radiusKm, L = def.widthKm;
@@ -204,7 +215,7 @@ export class MegaHabitat {
     this.mats.push(this.mirrorMat);
     const plate = new THREE.PlaneGeometry(R, L * 0.96, 1, 1);
     this.geos.push(plate);
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < (this.closed ? 3 : 0); k++) {
       const m = new THREE.Mesh(plate, this.mirrorMat);
       m.frustumCulled = false;
       this.mirrors.push(m);
@@ -213,7 +224,7 @@ export class MegaHabitat {
     // The light down the axis.
     this.axisMat = new THREE.ShaderMaterial({ vertexShader: MIRROR_VERT, fragmentShader: AXIS_FRAG, uniforms: { uDay: uniforms.uDay } });
     this.mats.push(this.axisMat);
-    const axis = new THREE.CylinderGeometry(0.008, 0.008, L, 8, 1, true).rotateX(Math.PI / 2);
+    const axis = new THREE.CylinderGeometry(0.008 * Math.max(1, R / 8), 0.008 * Math.max(1, R / 8), span, 8, 1, true).rotateX(Math.PI / 2);
     this.geos.push(axis);
     this.hull.add(new THREE.Mesh(axis, this.axisMat));
     // Clouds: placed once the cloud map has loaded.
@@ -230,15 +241,25 @@ export class MegaHabitat {
     const geo = new THREE.InstancedBufferGeometry().copy(puff as THREE.InstancedBufferGeometry);
     puff.dispose();
     const data: number[] = [], seeds: number[] = [];
-    for (let tries = 0; tries < PUFFS * 30 && data.length / 4 < PUFFS; tries++) {
+    // Star Crew's clouds sit 150 to 260 m up in a habitat 0.9 km round: here, in proportion (a
+    // little lower in a wide tube, where the air is no deeper).
+    const k = Math.min(R / 0.9, 12);
+    const along = this.closed ? L * 0.92 : this.tile;
+    const count = this.closed ? PUFFS : PUFFS * 4;
+    for (let tries = 0; tries < count * 30 && data.length / 4 < count; tries++) {
       const u = rng.next(), v = rng.next();
       // Over a land strip (centred on 0, 120 and 240 degrees), clear of its edges.
       const deg = u * 360, off = ((deg % 120) + 120) % 120;
       if (off > 24 && off < 96) continue;
       if (cover(u, v) < 150 / 255) continue;
-      // A puff spans about 2.6 of its size across: 0.4 to 0.8 km wide.
-      data.push((deg * Math.PI) / 180, (v - 0.5) * L * 0.92, rng.range(0.66, 1.14), rng.range(0.15, 0.3));
+      // A puff spans about 2.6 of its size across.
+      data.push((deg * Math.PI) / 180, (v - 0.5) * along, 0.15 * k * rng.range(1, 1.7), 0.035 * k * rng.range(1, 2));
       seeds.push(rng.next());
+    }
+    // An endless tube repeats its tile of clouds before and after.
+    if (!this.closed) {
+      const one = data.length;
+      for (const shift of [-this.tile, this.tile]) for (let i = 0; i < one; i += 4) { data.push(data[i], data[i + 1] + shift, data[i + 2], data[i + 3]); seeds.push(seeds[i / 4]); }
     }
     geo.setAttribute('aPuff', new THREE.InstancedBufferAttribute(new Float32Array(data), 4));
     geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(new Float32Array(seeds), 1));
@@ -253,7 +274,9 @@ export class MegaHabitat {
   /** Turn the hull's parts to the camera's frame (the focus floor at the origin, up the axis) and set the mirrors for the time of day. */
   update(focus: readonly [number, number], day: number): void {
     const R = this.def.radiusKm, L = this.def.widthKm;
-    this.hull.position.set(0, R, -focus[1]);
+    // An endless tube's parts repeat: keep the copy round the camera.
+    const z = this.closed ? focus[1] : focus[1] - Math.round(focus[1] / this.tile) * this.tile;
+    this.hull.position.set(0, R, -z);
     this.hull.rotation.set(0, 0, -focus[0] / R);
     const open = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(OPEN_NIGHT, OPEN_DAY, day));
     this.mirrors.forEach((m, k) => {

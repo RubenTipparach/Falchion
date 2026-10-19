@@ -17,17 +17,17 @@ import { FULL_QUALITY, LITE_QUALITY, SurfaceTerrain } from './SurfaceTerrain';
  * types use (city, machine, circuit and bone patterns, glowing seas, glitter, auroras, storms,
  * haze), the props, the towers, the city's traffic and the props' placement pass.
  *
- * With KHR_parallel_shader_compile (Chrome on Windows has it) the driver compiles them all off
- * the main thread and this only counts them in. Without it, a program's compile finishes when
- * the game first asks how it went, so this asks one program a frame: short stalls behind a
- * progress bar, instead of one long freeze on the first zoom. The materials are kept: three.js
- * deletes a program once no material uses it.
+ * One program at a time: the next is handed to the driver only once the last has finished, with
+ * a pause between. Handing them all over at once (as this first did) had Chrome's GPU process
+ * compile 75 at a time on Windows, which froze every tab, not just the game. With
+ * KHR_parallel_shader_compile the wait is a poll that never blocks; without it, asking for the
+ * link status finishes the one compile then and there, a short stall. The materials are kept:
+ * three.js deletes a program once no material uses it.
  */
 export class ShaderWarmup {
   total = 0;
   ready = 0;
   private readonly keep: THREE.Material[] = [];
-  private pending: Array<{ material: THREE.Material; program: WebGLProgram }> = [];
   private listeners: Array<(ready: number, total: number) => void> = [];
 
   get done(): boolean {
@@ -69,48 +69,63 @@ export class ShaderWarmup {
     if (roads.mesh) scene.add(roads.mesh);
     const flora = new Flora('jungle', terrain, lite, renderer);
     scene.add(flora.group);
-    const materials = [...renderer.compile(scene, camera)];
-    // The placement pass draws into a float target, which its program is keyed by too.
-    const holders = flora.group.children.filter((o) => !o.visible) as THREE.Mesh[];
-    if (holders.length) {
-      const target = new THREE.WebGLRenderTarget(4, 4, { type: THREE.FloatType, depthBuffer: false });
-      const before = renderer.getRenderTarget();
-      renderer.setRenderTarget(target);
-      const placeScene = new THREE.Scene();
-      for (const h of holders) placeScene.add(new THREE.Mesh(h.geometry, h.material));
-      materials.push(...renderer.compile(placeScene, camera));
-      renderer.setRenderTarget(before);
-      target.dispose();
-    }
-    // Programs do not need the geometry: free it, keep the materials.
-    scene.traverse((o) => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); });
-    const props = renderer.properties as unknown as { get(m: THREE.Material): { currentProgram?: { program: WebGLProgram } } };
-    this.pending = [];
-    for (const m of new Set(materials)) {
-      this.keep.push(m);
-      const p = props.get(m).currentProgram?.program;
-      if (p) this.pending.push({ material: m, program: p });
-    }
-    this.total = this.pending.length;
+    // Every object that draws (its program can depend on the object as well as the material).
+    const jobs: Array<{ object: THREE.Object3D; target: boolean }> = [];
+    const holders = new Set(flora.group.children.filter((o) => !o.visible));
+    scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material;
+      if (!m) return;
+      this.keep.push(...(Array.isArray(m) ? m : [m]));
+      // The placement pass draws into a float target, which its program is keyed by too.
+      jobs.push({ object: o, target: holders.has(o) });
+    });
+    this.total = jobs.length;
     this.ready = 0;
     this.emit();
     const gl = renderer.getContext();
     const parallel = renderer.extensions.has('KHR_parallel_shader_compile');
     const COMPLETION_STATUS = 0x91b1;
+    const props = renderer.properties as unknown as { get(m: THREE.Material): { currentProgram?: { program: WebGLProgram } } };
+    const lights = new THREE.Scene();
+    const target = new THREE.WebGLRenderTarget(4, 4, { type: THREE.FloatType, depthBuffer: false });
+    const finished = new Set<WebGLProgram>();
+    let waiting: WebGLProgram[] = [];
+    let handed = 0;
+    // Compile only while the tab is shown and the player is not in the middle of moving the view.
+    let touched = 0;
+    const touch = () => { touched = performance.now(); };
+    for (const e of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchmove']) window.addEventListener(e, touch, { passive: true });
+    const later = (fn: () => void, ms: number) => setTimeout(() => (document.hidden || performance.now() - touched < 1200 ? later(fn, 400) : fn()), ms);
     const step = () => {
-      if (parallel) {
-        // Count in what the driver has finished; never block.
-        this.pending = this.pending.filter((x) => !gl.getProgramParameter(x.program, COMPLETION_STATUS));
-      } else {
-        // Finish one compile a frame (asking for the link status waits for it).
-        const x = this.pending.shift();
-        if (x) gl.getProgramParameter(x.program, gl.LINK_STATUS);
+      // Wait out the programs last handed over.
+      if (parallel) waiting = waiting.filter((p) => !gl.getProgramParameter(p, COMPLETION_STATUS));
+      else for (const p of waiting.splice(0)) gl.getProgramParameter(p, gl.LINK_STATUS);
+      if (waiting.length) return later(step, 100);
+      // Hand over the next new program; materials whose program is already built count straight in.
+      while (jobs.length && !waiting.length) {
+        const job = jobs.shift()!;
+        const before = renderer.getRenderTarget();
+        if (job.target) renderer.setRenderTarget(target);
+        const materials = renderer.compile(job.object, camera, lights);
+        renderer.setRenderTarget(before);
+        for (const m of materials) {
+          const p = props.get(m).currentProgram?.program;
+          if (p && !finished.has(p)) { finished.add(p); waiting.push(p); }
+        }
+        handed++;
       }
-      this.ready = this.total - this.pending.length;
+      // A job counts once its program is built.
+      this.ready = waiting.length ? handed - 1 : handed;
       this.emit();
-      if (this.pending.length) setTimeout(step, parallel ? 100 : 30);
+      if (jobs.length || waiting.length) later(step, waiting.length ? 150 : 0);
+      else {
+        target.dispose();
+        for (const e of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchmove']) window.removeEventListener(e, touch);
+        // Programs do not need the geometry: free it, keep the materials.
+        scene.traverse((o) => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); });
+      }
     };
-    setTimeout(step, 50);
+    later(step, 50);
   }
 
   private emit(): void {

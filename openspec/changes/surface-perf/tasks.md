@@ -15,3 +15,4 @@
 - [x] 4.2 Close-up compiled in the background before it is shown; flora settles its placement path up front and puts the placement shader in the scene
 - [x] 4.3 The placed flora shader leaves the terrain out
 - [x] 4.4 Shader warm-up at start-up (ShaderWarmup) with a progress pill (LoadingPill); "Building the surface" while a close-up builds
+- [x] 4.5 Warm-up compiles one program at a time, pausing while the tab is hidden or the view is being moved (all at once froze Chrome)

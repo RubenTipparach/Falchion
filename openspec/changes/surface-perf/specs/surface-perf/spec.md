@@ -29,8 +29,15 @@ No shader loop SHALL take screen-space derivatives (`fwidth`, `dFdx`, `dFdy`), d
 - **THEN** the game keeps drawing while its shaders compile, and a pixel far from every city does not run the city code
 
 ### Requirement: Surface shaders are prepared up front, behind a progress bar
-Shortly after the game starts it SHALL compile every shader a close-up can use (one terrain per mix of shader switches the planet types use, the cities, roads, traffic and props, and the props' placement pass) and the system view's planet spheres, and SHALL show a progress bar while it does. Without parallel compile it SHALL finish one program at a time, so no single stall is long. While a close-up builds, a small bar SHALL say so.
+Shortly after the game starts it SHALL compile every shader a close-up can use (one terrain per mix of shader switches the planet types use, the cities, roads, traffic and props, and the props' placement pass) and the system view's planet spheres, and SHALL show a progress bar while it does. While a close-up builds, a small bar SHALL say so.
 
 #### Scenario: First zoom onto a planet after start-up
 - **WHEN** the player zooms onto a colony once the bar has finished
 - **THEN** no close-up shader is compiled during the landing
+
+### Requirement: The warm-up never floods the driver
+The warm-up SHALL hand the driver one program at a time, the next only once the last has finished. It SHALL pause while the tab is hidden or the player is moving the view. Handing all of them over at once froze every Chrome tab on Windows.
+
+#### Scenario: The warm-up does not freeze the browser
+- **WHEN** the warm-up runs on Chrome on Windows
+- **THEN** at most one of its programs is compiling at any moment, and other tabs stay responsive

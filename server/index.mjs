@@ -23,6 +23,7 @@ import { createLocks } from './locks.mjs';
 import { oncePerTick } from './markets.mjs';
 import { createStore, importLegacySaves } from './store.mjs';
 import { createSharedWorld } from './world.mjs';
+import { clientKey, createCached, createConnectionCap, createRateLimiter } from './throttle.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const STATIC_DIR = resolve(process.env.STATIC_DIR ?? join(here, '..', 'dist'));
@@ -91,6 +92,36 @@ const admin = createAdmin({
 
 function json(res, status, body) {
   send(res, status, JSON.stringify(body), { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+}
+
+// ── Limits (server/throttle.mjs) ──
+// Every client (a signed-in player, else an address) gets a bucket for all its API calls, and a
+// smaller one for the reads that cost the most; a few live streams each; and the dearest reads
+// are cached briefly, so a hundred players polling cost about what one does.
+export const limits = {
+  /** All of /api and /auth: bursts of 120, then 12 a second. */
+  all: createRateLimiter({ capacity: 120, perSecond: 12 }),
+  /** The player list, the shared world, the activity feed, your save: bursts of 12, then one every 2 s. */
+  reads: createRateLimiter({ capacity: 12, perSecond: 0.5 }),
+  /** News a player reports (POST /api/events): bursts of 10, then one every 2 s. */
+  reports: createRateLimiter({ capacity: 10, perSecond: 0.5 }),
+  /** Open live streams (the world clock, chat) per client: a few tabs' worth. */
+  streams: createConnectionCap(6),
+};
+const HEAVY_READS = new Set(['/api/players', '/api/world', '/api/activity', '/api/save', '/api/online']);
+
+function tooMany(res, retryAfter) {
+  send(res, 429, JSON.stringify({ error: 'too many requests: slow down a moment', retryAfter }), { 'Content-Type': 'application/json', 'Retry-After': String(retryAfter), 'Cache-Control': 'no-store' });
+}
+
+/** Every empire's public view, read from the database at most every 5 s (a new empire refreshes it). */
+const playersCache = createCached({ ttlMs: 5_000, compute: () => store.players() });
+
+/** The shared world as JSON, made once per version of it (it is replaced, never changed in place). */
+let worldJson = { world: null, text: '' };
+function sharedWorldJson(world) {
+  if (worldJson.world !== world) worldJson = { world, text: JSON.stringify(world) };
+  return worldJson.text;
 }
 
 async function readJson(req, limit) {
@@ -188,7 +219,7 @@ export function publicView(p) {
 async function api(req, res, pathname) {
   const user = auth.userFrom(req);
   // The shared world is public: guests see the same asteroid fields and NPCs.
-  if (pathname === '/api/world' && req.method === 'GET') return json(res, 200, await sharedWorld.get());
+  if (pathname === '/api/world' && req.method === 'GET') return send(res, 200, sharedWorldJson(await sharedWorld.get()), { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   if (pathname === '/api/me') return user ? json(res, 200, { ...user, admin: admins.has(user.id) }) : json(res, 401, { authEnabled: auth.enabled, login: '/auth/discord' });
   if (!user) return json(res, 401, { error: 'sign in with Discord first' });
   if (pathname === '/api/save' && req.method === 'GET') {
@@ -207,6 +238,7 @@ async function api(req, res, pathname) {
         const pub = publicView(body.public);
         const updatedAt = Date.now();
         await store.save(user.id, { player: user, save: body.save, public: pub, updatedAt });
+        playersCache.invalidate();
         playerFeed.publish({ ...pub, id: user.id, name: user.name, avatar: user.avatar ?? null, updatedAt });
         // A log failure never fails the founding.
         events.found(user.id, { worldTime: worldTime(), turn: body.save.turn, at: updatedAt }).catch((err) => console.error(`event log: ${err?.message ?? err}`));
@@ -233,7 +265,7 @@ async function api(req, res, pathname) {
     }
   }
   if (pathname === '/api/players' && req.method === 'GET') {
-    const players = (await store.players()).filter((p) => p.id !== user.id);
+    const players = (await playersCache.get()).filter((p) => p.id !== user.id);
     return json(res, 200, players);
   }
   return json(res, 404, { error: 'not found' });
@@ -303,7 +335,10 @@ export const commands = createCommandService({
 // Proxies drop idle streams; a comment every 20 s keeps them open.
 setInterval(() => { for (const res of listeners) res.write(': keep-alive\n\n'); }, 20_000).unref?.();
 
-function streamTicks(req, res) {
+function streamTicks(req, res, key) {
+  const release = limits.streams.claim(`ticks:${key}`);
+  if (!release) return tooMany(res, 30);
+  req.on('close', release);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write(`retry: 3000\nevent: tick\ndata: ${JSON.stringify(clockInfo())}\n\n`);
   listeners.add(res);
@@ -363,11 +398,24 @@ async function serveStatic(pathname, res) {
 export const server = createServer(async (req, res) => {
   const { pathname } = new URL(req.url ?? '/', 'http://localhost');
   if (pathname === '/healthz') return send(res, 200, 'ok', { 'Content-Type': 'text/plain' });
+  let key = '';
+  if (pathname.startsWith('/api/') || pathname.startsWith('/auth/')) {
+    key = clientKey(req, auth.userFrom(req));
+    const wait = limits.all.take(key)
+      || (HEAVY_READS.has(pathname) && req.method === 'GET' ? limits.reads.take(key) : 0)
+      || (pathname === '/api/events' && req.method === 'POST' ? limits.reports.take(key) : 0);
+    if (wait) return tooMany(res, wait);
+    if (pathname === '/api/chat/stream') {
+      const release = limits.streams.claim(`chat:${key}`);
+      if (!release) return tooMany(res, 30);
+      req.on('close', release);
+    }
+  }
   if (pathname === '/api/info') {
     return send(res, 200, JSON.stringify({ name: 'falchion', version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled }), { 'Content-Type': 'application/json' });
   }
   if (pathname === '/api/clock') return send(res, 200, JSON.stringify(clockInfo()), { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-  if (pathname === '/api/ticks') return streamTicks(req, res);
+  if (pathname === '/api/ticks') return streamTicks(req, res, key);
   if (pathname === '/auth/discord') return auth.enabled ? auth.login(res, new URL(req.url ?? '/', 'http://localhost').searchParams.get('next') ?? '/') : send(res, 404, 'Discord sign-in is not configured on this server (see docs/discord.md).');
   if (await admin(req, res, pathname)) return;
   if (await chat.handle(req, res, pathname)) return;

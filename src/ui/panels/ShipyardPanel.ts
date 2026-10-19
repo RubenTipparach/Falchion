@@ -16,7 +16,7 @@ import { buildYears, logisticsOf } from '../../content/logistics';
 import { jobProgress } from '../../core/construction/Construction';
 import { formatDuration } from '../../core/time/WorldTime';
 import { CLOCK } from '../../app/WorldClock';
-import { clear, fmt, h } from '../dom';
+import { clear, fmt, h, keepScroll } from '../dom';
 import { icon, resourceIcon } from '../icons';
 import { thumb } from '../thumbs';
 import { COMMERCE, COMPANY_KINDS } from '../../content/commerce';
@@ -131,27 +131,48 @@ export class ShipyardPanel extends Drawer {
     this.camera.position.copy(sphere.center).addScaledVector(dir, sphere.radius * 2.5);
   }
 
+  /** The class buttons, built once and then updated in place (a rebuild emptied the list and lost its scroll). */
+  private classButtons: Map<string, { btn: HTMLElement; count: HTMLElement }> | null = null;
+
   private renderClasses(): void {
     const s = this.store.state;
-    clear(this.classesEl);
-    for (const [role, label] of ROLE_ORDER) {
-      this.classesEl.append(h('h4', {}, label));
-      for (const c of SHIP_CLASSES.filter((x) => x.role === role)) {
-        const unlocked = this.q.isUnlocked(c);
-        const n = s.economy.roster[c.id] ?? 0;
-        this.classesEl.append(h('button', {
-          class: `class-btn ${s.shipyardClass === c.id ? 'active' : ''} ${unlocked ? '' : 'locked'}`,
-          style: `--doc:${DOCTRINES[c.doctrine].color}`,
-          onclick: () => this.actions.selectClass(c.id),
-        },
-        thumb('ship', c.id, 64),
-        h('span', { class: 'cname' }, h('span', { class: 'doc-dot' }), c.name),
-        h('span', { class: 'ccount' }, unlocked ? (n ? `×${n}` : '') : icon('lock'))));
+    if (!this.classButtons) {
+      this.classButtons = new Map();
+      for (const [role, label] of ROLE_ORDER) {
+        this.classesEl.append(h('h4', {}, label));
+        for (const c of SHIP_CLASSES.filter((x) => x.role === role)) {
+          const count = h('span', { class: 'ccount' });
+          const btn = h('button', { class: 'class-btn', style: `--doc:${DOCTRINES[c.doctrine].color}`, onclick: () => this.actions.selectClass(c.id) },
+            thumb('ship', c.id, 64),
+            h('span', { class: 'cname' }, h('span', { class: 'doc-dot' }), c.name),
+            count);
+          this.classesEl.append(btn);
+          this.classButtons.set(c.id, { btn, count });
+        }
+      }
+    }
+    for (const c of SHIP_CLASSES) {
+      const el = this.classButtons.get(c.id);
+      if (!el) continue;
+      const unlocked = this.q.isUnlocked(c);
+      const n = s.economy.roster[c.id] ?? 0;
+      el.btn.classList.toggle('active', s.shipyardClass === c.id);
+      el.btn.classList.toggle('locked', !unlocked);
+      const text = unlocked ? (n ? `×${n}` : '') : 'lock';
+      if (el.count.dataset.v !== text) {
+        el.count.dataset.v = text;
+        clear(el.count);
+        if (unlocked) el.count.textContent = text;
+        else el.count.append(icon('lock'));
       }
     }
   }
 
   private renderInfo(): void {
+    keepScroll(this.infoEl, () => this.buildInfo());
+  }
+
+  private buildInfo(): void {
     const s = this.store.state;
     const c = SHIP_CLASSES.find((x) => x.id === s.shipyardClass)!;
     const unlocked = this.q.isUnlocked(c);
@@ -229,6 +250,10 @@ export class ShipyardPanel extends Drawer {
   }
 
   private renderControls(): void {
+    keepScroll(this.controlsEl, () => this.buildControls());
+  }
+
+  private buildControls(): void {
     const d = this.q.designFor(this.store.state.shipyardClass);
     clear(this.controlsEl);
     // Your race's style is always yours; research unlocks the others to build in or mix in.

@@ -86,9 +86,11 @@ const ROCK_VERT = /* glsl */ `
     vLocal = position;
     // The template's axes as normals turn (for the detail's slope).
     mat3 nm = transpose(inverse(m));
-    vBX = rotateAxis(nm[0], aSpin.xyz, tumble);
-    vBY = rotateAxis(nm[1], aSpin.xyz, tumble);
-    vBZ = rotateAxis(nm[2], aSpin.xyz, tumble);
+    // Unit length: the normal matrix carries 1/size (a rock is a thousandth of a light year), and
+    // left in, every bump came out a thousand times too steep.
+    vBX = normalize(rotateAxis(nm[0], aSpin.xyz, tumble));
+    vBY = normalize(rotateAxis(nm[1], aSpin.xyz, tumble));
+    vBZ = normalize(rotateAxis(nm[2], aSpin.xyz, tumble));
     gl_Position = projectionMatrix * modelViewMatrix * vec4(world, 1.0);
   }
 `;
@@ -97,6 +99,7 @@ const ROCK_FRAG = /* glsl */ `
   ${NOISE_GLSL}
   ${RELIEF_GLSL}
   uniform float uKind;
+  uniform float uBump;
   uniform vec3 uStar;
   uniform vec3 uGlow;
   uniform float uGlowAmount;
@@ -121,7 +124,7 @@ const ROCK_FRAG = /* glsl */ `
    */
   float rockHeight(vec3 q) {
     if (uKind < 0.5) return craterLayer(q * 1.4, 11.0, 0.5) + 0.45 * craterLayer(q * 3.2, 37.0, 0.6) + snoise(q * 4.0) * 0.03;
-    if (uKind < 1.5) return snoise(q * 2.0) * 0.03 - (1.0 - smoothstep(0.0, 0.04, abs(snoise(q * 1.6)))) * 0.03;
+    if (uKind < 1.5) return snoise(q * 1.6) * 0.025 - (1.0 - smoothstep(0.0, 0.12, abs(snoise(q * 1.3)))) * 0.012;
     return 0.0;
   }
   float rockAlbedo(vec3 q, float h) {
@@ -132,7 +135,7 @@ const ROCK_FRAG = /* glsl */ `
     }
     if (uKind < 1.5) {
       float frost = smoothstep(0.2, 0.8, snoise(q * 5.0 + vec3(9.0)));
-      return 1.0 + frost * 0.15 + h * 5.0 + mott * 0.06;
+      return 1.0 + frost * 0.12 + h * 3.0 + mott * 0.05;
     }
     // Growth lines along the shard, and a cloudy core.
     float lines = smoothstep(0.35, 0.5, abs(fract(q.y * 3.5 + snoise(q * 0.7) * 0.25) - 0.5));
@@ -150,9 +153,11 @@ const ROCK_FRAG = /* glsl */ `
       // The height's slope in the rock's frame, turned with the rock: tilts the facet's normal.
       const float e = 0.02;
       vec3 g = vec3(rockHeight(q + vec3(e, 0.0, 0.0)), rockHeight(q + vec3(0.0, e, 0.0)), rockHeight(q + vec3(0.0, 0.0, e))) - h;
-      vec3 gw = (g.x * vBX + g.y * vBY + g.z * vBZ) / e * 2.0;
+      // The height's slope along the surface (per unit of the rock's own size): a gentle tilt, so
+      // the star still lights one side and leaves the other dark.
+      vec3 gw = (g.x * vBX + g.y * vBY + g.z * vBZ) / e;
       gw -= n * dot(gw, n);
-      n = normalize(n - gw * 0.25 * fade);
+      n = normalize(n - gw * uBump * fade);
     }
     vec3 l = normalize(vL);
     vec3 v = normalize(vV);
@@ -329,6 +334,7 @@ export class AsteroidBelt {
         uTime: { value: 0 },
         uRate: { value: ORBIT_RATE },
         uKind: { value: field.resource === 'metals' ? 0 : field.resource === 'gases' ? 1 : 2 },
+        uBump: { value: field.resource === 'metals' ? 0.5 : 0.3 },
         uCam: { value: new THREE.Vector3() },
         uStar: { value: starLight.clone() },
         uGlow: { value: new THREE.Color(look.glow) },

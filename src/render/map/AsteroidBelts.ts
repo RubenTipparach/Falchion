@@ -337,8 +337,26 @@ export class AsteroidBelt {
     band.renderOrder = 1;
     this.object3d.add(band);
 
+    // A soft outline over the belt when it is hovered or its card is open (change asteroid-assign).
+    this.outlineMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(look.glow).lerp(new THREE.Color('#ffffff'), 0.4), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    this.outline = new THREE.Mesh(new THREE.RingGeometry(place.radius - place.halfWidth * 1.15, place.radius + place.halfWidth * 1.15, 192, 1), this.outlineMat);
+    this.outline.rotation.x = -Math.PI / 2;
+    this.outline.raycast = () => {};
+    this.outline.renderOrder = 1;
+    this.outline.visible = false;
+    this.object3d.add(this.outline);
+
     this.radius = place.radius;
     this.halfWidth = place.halfWidth;
+  }
+
+  private readonly outline: THREE.Mesh;
+  private readonly outlineMat: THREE.MeshBasicMaterial;
+
+  /** Highlight the belt: 0 none, 1 hovered, 2 selected (its card is open). */
+  setHighlight(level: 0 | 1 | 2): void {
+    this.outlineMat.opacity = level === 2 ? 0.16 : level === 1 ? 0.09 : 0;
+    this.outline.visible = level > 0;
   }
 
   /** Where the belt's label goes (in the star's frame): on its near edge, along `toward` (unit, in the plane). */
@@ -366,5 +384,7 @@ export class AsteroidBelt {
   dispose(): void {
     this.rocks.dispose();
     this.tails?.dispose();
+    this.outline.geometry.dispose();
+    this.outlineMat.dispose();
   }
 }

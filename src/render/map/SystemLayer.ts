@@ -151,6 +151,18 @@ export class SystemLayer implements MapLayer {
     return best?.field ?? null;
   }
 
+  /** The asteroid field under the pointer, and the one whose card is open (change asteroid-assign). */
+  private fieldHover: string | null = null;
+  private fieldSelected: string | null = null;
+
+  setFieldHover(fieldId: string | null): void {
+    this.fieldHover = fieldId;
+  }
+
+  setFieldSelected(fieldId: string | null): void {
+    this.fieldSelected = fieldId;
+  }
+
   setHover(planetId: string | null): void {
     this.hoverId = planetId;
   }
@@ -260,6 +272,8 @@ export class SystemLayer implements MapLayer {
     TMP.normalize().applyAxisAngle(UP, 0.5);
     for (const b of sys.belts) {
       b.belt.update(t);
+      const id = b.belt.field.id;
+      b.belt.setHighlight(id === this.fieldSelected ? 2 : id === this.fieldHover ? 1 : 0);
       b.belt.labelAt(TMP, b.label.position);
       b.label.visible = showLabels;
       b.label.element.style.opacity = labelFade;

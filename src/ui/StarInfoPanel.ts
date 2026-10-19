@@ -21,6 +21,7 @@ import { collectWithFx } from './collectFx';
 import { clear, fmt, h, touchFirst } from './dom';
 import { icon, resourceIcon } from './icons';
 import { FREIGHTER } from '../core/economy/Trade';
+import type { Squadron } from '../core/combat/Combat';
 import { populationOf } from '../core/economy/Population';
 import { describeStar, STAR_KINDS } from '../content/stars';
 import { broadcastOf } from '../core/galaxy/Planets';
@@ -84,7 +85,7 @@ export class StarInfoPanel {
       return this.renderPlanet(s, star, s.selectedPlanet);
     }
     const field = s.selectedField ? this.q.fieldReport(star).find((f) => f.field.id === s.selectedField) : null;
-    if (field) return this.renderField(s, star, field);
+    if (field) return this.renderField(star, field);
     const d = this.describe(star);
     const isHome = star.id === s.home.id;
     const here = this.q.groupsAt(star).filter((g) => g.id !== 'dock' || isHome);
@@ -127,18 +128,20 @@ export class StarInfoPanel {
 
   /**
    * An asteroid field's card: what it holds and when it is full again, the mining ships working it
-   * and what they take a year, and sending idle miners of its kind from the dock.
+   * and what they take a year, and every group of miners of its kind, each with a button that sends
+   * it to work this field (change asteroid-assign).
    */
-  private renderField(s: GameState, star: StarSystem, f: FieldReport): void {
+  private renderField(star: StarSystem, f: FieldReport): void {
     const { field, left, fullIn } = f;
     const res = RESOURCES.find((r) => r.id === field.resource)!;
-    const isHome = star.id === s.home.id;
+    const mines = (x: Squadron) => x.count > 0 && minesOf(x.classId) === field.resource;
     // Miners of this resource working here (at home that includes the dock's).
-    const here = this.q.groupsAt(star).flatMap((g) => g.ships).filter((x) => minesOf(x.classId) === field.resource);
+    const here = this.q.groupsAt(star).flatMap((g) => g.ships).filter(mines);
     const take = here.reduce((n, x) => n + x.count * this.q.minePerYear(x.classId), 0);
-    const idle = isHome ? [] : this.q.docked().filter((x) => minesOf(x.classId) === field.resource && x.count > 0);
     const pct = Math.round((100 * left) / field.capacity);
     const kinds = SHIP_CLASSES.filter((c) => c.mines === field.resource).map((c) => c.name).join(', ');
+    // Every group with miners of this resource: the dock's and each fleet's (not a company's).
+    const crews = this.q.groups().filter((g) => !g.company && g.ships.some(mines));
     this.el.append(
       h('header', {},
         resourceIcon(field.resource, 22),
@@ -151,15 +154,33 @@ export class StarInfoPanel {
         h('dt', {}, 'Mining here'), h('dd', {}, here.length ? `${shipsText(here)} · ${fmt(take)} / yr` : 'No miners'),
         h('dt', {}, 'Mined by'), h('dd', {}, kinds || '—')),
       take > 0 && left > 0 ? h('p', { class: 'small muted' }, `At this rate the field lasts about ${formatDuration(Math.ceil(left / take), CLOCK)} (it refills over a day).`) : '',
-      isHome ? h('p', { class: 'small muted' }, 'Mining ships at your home dock work your home system\'s fields every year.') : '',
+      h('div', { class: 'field-crews' },
+        h('span', { class: 'eyebrow' }, 'Assign miners'),
+        crews.length
+          ? h('ul', { class: 'crew-list' }, ...crews.map((g) => this.crewRow(g, star, field.id, mines)))
+          : h('p', { class: 'small muted' }, `No ${res.name.toLowerCase()} miners: build a ${kinds.split(', ')[0] || 'mining ship'} in the Shipyard.`)),
       h('div', { class: 'actions' },
-        !isHome ? h('button', {
-          class: 'btn primary', disabled: !idle.length,
-          title: idle.length ? `Send ${shipsText(idle)} from the dock to mine here` : `No idle ${res.name.toLowerCase()} miners at the dock: build a ${kinds.split(', ')[0] ?? 'mining ship'} in the Shipyard`,
-          onclick: () => this.actions.formFleet(idle, star, `${res.name} miners`),
-        }, icon('fleet'), idle.length ? ` Send miners (${idle.reduce((n, x) => n + x.count, 0)})` : ' No idle miners') : '',
         h('button', { class: 'btn', onclick: () => this.actions.focusField(null, null) }, 'Back to system')),
     );
+  }
+
+  /** One group of miners on a field's card: where it is, and sending it to work this field. */
+  private crewRow(g: FleetGroup, star: StarSystem, fieldId: string, mines: (x: Squadron) => boolean): HTMLElement {
+    const ships = g.ships.filter(mines);
+    const n = ships.reduce((t, x) => t + x.count, 0);
+    const dock = g.id === 'dock';
+    const onIt = !dock && g.orders?.mineField === fieldId;
+    const there = g.star?.id === star.id;
+    const where = dock ? 'At the dock' : g.stationed ? (there ? `At ${star.name}` : `At ${g.star?.name ?? 'sea'}`) : `Heading to ${g.star?.name ?? 'a point in space'}`;
+    const state = onIt ? (there && g.stationed ? 'Mining this field' : 'On its way here') : where;
+    return h('li', { class: `crew-row ${onIt ? 'on' : ''}` },
+      h('span', { class: 'crew-name' }, h('b', {}, dock ? 'Dock miners' : g.name), h('small', {}, `${shipsText(ships)} · ${state}`)),
+      onIt ? h('span', { class: 'chip active' }, '✓ Assigned')
+        : h('button', {
+          class: 'btn primary',
+          title: dock ? `${n} miner${n === 1 ? '' : 's'} leave the dock as a new flotilla to mine this field` : `${g.name} sets course for ${star.name} and mines this field first`,
+          onclick: () => this.actions.mineField(g.id, fieldId),
+        }, icon('fleet'), dock ? ` Send ${n}` : ' Assign'));
   }
 
   /** Asteroid fields: what mining ships here can mine, how much is left, and when it refills. */
@@ -288,6 +309,7 @@ export class StarInfoPanel {
           this.orderChip(group, 'autoReturn', 'Return to resupply'),
           minedBy(group.ships, minesOf).length ? this.orderChip(group, 'autoMine', 'Auto-mine') : '',
           this.stanceChip(group)),
+        this.fieldView(group),
         this.cargoView(group, info.at),
         info.surveying ? h('p', { class: 'small' }, `Surveying ${info.surveying.name} this year`) : '',
         info.plan.length ? h('div', { class: 'survey-plan' }, h('span', { class: 'eyebrow' }, 'Survey route'),
@@ -360,6 +382,20 @@ export class StarInfoPanel {
     if (!hasWarships(g.ships)) return null;
     const on = g.orders?.stance === 'aggressive';
     return h('button', { class: `chip ${on ? 'active' : ''}`, title: 'Aggressive: attack the fleets of empires you are at war with when they meet this one', 'aria-pressed': String(on), onclick: () => this.actions.setOrders(g.id, { ...g.orders, stance: on ? undefined : 'aggressive' }) }, on ? '✓ Aggressive' : 'Aggressive');
+  }
+
+  /** The asteroid field a fleet was sent to mine, linking to its card (change asteroid-assign). */
+  private fieldView(g: FleetGroup): HTMLElement | string {
+    const id = g.orders?.mineField;
+    const star = g.star;
+    if (!id || !star) return '';
+    const f = this.q.fieldReport(star).find((x) => x.field.id === id);
+    if (!f) return '';
+    const res = RESOURCES.find((r) => r.id === f.field.resource);
+    return h('p', { class: 'small' }, resourceIcon(f.field.resource, 14),
+      ` ${g.stationed ? (f.left > 0 ? 'Mining' : 'Mined out:') : 'Heading to mine'} the `,
+      h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.actions.focusField(star, id); } }, `${res?.name ?? f.field.resource} field`),
+      ` at ${star.name}${g.stationed && f.left <= 0 ? ', working its other fields until it refills' : ''}`);
   }
 
   private orderChip(g: FleetGroup, key: 'autoExplore' | 'autoReturn' | 'autoMine', label: string): HTMLElement {

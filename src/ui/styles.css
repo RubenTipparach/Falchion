@@ -997,6 +997,14 @@ img.thumb:not(.ready) { animation: thumb-wait 1.2s ease-in-out infinite alternat
 button.field-row { width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 4px; }
 button.field-row:hover { background: var(--raise); }
 .field-bar.big { display: block; height: 6px; margin: 4px 0 10px; }
+/* Assigning miners to an asteroid field (change asteroid-assign). */
+.field-crews { margin: 8px 0 4px; }
+.crew-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.crew-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
+.crew-row.on { background: rgba(120, 200, 140, 0.1); }
+.crew-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.crew-row .btn { padding: 3px 9px; font-size: 12px; flex: none; }
+.crew-name small { color: var(--muted); }
 
 /* ── Commerce: exchanges, tariffs, companies (change commerce) ── */
 .exchange-pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }

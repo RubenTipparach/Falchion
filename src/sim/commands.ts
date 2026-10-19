@@ -64,6 +64,8 @@ const hex: ArgCodec<Hex> = {
     return h && Number.isInteger(h.q) && Number.isInteger(h.r) && Math.abs(h.q) < 1e6 && Math.abs(h.r) < 1e6 ? { q: h.q, r: h.r } : fail('bad hex');
   },
 };
+/** An asteroid field: `${starId}#n` (or a home belt's `${starId}#home-…`). */
+const fieldId: ArgCodec<string> = { encode: (v) => v, decode: (raw) => (typeof raw === 'string' && /^[\w:,./+-]{1,80}#[\w-]{1,24}$/.test(raw) ? raw : fail('bad field')) };
 /** Another player's fleet, as `${ownerId}:${fleetId}`. */
 const fleetKey: ArgCodec<string> = { encode: (v) => v, decode: (raw) => (typeof raw === 'string' && /^[\w-]{1,40}:[\w:,./+-]{1,80}$/.test(raw) ? raw : fail('bad fleet')) };
 const playerId: ArgCodec<string> = { encode: (v) => v, decode: (raw) => (typeof raw === 'string' && /^[\w-]{1,40}$/.test(raw) ? raw : fail('bad player')) };
@@ -127,6 +129,7 @@ export const COMMANDS = {
   moveFleet: [id, star, optional(bool)],
   moveFleetToHex: [id, hex, string(120), optional(bool)],
   setOrders: [id, orders],
+  mineField: [id, fieldId],
   returnHome: [id],
   dockFleet: [id],
   explore: [planet, optional(bool)],

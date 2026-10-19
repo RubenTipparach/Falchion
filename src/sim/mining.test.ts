@@ -99,3 +99,45 @@ describe('mining ships mine asteroid fields', () => {
     expect(Object.keys(after.asteroids).some((id) => id.startsWith(state.home.id))).toBe(true);
   });
 });
+
+describe('assigning miners to one field (change asteroid-assign)', () => {
+  /** A star near home with two or more fields of a resource. */
+  function starWithTwo(near: StarSystem, resource: string): StarSystem {
+    for (let d = 2; d < 300; d += 3) for (const [dq, dr] of [[d, 0], [0, d], [-d, d], [-d, 0], [0, -d], [d, -d]]) {
+      const s = galaxy.nearestStar({ q: near.hex.q + dq, r: near.hex.r + dr }, 2);
+      if (s && s.id !== near.id && fieldsOf(s, galaxy.params.seed).filter((f) => f.resource === resource).length >= 2) return s;
+    }
+    throw new Error('no such star');
+  }
+
+  it('miners sent to a field mine that field and leave the system\'s others alone', () => {
+    const link = snapshotLink(EMPTY_WORLD);
+    const sim = empire('555555555555555555', link);
+    const star = starWithTwo(sim.state.home, 'metals');
+    const [, target] = fieldsOf(star, galaxy.params.seed).filter((f) => f.resource === 'metals');
+    sim.store.update((s) => ({ economy: { ...s.economy, roster: { ...s.economy.roster, prospector: 6 } } }));
+    sim.mineField('dock', target.id);
+    const fleet = sim.state.fleets.at(-1)!;
+    expect(sim.state.loadouts[fleet.id].orders?.mineField).toBe(target.id);
+    expect(fleet.movement.route.at(-1)).toEqual(star.hex);
+    // Arrive at once, then mine a year.
+    sim.store.update((s) => ({ fleets: s.fleets.map((f) => (f.id === fleet.id ? { ...f, movement: { ...f.movement, route: [star.hex], departTurn: s.turn, from: undefined } } : f)) }));
+    sim.skipYear();
+    const mined = link.effects.filter((e) => e.kind === 'mined' && e.field.starId === star.id);
+    expect(mined.length).toBeGreaterThan(0);
+    expect(mined.every((e) => e.kind === 'mined' && e.field.id === target.id)).toBe(true);
+    // Its orders survive other order changes.
+    sim.setOrders(fleet.id, { autoMine: true });
+    expect(sim.state.loadouts[fleet.id].orders?.mineField).toBe(target.id);
+  });
+
+  it('only miners of the field\'s resource can be sent, and unknown fields are ignored', () => {
+    const sim = empire('666666666666666666', snapshotLink(EMPTY_WORLD));
+    const star = starWithTwo(sim.state.home, 'crystals');
+    const crystals = fieldsOf(star, galaxy.params.seed).find((f) => f.resource === 'crystals')!;
+    const before = sim.state.fleets.length;
+    sim.mineField('dock', crystals.id); // the dock has no crystal drillers
+    sim.mineField('dock', `${star.id}#99`);
+    expect(sim.state.fleets.length).toBe(before);
+  });
+});

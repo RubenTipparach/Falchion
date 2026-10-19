@@ -11,6 +11,8 @@ export interface FleetOrders {
   readonly autoReturn?: boolean;
   /** Mining ships move on to the nearest asteroid field of their resource when theirs runs dry. */
   readonly autoMine?: boolean;
+  /** Mining ships work this asteroid field (its id) first while on station at its star (change asteroid-assign). */
+  readonly mineField?: string;
   /** Trade run: load goods at `from` (a colony system), sell them at `to` (a market), repeat. */
   readonly trade?: { readonly from: string; readonly to: string };
   /** Attacks other empires' fleets it meets at sea (absent = passive). Only fleets with warships may be aggressive. */

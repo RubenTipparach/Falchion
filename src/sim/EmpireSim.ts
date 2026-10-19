@@ -150,6 +150,9 @@ const RELATIONS_EVERY = 5;
 const RELATIONS_KEEP = 120;
 
 const poolKey = (starId: string, resource: Resource) => `${starId}|${resource}`;
+/** A pool of one field, worked by the miners sent to it. */
+const FIELD_POOL = 'field:';
+const fieldPoolKey = (fieldId: string) => `${FIELD_POOL}${fieldId}`;
 const parsePool = (key: string) => { const i = key.lastIndexOf('|'); return { starId: key.slice(0, i), resource: key.slice(i + 1) as Resource }; };
 
 /** A fleet as it meets another at sea: what it fights with, and whether it attacks. */
@@ -455,6 +458,12 @@ export class EmpireSim {
   /** Units a year one mining ship of a class takes from a field of its resource. */
   minePerYear = (classId: string): number => miningYield({ ...this.state.economy, stock: this.state.empire.materials }, this.deps.economy, this.state.empire.research, classId);
 
+  /** An asteroid field by its id (`${starId}#…`), or null. */
+  fieldById = (id: string): AsteroidField | null => {
+    const star = this.starById(id.slice(0, id.lastIndexOf('#')));
+    return star ? this.asteroidsAt(star).find((f) => f.id === id) ?? null : null;
+  };
+
   fieldReport = (star: StarSystem): FieldReport[] => {
     const w = this.sharedWorld(), year = this.state.turn;
     return this.asteroidsAt(star).map((field) => ({ field, left: fieldLeft(field, w.asteroids[field.id], year), fullIn: yearsToFull(field, w.asteroids[field.id], year) }));
@@ -465,11 +474,27 @@ export class EmpireSim {
     const s = this.state;
     const miners: Array<{ classId: string; count: number; pool?: string; contract?: { company: string; name: string } }> = [];
     const pools: Record<string, number> = {};
-    const at = (star: StarSystem | null, classId: string): string | undefined => {
+    // Fields that miners on station were sent to work, while they have rock left: those miners
+    // draw on them alone, and the rest of the system's miners on the other fields.
+    const pinned = new Map<string, FieldReport>();
+    for (const g of this.groups()) {
+      const id = g.id === 'dock' ? undefined : s.loadouts[g.id]?.orders?.mineField;
+      if (!id || !g.stationed || !g.star) continue;
+      const f = this.fieldReport(g.star).find((x) => x.field.id === id);
+      if (f && f.left > 0 && g.ships.some((x) => this.classById.get(x.classId)?.mines === f.field.resource)) pinned.set(id, f);
+    }
+    this.pinned = new Set(pinned.keys());
+    const at = (star: StarSystem | null, classId: string, field?: string): string | undefined => {
       const r = this.classById.get(classId)?.mines;
       if (!star || !r) return undefined;
+      const own = field ? pinned.get(field) : undefined;
+      if (own && own.field.resource === r && own.field.starId === star.id) {
+        const key = fieldPoolKey(own.field.id);
+        pools[key] = own.left;
+        return key;
+      }
       const key = poolKey(star.id, r);
-      if (!(key in pools)) pools[key] = this.fieldReport(star).filter((f) => f.field.resource === r).reduce((n, f) => n + f.left, 0);
+      if (!(key in pools)) pools[key] = this.fieldReport(star).filter((f) => f.field.resource === r && !pinned.has(f.field.id)).reduce((n, f) => n + f.left, 0);
       return key;
     };
     for (const x of this.docked()) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, pool: at(s.home, x.classId) });
@@ -477,7 +502,8 @@ export class EmpireSim {
       if (g.id === 'dock') continue;
       // A mining company's crews are paid for what they mine.
       const contract = g.company ? { company: g.company.id, name: g.company.name } : undefined;
-      for (const x of g.ships) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, pool: g.stationed ? at(g.star, x.classId) : undefined, ...(contract ? { contract } : {}) });
+      const field = s.loadouts[g.id]?.orders?.mineField;
+      for (const x of g.ships) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, pool: g.stationed ? at(g.star, x.classId, field) : undefined, ...(contract ? { contract } : {}) });
     }
     const known = this.knownNpcs();
     const reached = known.map((n) => n.def.name).filter((n) => this.reached(n));
@@ -485,15 +511,23 @@ export class EmpireSim {
     return { miners, pools, reached, techOf };
   }
 
+  /** Fields worked by miners sent to them this year (presence): the system's other miners leave them be. */
+  private pinned = new Set<string>();
+
   /** What was mined from each pool, taken from its fields (fullest first) and shared. */
   protected drawFields(mined: Readonly<Record<string, number>>): void {
     const effects: SharedEffect[] = [];
     for (const [key, amount] of Object.entries(mined)) {
+      if (key.startsWith(FIELD_POOL)) {
+        const field = this.fieldById(key.slice(FIELD_POOL.length));
+        if (field && amount > 0) effects.push({ kind: 'mined', field, amount, year: this.state.turn });
+        continue;
+      }
       const { starId, resource } = parsePool(key);
       const star = this.starById(starId);
       if (!star || amount <= 0) continue;
       let rest = amount;
-      for (const f of this.fieldReport(star).filter((x) => x.field.resource === resource && x.left > 0).sort((a, b) => b.left - a.left)) {
+      for (const f of this.fieldReport(star).filter((x) => x.field.resource === resource && x.left > 0 && !this.pinned.has(x.field.id)).sort((a, b) => b.left - a.left)) {
         const take = Math.min(rest, f.left);
         effects.push({ kind: 'mined', field: f.field, amount: take, year: this.state.turn });
         rest -= take;
@@ -616,8 +650,39 @@ export class EmpireSim {
     const trade = orders.autoExplore ? undefined : orders.trade ?? l.orders?.trade;
     // Only a fleet with warships may be aggressive.
     const stance = isAggressive(orders) && hasWarships(l.ships) ? 'aggressive' as const : undefined;
-    const next: FleetOrders = { autoExplore: orders.autoExplore === true, autoReturn: orders.autoReturn === true, ...(orders.autoMine === true ? { autoMine: true } : {}), trade, stance, ...(l.orders?.chase ? { chase: l.orders.chase } : {}) };
+    const next: FleetOrders = { autoExplore: orders.autoExplore === true, autoReturn: orders.autoReturn === true, ...(orders.autoMine === true ? { autoMine: true } : {}), trade, stance, ...(l.orders?.chase ? { chase: l.orders.chase } : {}), ...(l.orders?.mineField ? { mineField: l.orders.mineField } : {}) };
     this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [fleetId]: { ...l, orders: next } } }));
+  }
+
+  /**
+   * Send mining ships to work one asteroid field (change asteroid-assign). A fleet sets course for
+   * the field's star and, on station there, its miners of that field's resource mine it first;
+   * from the dock (`dock`), its miners of that resource leave as a new flotilla. Once the field is
+   * dry they mine the system's other fields, and an auto-mining fleet moves on as before.
+   */
+  mineField(fleetId: string, fieldId: string): void {
+    const s = this.state;
+    const field = this.fieldById(fieldId);
+    const star = field && this.starById(field.starId);
+    if (!field || !star) return;
+    const res = RESOURCES.find((r) => r.id === field.resource)?.name.toLowerCase() ?? field.resource;
+    let id = fleetId;
+    if (fleetId === 'dock') {
+      const ships = this.docked().filter((x) => x.count > 0 && this.classById.get(x.classId)?.mines === field.resource);
+      if (!ships.length) return;
+      const before = new Set(s.fleets.map((f) => f.id));
+      this.formFleet(ships, star, `${RESOURCES.find((r) => r.id === field.resource)?.name ?? 'Mining'} miners`, true);
+      const made = this.state.fleets.find((f) => !before.has(f.id));
+      if (!made) return;
+      id = made.id;
+    }
+    if (this.runByCompany(id)) return;
+    const l = this.state.loadouts[id];
+    const f = this.state.fleets.find((x) => x.id === id);
+    if (!l || !f || !l.ships.some((x) => x.count > 0 && this.classById.get(x.classId)?.mines === field.resource)) return;
+    this.deps.store.update((st) => ({ loadouts: { ...st.loadouts, [id]: { ...l, orders: { ...(l.orders ?? {}), mineField: field.id } } } }));
+    this.setCourse(id, star.hex, star.name, true);
+    this.dispatch(`Sent ${f.name} to mine the ${res} field at ${star.name}`);
   }
 
   returnHome(fleetId: string): void {

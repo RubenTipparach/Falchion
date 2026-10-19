@@ -399,10 +399,11 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
   focusField(star: StarSystem | null, fieldId: string | null): void {
     if (star && this.state.selected?.id !== star.id) this.select(star);
     this.deps.store.update({ selectedField: fieldId, ...(fieldId ? { selectedPlanet: null } : {}) });
+    this.view.system.setFieldSelected(fieldId);
   }
 
   focusPlanet(star: StarSystem, planet: Planet | null): void {
-    if (this.state.selectedField) this.deps.store.update({ selectedField: null });
+    if (this.state.selectedField) { this.deps.store.update({ selectedField: null }); this.view.system.setFieldSelected(null); }
     if (this.state.selected?.id !== star.id) this.select(star);
     if (planet) this.onFocusPlanet?.(planet);
     const cam = this.view.map.controller;
@@ -671,6 +672,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     if (v0 && v0.visibleWidth < SYSTEM_VIEW_WIDTH) {
       const planet = this.view.system.pick(ray);
       this.view.system.setHover(planet?.id ?? null);
+      this.view.system.setFieldHover(null);
       this.view.map.canvas.style.cursor = planet ? 'pointer' : '';
       if (planet) {
         this.view.hud.setHover(`${planet.name}  ·  ${BIOMES.find((b) => b.id === planet.biome)?.name ?? planet.biome}  ·  size ${planet.size}  ·  click to focus`);
@@ -678,14 +680,18 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
       }
       const star = this.view.system.system;
       const field = star ? this.view.system.pickField(ray) : null;
+      this.view.system.setFieldHover(field?.id ?? null);
       if (field && star) {
         const f = this.fieldReport(star).find((x) => x.field.id === field.id);
         const name = RESOURCES.find((r) => r.id === field.resource)?.name ?? field.resource;
         this.view.map.canvas.style.cursor = 'pointer';
-        this.view.hud.setHover(`${name} asteroid field  ·  ${f ? `${Math.round(f.left).toLocaleString('en-US')} / ${field.capacity.toLocaleString('en-US')}` : ''}  ·  click for details`);
+        this.view.hud.setHover(`${name} asteroid field  ·  ${f ? `${Math.round(f.left).toLocaleString('en-US')} / ${field.capacity.toLocaleString('en-US')}` : ''}  ·  click to assign miners`);
         return;
       }
-    } else this.view.map.canvas.style.cursor = '';
+    } else {
+      this.view.map.canvas.style.cursor = '';
+      this.view.system.setFieldHover(null);
+    }
     if (!world) return;
     const h = worldToHex(world.x, world.z);
     this.view.hexGrid.setHover(h.q, h.r);

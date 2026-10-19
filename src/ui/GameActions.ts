@@ -229,6 +229,8 @@ export interface GameActions {
   leaveBattle(): void;
   /** Standing orders a fleet follows on its own. */
   setOrders(fleetId: string, orders: FleetOrders): void;
+  /** Send mining ships (a fleet, or `dock` for the dock's idle miners) to work one asteroid field. */
+  mineField(fleetId: string, fieldId: string): void;
   /** Settle an explored planet with a Colony Ark on station. */
   settle(planet: Planet): void;
   /** Build a supply depot with a Construction Tender on station. */

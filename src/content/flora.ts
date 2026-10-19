@@ -104,12 +104,18 @@ export const FLORA: Readonly<Record<string, readonly FloraLayer[]>> = {
     { layer: S, fill: 0.5, entries: [GRASS(['#5a6a4a', '#7a8a6a']), STONES] },
   ],
   eyeball: [
-    { layer: L, fill: 0.4, entries: [
-      { kind: 'conifer', weight: 2, size: [0.0003, 0.0006], colors: ['#24502e', '#3a6a3a'], cluster: 0.8, living: true, sway: 0.02 },
-      { kind: 'broadleaf', weight: 1, size: [0.0003, 0.0006], colors: ['#3f7a34', '#6a9a3c'], cluster: 0.8, living: true, sway: 0.03 },
+    // Plants only in the living band between the day-side sea and the ice (placeCell): a thick forest there.
+    { layer: L, fill: 0.75, entries: [
+      { kind: 'conifer', weight: 3, size: [0.0003, 0.0007], colors: ['#24502e', '#3a6a3a'], cluster: 0.6, clusterFreq: 40, living: true, sway: 0.02 },
+      { kind: 'broadleaf', weight: 3, size: [0.0003, 0.0007], colors: ['#3f7a34', '#6a9a3c'], cluster: 0.6, living: true, sway: 0.03 },
       BOULDERS(['#6a7078', '#8a9098']),
     ] },
-    { layer: S, fill: 0.6, entries: [GRASS(['#5a8a34', '#7aa040']), STONES] },
+    { layer: S, fill: 0.8, entries: [
+      GRASS(['#5a8a34', '#7aa040']),
+      { kind: 'fern', weight: 2, size: [0.00008, 0.00016], colors: ['#2e6a2a', '#4a8a34'], living: true, sway: 0.1 },
+      { kind: 'shrub', weight: 1, size: [0.00008, 0.00016], colors: ['#3e6a2e', '#5a7a34'], living: true, sway: 0.05 },
+      STONES,
+    ] },
   ],
   storm: [
     { layer: L, fill: 0.35, entries: [

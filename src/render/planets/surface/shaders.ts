@@ -212,6 +212,13 @@ void main() {
     float shore = 1.0 - smoothstep(uLocked - 0.3, uLocked - 0.05, dir.x + fine * 0.01);
     vec3 iceCol = mix(vec3(0.6, 0.7, 0.8), vec3(0.9, 0.94, 0.98), smoothstep(-0.3, 0.4, h + coarse * 0.15)) * (0.94 + 0.06 * fine);
     float frozen = water ? iced : smoothstep(0.25, 0.75, shore + coarse * 0.2);
+    if (!water) {
+      // The living band between the sea and the ice: forest and meadow, thinning up the slopes.
+      float lush = (1.0 - smoothstep(0.3, 0.7, shore + coarse * 0.2)) * (0.55 + 0.45 * smoothstep(-0.3, 0.3, snoise(p * 4.0 + vec3(7.0))));
+      lush *= 1.0 - smoothstep(0.08, 0.2, 1.0 - dot(n, dir));
+      vec3 green = mix(uC2 * vec3(0.45, 0.95, 0.4), uC3 * vec3(0.55, 0.95, 0.4), smoothstep(-0.4, 0.4, snoise(p * 9.0) + fine * 0.2)) * (0.85 + 0.15 * fine);
+      col = mix(col, green, lush * 0.85);
+    }
     col = mix(col, iceCol, frozen);
     spec *= 1.0 - frozen;
   }
@@ -801,7 +808,7 @@ vec4 placeCell(vec2 cell, uint face, vec3 n, vec3 fu, vec3 fv, vec2 c) {
   if (uELiving[e] > 0.5) {
     if (abs(dir.y) > uIce - 0.03) return none;
     if (uSnow > 0.5 && h > uSea + 0.5) return none;
-    if (uLocked > 0.0 && dir.x < uLocked - 0.25) return none;
+    if (uLocked > 0.0 && dir.x < uLocked - 0.2) return none;
   }
   for (int i = 0; i < ${MAX_SITES}; i++) {
     if (i >= uCityN) break;

@@ -3,6 +3,8 @@ import type { Mineral } from '../../content/resources';
 import type { AsteroidField } from '../../core/galaxy/Asteroids';
 import { Rng, hashSeed } from '../../core/rng/Rng';
 import { makeOutward } from '../geometry/orientation';
+import { NOISE_GLSL } from '../planets/noise.glsl';
+import { RELIEF_GLSL } from '../planets/relief.glsl';
 import { fullness, maxRocks, visibleRocks, type BeltPlace } from './beltLayout';
 
 /**
@@ -56,6 +58,10 @@ const ROCK_VERT = /* glsl */ `
   varying vec3 vV;
   varying vec3 vTint;
   varying float vPhase;
+  varying vec3 vLocal;
+  varying vec3 vBX;
+  varying vec3 vBY;
+  varying vec3 vBZ;
   vec3 rotateAxis(vec3 v, vec3 k, float a) {
     float c = cos(a), s = sin(a);
     return v * c + cross(k, v) * s + k * dot(k, v) * (1.0 - c);
@@ -76,11 +82,21 @@ const ROCK_VERT = /* glsl */ `
     vV = uCam - world;
     vTint = aTint;
     vPhase = aOrbit.w;
+    // The rock's own surface point (the template, before its size), so its detail rides with it.
+    vLocal = position;
+    // The template's axes as normals turn (for the detail's slope).
+    mat3 nm = transpose(inverse(m));
+    vBX = rotateAxis(nm[0], aSpin.xyz, tumble);
+    vBY = rotateAxis(nm[1], aSpin.xyz, tumble);
+    vBZ = rotateAxis(nm[2], aSpin.xyz, tumble);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(world, 1.0);
   }
 `;
 
 const ROCK_FRAG = /* glsl */ `
+  ${NOISE_GLSL}
+  ${RELIEF_GLSL}
+  uniform float uKind;
   uniform vec3 uStar;
   uniform vec3 uGlow;
   uniform float uGlowAmount;
@@ -93,13 +109,56 @@ const ROCK_FRAG = /* glsl */ `
   varying vec3 vV;
   varying vec3 vTint;
   varying float vPhase;
+  varying vec3 vLocal;
+  varying vec3 vBX;
+  varying vec3 vBY;
+  varying vec3 vBZ;
+  /**
+   * Surface detail, in the rock's own frame (change asteroid-detail): (height, albedo). Metal rock is
+   * cratered and mottled with bright veins; ice is smooth with frost and dark cracks; crystal is
+   * lined along its length. It fades as the rock gets small on screen, so a far belt does not
+   * shimmer.
+   */
+  float rockHeight(vec3 q) {
+    if (uKind < 0.5) return craterLayer(q * 1.4, 11.0, 0.5) + 0.45 * craterLayer(q * 3.2, 37.0, 0.6) + snoise(q * 4.0) * 0.03;
+    if (uKind < 1.5) return snoise(q * 2.0) * 0.03 - (1.0 - smoothstep(0.0, 0.04, abs(snoise(q * 1.6)))) * 0.03;
+    return 0.0;
+  }
+  float rockAlbedo(vec3 q, float h) {
+    float mott = snoise(q * 1.8) * 0.55 + snoise(q * 4.3) * 0.3 + snoise(q * 9.0) * 0.15;
+    if (uKind < 0.5) {
+      float vein = 1.0 - smoothstep(0.0, 0.05, abs(snoise(q * 1.7 + vec3(4.0))));
+      return 1.0 + mott * 0.25 + clamp(h * 1.2, -0.35, 0.25) + vein * 0.4;
+    }
+    if (uKind < 1.5) {
+      float frost = smoothstep(0.2, 0.8, snoise(q * 5.0 + vec3(9.0)));
+      return 1.0 + frost * 0.15 + h * 5.0 + mott * 0.06;
+    }
+    // Growth lines along the shard, and a cloudy core.
+    float lines = smoothstep(0.35, 0.5, abs(fract(q.y * 3.5 + snoise(q * 0.7) * 0.25) - 0.5));
+    return 0.78 + lines * 0.45 + mott * 0.12;
+  }
   void main() {
     vec3 n = normalize(vN);
+    vec3 q = vLocal * 1.1 + vec3(vPhase * 31.0, vPhase * 17.0, vPhase * 53.0);
+    // How much detail the pixel can hold (taken before any loop, never inside one).
+    float fade = 1.0 - smoothstep(0.15, 0.5, length(fwidth(q)));
+    float albedo = 1.0;
+    if (fade > 0.0) {
+      float h = rockHeight(q);
+      albedo = mix(1.0, rockAlbedo(q, h), fade);
+      // The height's slope in the rock's frame, turned with the rock: tilts the facet's normal.
+      const float e = 0.02;
+      vec3 g = vec3(rockHeight(q + vec3(e, 0.0, 0.0)), rockHeight(q + vec3(0.0, e, 0.0)), rockHeight(q + vec3(0.0, 0.0, e))) - h;
+      vec3 gw = (g.x * vBX + g.y * vBY + g.z * vBZ) / e * 2.0;
+      gw -= n * dot(gw, n);
+      n = normalize(n - gw * 0.25 * fade);
+    }
     vec3 l = normalize(vL);
     vec3 v = normalize(vV);
     float diff = max(dot(n, l), 0.0);
     // Dim stars (brown dwarfs, black holes) still light their rocks enough to see.
-    vec3 col = vTint * (0.22 + 1.3 * diff * max(uStar, vec3(0.55)));
+    vec3 col = vTint * albedo * (0.22 + 1.3 * diff * max(uStar, vec3(0.55)));
     vec3 h = normalize(l + v);
     float spec = pow(max(dot(n, h), 0.0), uShine) * uSpecular * step(0.0, dot(n, l));
     col += spec * uStar;
@@ -269,6 +328,7 @@ export class AsteroidBelt {
       uniforms: {
         uTime: { value: 0 },
         uRate: { value: ORBIT_RATE },
+        uKind: { value: field.resource === 'metals' ? 0 : field.resource === 'gases' ? 1 : 2 },
         uCam: { value: new THREE.Vector3() },
         uStar: { value: starLight.clone() },
         uGlow: { value: new THREE.Color(look.glow) },

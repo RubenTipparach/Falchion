@@ -13,3 +13,10 @@ Every asteroid field SHALL be drawn in its system's view as a belt whose look sh
 #### Scenario: A mined-out field
 - **WHEN** a field has been mined down
 - **THEN** its belt is thinner, and it fills back in as the field refills
+
+### Requirement: Asteroids have surface detail
+Up close, each rock SHALL carry detail in its own frame that turns with it: metal rock cratered, mottled and veined; ice smooth, frosted and cracked; crystal lined along its length. The detail SHALL fade as a rock gets small on screen, so a far belt does not shimmer.
+
+#### Scenario: Zooming onto a metal belt
+- **WHEN** the camera comes close to a metal field's rocks
+- **THEN** each rock shows craters and veins that stay put on it as it tumbles

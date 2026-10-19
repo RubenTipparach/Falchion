@@ -191,7 +191,11 @@ async function surfaceViews(look: typeof PLANET_LOOKS[string], seed: number, cam
   const midTarget = P.clone().add(tP.clone().multiplyScalar(0.27)).normalize().multiplyScalar(ground(P.clone().add(tP.clone().multiplyScalar(0.27))));
   out.push(pose(midCam, midTarget, P));
   // Close: a little above the ground where the sun is about 35 degrees up, looking across toward the terminator.
-  const Q = SUN.clone().multiplyScalar(0.57).add(new THREE.Vector3(0, 0.15, 1).projectOnPlane(SUN).normalize().multiplyScalar(0.82)).normalize();
+  // A locked world's life is in the band between its sunward sea and the ice: look there.
+  const lockedAt = look.locked;
+  const Q = lockedAt !== undefined
+    ? new THREE.Vector3(lockedAt - 0.14, 0.1, Math.sqrt(Math.max(1 - (lockedAt - 0.14) ** 2 - 0.01, 0))).normalize()
+    : SUN.clone().multiplyScalar(0.57).add(new THREE.Vector3(0, 0.15, 1).projectOnPlane(SUN).normalize().multiplyScalar(0.82)).normalize();
   const tQ = SUN.clone().negate().projectOnPlane(Q).normalize();
   const rq = ground(Q);
   const closeCam = Q.clone().multiplyScalar(rq + 0.006);

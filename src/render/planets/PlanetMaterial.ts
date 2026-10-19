@@ -105,6 +105,9 @@ void main() {
   } else {
     float shore = 1.0 - smoothstep(uLocked - 0.3, uLocked - 0.05, vObj.x);
     vec3 land = mix(uC2, uC3, smoothstep(-0.2, 0.4, h)) * (0.85 + 0.15 * snoise(p * 6.0));
+    // The living band between the sea and the ice: forest and meadow (as the close-up grows them).
+    float lush = (1.0 - smoothstep(0.3, 0.7, shore + snoise(p * 3.0) * 0.2)) * (0.55 + 0.45 * smoothstep(-0.3, 0.3, snoise(p * 4.0 + vec3(7.0))));
+    land = mix(land, mix(uC2 * vec3(0.45, 0.95, 0.4), uC3 * vec3(0.55, 0.95, 0.4), smoothstep(-0.4, 0.4, snoise(p * 9.0))), lush * 0.85);
     vec3 ice = mix(vec3(0.55, 0.66, 0.78), vec3(0.9, 0.94, 0.98), smoothstep(-0.3, 0.4, h + snoise(p * 5.0) * 0.15));
     col = mix(land, ice, smoothstep(0.25, 0.75, shore + snoise(p * 3.0) * 0.2));
   }

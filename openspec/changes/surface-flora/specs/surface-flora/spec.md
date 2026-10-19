@@ -37,3 +37,10 @@ Large props SHALL appear as the camera comes within about a tenth of a radius, a
 #### Scenario: Descending to a meadow
 - **WHEN** the camera descends toward a terran world's plains
 - **THEN** groves appear first, then grass and stones as the ground nears
+
+### Requirement: A locked world lives in its band
+On a tidally locked (eyeball) world the living props SHALL grow only in the band between the day-side sea and the ice, and that band SHALL read as forest and meadow from orbit, from the system view and on the ground.
+
+#### Scenario: Coming down on an eyeball world's shore
+- **WHEN** the camera comes down between the sunward sea and the ice
+- **THEN** the ground is green and covered in forest, ferns and grass, and none grow on the ice

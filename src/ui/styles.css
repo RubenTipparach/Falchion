@@ -501,7 +501,7 @@ td.heat { background: rgba(127, 211, 230, calc(var(--v) * 0.35)); }
 .res-ico { display: inline-flex; flex: none; }
 .res-ico svg { display: block; }
 .cost .res-ico { margin-right: 3px; vertical-align: -2px; }
-.fleet-label { pointer-events: auto; cursor: pointer; }
+.fleet-label { pointer-events: auto; cursor: pointer; margin: 0 0 6px 5px; }
 .fleet-label:hover, .fleet-label.selected { background: rgba(20, 30, 50, 0.95); box-shadow: 0 0 0 1px currentColor; }
 
 /* ── Sign-in ─────────────────────────────────────────────────── */

@@ -408,8 +408,11 @@ export class FleetLayer implements MapLayer {
       const el = lead.label.element;
       if (el.innerHTML !== html) el.innerHTML = html;
       // An open list is centred on its stack so it fits on a narrow screen.
+      // Otherwise pinned by its bottom-left corner (offset in CSS, .fleet-label's margin), so the
+      // label a hover expands always covers the icon it grew from: anchored by a share of its
+      // own size, the bigger label moved off the cursor, shrank back under it, and flickered.
       if (this.openStack === lead.fleet.id) lead.label.center.set(0.5, 1.05);
-      else lead.label.center.set(-0.15, 1.2);
+      else lead.label.center.set(0, 1);
       el.classList.toggle('selected', lead.fleet.id === this.selectedId);
       el.classList.toggle('compact', !full);
       el.title = st.length > 1 ? `${st.length} fleets: click to list them` : lead.fleet.name;
@@ -463,7 +466,7 @@ export class FleetLayer implements MapLayer {
       this.onSelect(fleet.id);
     });
     const label = new CSS2DObject(el);
-    label.center.set(-0.15, 1.2);
+    label.center.set(0, 1);
     root.add(label);
     // Placed at once, so a rebuilt fleet (new orders) never reports the origin as its position.
     root.position.lerpVectors(start, end, progressAtTime(fleet.movement, this.time));

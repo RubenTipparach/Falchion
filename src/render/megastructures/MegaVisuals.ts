@@ -236,7 +236,9 @@ const ringworld: Builder = (k) => {
     const a = (i / 10) * Math.PI * 2;
     const m = k.add(new THREE.Mesh(new THREE.PlaneGeometry(r2 * 0.4, w * 0.8), panel), squares);
     m.position.set(Math.cos(a) * r2, 0, Math.sin(a) * r2);
-    m.lookAt(0, 0, 0);
+    // Face the star in the ring's own frame (lookAt takes a world point: the galaxy's origin, not
+    // the star, which turned every panel a different way).
+    m.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a));
   }
   k.spin(squares, 0.05);
   return k.finish(R * 1.05);

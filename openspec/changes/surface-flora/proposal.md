@@ -14,7 +14,7 @@ The owner: "Consider foliage on planets. Planet worlds like jungle, plains, swam
   - **Volcanic and magma worlds:** lava rocks with glowing cracks.
   - **Toxic and acid worlds:** glowing fungi.
   - **Diamond worlds:** crystal spikes.
-  - **Bone worlds:** ribcages, bones and dead trees.
+  - **Bone worlds:** whole skeletons, ribcages, tusks arching out of the ground, bones and dead trees, bone-white on darker dust.
   - **Dead machine worlds:** wrecks and ruined blocks.
   - **Choir worlds:** glowing spires.
   - **City worlds:** city blocks and spires with lit windows at night.

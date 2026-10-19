@@ -9,7 +9,7 @@
  */
 export type PropKind =
   | 'broadleaf' | 'conifer' | 'palm' | 'jungle' | 'swamptree' | 'deadtree' | 'shrub' | 'fern' | 'grass' | 'reeds' | 'cactus'
-  | 'rock' | 'boulder' | 'crag' | 'lavarock' | 'fungus' | 'crystal' | 'bones' | 'ribcage' | 'spire' | 'wreck' | 'block';
+  | 'rock' | 'boulder' | 'crag' | 'lavarock' | 'fungus' | 'crystal' | 'bones' | 'ribcage' | 'skeleton' | 'tusk' | 'spire' | 'wreck' | 'block';
 
 export interface FloraEntry {
   readonly kind: PropKind;
@@ -183,15 +183,18 @@ export const FLORA: Readonly<Record<string, readonly FloraLayer[]>> = {
       { ...STONES, colors: ['#14161c', '#262a34'], weight: 2 },
     ] },
   ],
+  // Bone white on dark dust, so they stand out as things, not paint.
   bones: [
-    { layer: L, fill: 0.6, entries: [
-      { kind: 'ribcage', weight: 2, size: [0.0005, 0.001], colors: ['#d8ccb0', '#ece4cc'], cluster: 0.6 },
-      { kind: 'deadtree', weight: 3, size: [0.0004, 0.0008], colors: ['#6a5e4c', '#8a7c64'], cluster: 0.7 },
-      BOULDERS(['#8a7a5e', '#a89878']),
+    { layer: L, fill: 0.75, entries: [
+      { kind: 'skeleton', weight: 3, size: [0.0011, 0.0022], colors: ['#e6dfcc', '#f6f1e4'], cluster: 0.4 },
+      { kind: 'ribcage', weight: 3, size: [0.0007, 0.0014], colors: ['#e2d9c2', '#f2ecdc'], cluster: 0.4 },
+      { kind: 'tusk', weight: 2, size: [0.0007, 0.0016], colors: ['#ddd2b8', '#efe8d6'], cluster: 0.5 },
+      { kind: 'deadtree', weight: 2, size: [0.0004, 0.0008], colors: ['#4a4034', '#5e5444'], cluster: 0.7 },
+      BOULDERS(['#5a4c3a', '#6e5e48']),
     ] },
-    { layer: S, fill: 0.7, entries: [
-      { kind: 'bones', weight: 3, size: [0.00008, 0.00016], colors: ['#d8ccb0', '#f0e8d4'] },
-      { ...STONES, colors: ['#8a7a5e', '#a89878'] },
+    { layer: S, fill: 0.75, entries: [
+      { kind: 'bones', weight: 4, size: [0.00012, 0.00024], colors: ['#e6dfcc', '#f6f1e4'] },
+      { ...STONES, colors: ['#4a3e2e', '#62523e'] },
     ] },
   ],
   deadtech: [

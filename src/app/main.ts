@@ -263,9 +263,30 @@ async function bootstrap(): Promise<void> {
   const pill = new LoadingPill();
   app.append(pill.el);
   const warmup = new ShaderWarmup();
-  let warming = false;
-  warmup.onProgress((ready, total) => { warming = ready < total; pill.set(warming ? `Preparing planet surfaces · ${ready}/${total}` : null, total ? ready / total : null); });
-  setTimeout(() => { try { warmup.start(map.renderer, lite); } catch (e) { console.warn('shader warm-up', e); } }, 2500);
+  // Until it is done, planet close-ups are held back; trying one says why (change surface-perf).
+  let warming = true;
+  let nudgeUntil = 0;
+  const showWarmup = () => {
+    if (!warming) return;
+    const counted = warmup.total ? ` · ${warmup.ready}/${warmup.total}` : '';
+    const nudged = performance.now() < nudgeUntil;
+    pill.set(nudged ? `Preparing shaders${counted} · landing opens when done` : `Preparing planet surfaces${counted}`, warmup.total ? warmup.ready / warmup.total : null);
+    pill.el.classList.toggle('nudge', nudged);
+  };
+  controller.setShadersPreparing(true);
+  controller.onShadersBusy = (ms) => {
+    if (!warming) return;
+    const now = performance.now(), shown = now < nudgeUntil;
+    nudgeUntil = Math.max(nudgeUntil, now + ms);
+    if (shown) return;
+    showWarmup();
+    const done = () => (performance.now() < nudgeUntil ? setTimeout(done, nudgeUntil - performance.now() + 20) : showWarmup());
+    setTimeout(done, ms + 20);
+  };
+  const warmed = () => { warming = false; pill.el.classList.remove('nudge'); pill.set(null); controller.setShadersPreparing(false); };
+  warmup.onProgress((ready, total) => { if (ready >= total) warmed(); else showWarmup(); });
+  showWarmup();
+  setTimeout(() => { try { warmup.start(map.renderer, lite); if (!warmup.total) warmed(); } catch (e) { console.warn('shader warm-up', e); warmed(); } }, 2500);
   setInterval(() => { if (!warming) pill.set(surface.status.building ? 'Building the surface' : null); }, 200);
   // Touch screens: a joystick to orbit the view (the battle's camera while one is open), kept above
   // the bottom sheet on a phone.

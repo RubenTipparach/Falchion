@@ -418,6 +418,9 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
   onEditEmpire: () => void = () => {};
   /** A planet was focused (the UI reopens its card if the player had closed it). */
   onFocusPlanet: ((planet: Planet) => void) | null = null;
+  /** A close-up was asked for while the shaders are still being prepared: say so for `ms`. */
+  onShadersBusy: ((ms: number) => void) | null = null;
+  private shadersPreparing = false;
 
   async shareLink(star: StarSystem, planet: Planet | null = null): Promise<'shared' | 'copied' | 'failed'> {
     const url = new URL(routePath(systemRoute(star, planet ? planet.index : null)), location.origin).toString();
@@ -491,6 +494,12 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
 
   /** Descend to a rocky planet's surface (its capital or main city): focuses it first if need be. */
   land(star: StarSystem, planet: Planet, at?: LandingSpot): void {
+    if (this.shadersPreparing && this.landable(planet)) {
+      // Close-ups wait for the start-up shader warm-up: drawn now, they would compile on the spot.
+      if (this.state.selectedPlanet?.id !== planet.id || this.state.selectedFleet) this.focusPlanet(star, planet);
+      this.onShadersBusy?.(4000);
+      return;
+    }
     if (hasMegaSurface(planet.biome)) {
       // A megastructure you can stand on (change mega-surfaces): its own close-up.
       if (this.state.selectedPlanet?.id !== planet.id || this.state.selectedFleet) this.focusPlanet(star, planet);
@@ -548,9 +557,25 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     return { id: planet.id, type: planet.biome, seed: hashSeed(planet.id, 'mega'), light };
   }
 
+  /**
+   * While the start-up shader warm-up runs (change surface-perf), no close-up is offered: Land
+   * says why, and the zoom stops at planet view. Done, the close-ups come back.
+   */
+  setShadersPreparing(on: boolean): void {
+    if (on === this.shadersPreparing) return;
+    this.shadersPreparing = on;
+    this.refreshSurface();
+  }
+
+  /** A planet or megastructure with a close-up to land in. */
+  private landable(planet: Planet): boolean {
+    return planet.biome !== 'gas' && (!isMegastructure(planet.biome) || hasMegaSurface(planet.biome));
+  }
+
   private refreshSurface(): void {
-    this.view.surface.setTarget(this.surfaceTarget(this.state.selectedPlanet));
-    this.view.mega.setTarget(this.megaTarget(this.state.selectedPlanet));
+    const planet = this.shadersPreparing ? null : this.state.selectedPlanet;
+    this.view.surface.setTarget(this.surfaceTarget(planet));
+    this.view.mega.setTarget(this.megaTarget(planet));
     // Night lights in the system view come from the same colonies.
     this.view.system.refreshLights();
   }
@@ -801,6 +826,9 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     // Ships glide through the current year toward next year's position.
     this.view.fleets.setTime(this.fleetTime());
     const surface = this.view.surface.status, mega = this.view.mega.status;
+    // Zoomed all the way in on a planet whose close-up is still waiting on its shaders: say so.
+    const planet = this.state.selectedPlanet;
+    if (this.shadersPreparing && planet && this.landable(planet) && view.altitude <= this.view.map.controller.zoom.floor * 1.05) this.onShadersBusy?.(1500);
     if (surface.engaged) return this.view.hud.setSurface(surface.altitudeKm, view.altitude);
     if (mega.engaged) return this.view.hud.setSurface(mega.altitudeKm, view.altitude);
     const mode = this.state.selectedPlanet ? 'Planet view' : view.visibleWidth < SYSTEM_VIEW_WIDTH ? 'System view' : view.visibleWidth < 420 ? 'Hex view' : view.visibleWidth < 7_000 ? 'Sector view' : 'Galaxy view';

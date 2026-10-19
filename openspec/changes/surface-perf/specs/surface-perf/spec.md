@@ -41,3 +41,10 @@ The warm-up SHALL hand the driver one program at a time, the next only once the 
 #### Scenario: The warm-up does not freeze the browser
 - **WHEN** the warm-up runs on Chrome on Windows
 - **THEN** at most one of its programs is compiling at any moment, and other tabs stay responsive
+
+### Requirement: Close-ups wait for the warm-up
+Until the warm-up has finished, no planet or megastructure close-up SHALL open. Pressing Land, or zooming all the way in on a planet, SHALL leave the view where it is and SHALL say that the shaders are being prepared and that landing opens when they are done. Once the warm-up finishes, close-ups SHALL be offered again without a reload.
+
+#### Scenario: Landing during the warm-up
+- **WHEN** the player presses Land on a colony while the warm-up is at 20 of 91
+- **THEN** the view stays at planet view and the bar reads "Preparing shaders · 20/91 · landing opens when done"

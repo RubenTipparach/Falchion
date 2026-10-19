@@ -1158,3 +1158,5 @@ body.battle-open .orbit-stick { top: calc(50% - 42px); bottom: auto; }
 .lp-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--chart); transition: width 0.2s; }
 .loading-pill.indeterminate .lp-bar i { width: 35%; animation: lp-slide 1.1s ease-in-out infinite; }
 @keyframes lp-slide { 0% { left: -35%; } 100% { left: 100%; } }
+.loading-pill.nudge { border-color: var(--chart); animation: lp-nudge 0.5s ease-out; }
+@keyframes lp-nudge { 0% { transform: translateX(-50%) scale(1); } 40% { transform: translateX(-50%) scale(1.08); } 100% { transform: translateX(-50%) scale(1); } }

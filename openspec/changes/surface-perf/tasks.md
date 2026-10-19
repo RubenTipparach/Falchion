@@ -16,3 +16,4 @@
 - [x] 4.3 The placed flora shader leaves the terrain out
 - [x] 4.4 Shader warm-up at start-up (ShaderWarmup) with a progress pill (LoadingPill); "Building the surface" while a close-up builds
 - [x] 4.5 Warm-up compiles one program at a time, pausing while the tab is hidden or the view is being moved (all at once froze Chrome)
+- [x] 4.6 Close-ups wait for the warm-up: Land and zooming in say the shaders are being prepared

@@ -1132,3 +1132,16 @@ h4.sec { margin: 8px 0 0; font: 600 11px var(--font-display); letter-spacing: 0.
 .chronicle { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .chronicle li { display: grid; grid-template-columns: 56px 1fr auto; gap: 8px; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--line); }
 .mission h4 { text-transform: none; letter-spacing: 0.01em; font-family: var(--font-display); color: var(--text); }
+
+/* The orbit joystick (change mobile-orbit): touch screens only, bottom right, above the bottom sheet. */
+.orbit-stick { position: fixed; right: max(14px, env(safe-area-inset-right, 0px)); bottom: calc(var(--tabbar, 0px) + 14px + var(--stick-lift, 0px)); z-index: 10;
+  width: 84px; height: 84px; border-radius: 50%; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  display: grid; place-items: center; background: radial-gradient(circle, rgba(10, 16, 32, 0.35) 0 55%, rgba(10, 16, 32, 0.6) 56%); border: 1px solid var(--line-strong);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35); opacity: 0.7; transition: opacity 0.2s, bottom 0.18s; }
+.orbit-stick.held { opacity: 1; }
+/* A dashed ring round the rim: the knob travels inside it. */
+.orbit-ring { position: absolute; inset: 7px; border-radius: 50%; border: 2px dashed rgba(127, 211, 230, 0.35); pointer-events: none; }
+.orbit-knob { width: 36px; height: 36px; border-radius: 50%; pointer-events: none; background: radial-gradient(circle at 35% 30%, #f6d98c, #c8952f 70%); border: 1px solid var(--brass);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); transition: transform 0.16s ease-out; }
+.orbit-stick.held .orbit-knob { transition: none; }
+body.battle-open .orbit-stick { top: calc(50% - 42px); bottom: auto; }

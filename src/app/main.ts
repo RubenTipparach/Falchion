@@ -25,6 +25,7 @@ import { ResourceLedger } from '../ui/ResourceLedger';
 import { NebulaLayer } from '../render/map/NebulaLayer';
 import { LowResBackground } from '../render/map/LowResBackground';
 import { touchFirst } from '../ui/dom';
+import { OrbitStick } from '../ui/OrbitStick';
 import { NebulaSkyboxLayer } from '../render/map/NebulaSkyboxLayer';
 import { GalaxyDiscLayer } from '../render/map/GalaxyDiscLayer';
 import { StarfieldLayer } from '../render/map/StarfieldLayer';
@@ -251,6 +252,18 @@ async function bootstrap(): Promise<void> {
       // The top bar covers the map's top edge too: centre between the two.
       return covered && Math.max(0, covered - Math.max(0, topBar.el.getBoundingClientRect().bottom - box.top));
     });
+  }
+  // Touch screens: a joystick to orbit the view (the battle's camera while one is open), kept above
+  // the bottom sheet on a phone.
+  if (lite) {
+    const stick = new OrbitStick((dx, dy) => (battle.isOpen ? battle.controls.drag(dx, dy, false) : map.controller.orbit(dx, dy)));
+    app.append(stick.el);
+    const phone = window.matchMedia('(max-width: 720px)');
+    const lift = () => stick.lift(phone.matches && !starInfo.el.classList.contains('hidden') ? starInfo.el.getBoundingClientRect().height : 0);
+    new ResizeObserver(lift).observe(starInfo.el);
+    new MutationObserver(lift).observe(starInfo.el, { attributes: true, attributeFilter: ['class', 'hidden'] });
+    phone.addEventListener('change', lift);
+    lift();
   }
   // The NPC empires you know: drawn now, every year, and whenever the shared world changes.
   const drawNpcs = () => controller.drawNpcs(territory);

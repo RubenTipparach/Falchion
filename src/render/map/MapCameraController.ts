@@ -38,8 +38,8 @@ const PINCH_POWER = 1.8;
  *
  * Mouse: drag pans, right-drag (or shift-drag) turns and tilts, wheel zooms, right-click
  * orders. Touch: one finger pans, two fingers only zoom (toward where the pinch began; moving
- * both fingers together does not pan); a long press is the right-click. Touch never turns or tilts
- * the view: on a phone it only got in the way.
+ * both fingers together does not pan); a long press is the right-click. Touch gestures never turn
+ * or tilt the view (on a phone that only got in the way): the orbit joystick does (`orbit`).
  *
  * Floating origin: the galaxy spans 70,000 ly but a planet is ~0.005 ly, far
  * below float32 resolution at that range. The camera therefore lives near (0,0,0)
@@ -370,8 +370,7 @@ export class MapCameraController {
         this.clampFocus();
       }
     } else {
-      this.yaw -= dx * 0.005;
-      this.tilt = THREE.MathUtils.clamp(this.tilt - dy * 0.004, 0, 1.4);
+      this.turn(dx, dy);
     }
     this.drag.x = e.clientX;
     this.drag.y = e.clientY;
@@ -410,6 +409,21 @@ export class MapCameraController {
     }
     this.drag = null;
   };
+
+  /**
+   * Orbit the view as a right-drag of (dx, dy) pixels would: the heading round the point looked at
+   * and the tilt, or the close-up's own turn while one is shown (the touch joystick, OrbitStick).
+   */
+  orbit(dx: number, dy: number): void {
+    if (this.capture) return this.capture.drag(dx, dy, true);
+    this.turn(dx, dy);
+    this.place();
+  }
+
+  private turn(dx: number, dy: number): void {
+    this.yaw -= dx * 0.005;
+    this.tilt = THREE.MathUtils.clamp(this.tilt - dy * 0.004, 0, 1.4);
+  }
 
   /** The browser took the touch over (e.g. a system gesture): drop it without a tap. */
   private readonly handleCancel = (e: PointerEvent): void => {

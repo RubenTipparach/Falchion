@@ -1145,3 +1145,12 @@ h4.sec { margin: 8px 0 0; font: 600 11px var(--font-display); letter-spacing: 0.
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); transition: transform 0.16s ease-out; }
 .orbit-stick.held .orbit-knob { transition: none; }
 body.battle-open .orbit-stick { top: calc(50% - 42px); bottom: auto; }
+
+/* Loading pill (change surface-perf): shaders compiling up front, a planet's close-up being built. */
+.loading-pill { position: fixed; left: 50%; bottom: calc(var(--tabbar, 0px) + 16px); transform: translateX(-50%); z-index: 11; display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line-strong); background: rgba(5, 8, 16, 0.88); font: 11px var(--font-mono); color: var(--text); pointer-events: none; }
+.loading-pill[hidden] { display: none; }
+.lp-bar { position: relative; width: 120px; height: 4px; border-radius: 2px; background: rgba(127, 211, 230, 0.15); overflow: hidden; }
+.lp-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--chart); transition: width 0.2s; }
+.loading-pill.indeterminate .lp-bar i { width: 35%; animation: lp-slide 1.1s ease-in-out infinite; }
+@keyframes lp-slide { 0% { left: -35%; } 100% { left: 100%; } }

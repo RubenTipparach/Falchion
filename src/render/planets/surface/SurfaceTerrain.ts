@@ -157,6 +157,11 @@ export class SurfaceTerrain {
     return this.base !== null;
   }
 
+  /** The baked globe's material (in the scene only once the globe is baked; ShaderWarmup compiles it earlier). */
+  get globeMaterial(): THREE.Material {
+    return this.baseMat;
+  }
+
   /**
    * Bake the globe; true once it is complete. With workers, the first call sends all six faces off
    * and later calls only check whether they are back; without, each call bakes one face here.

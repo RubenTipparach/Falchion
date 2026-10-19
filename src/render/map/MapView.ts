@@ -24,7 +24,7 @@ export class MapView {
   readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
   readonly layers: LayerStack;
   readonly controller: MapCameraController;
-  private readonly renderer: THREE.WebGLRenderer;
+  readonly renderer: THREE.WebGLRenderer;
   private readonly labelRenderer = new CSS2DRenderer();
   private readonly clock = new THREE.Clock();
   private lastView: ViewState | null = null;

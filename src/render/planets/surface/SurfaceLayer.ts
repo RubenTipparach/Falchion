@@ -55,6 +55,8 @@ export interface SurfaceStatus {
   readonly engaged: boolean;
   /** Camera altitude above the ground, km. */
   readonly altitudeKm: number;
+  /** The close-up is being prepared (globe baking) for the planet in view. */
+  readonly building: boolean;
 }
 
 /** Descent past which the close-up fills the screen: the map is not drawn. */
@@ -134,7 +136,7 @@ export class SurfaceLayer implements MapLayer {
 
   get status(): SurfaceStatus {
     const km = this.target ? this.camAlt * radiusKm(this.target.planet.size) : 0;
-    return { active: this.active, engaged: this.active && this.u > 0, altitudeKm: km };
+    return { active: this.active, engaged: this.active && this.u > 0, altitudeKm: km, building: !!this.building && !!this.target };
   }
 
   /** Show this planet's surface when the view comes close (null: none). Same planet and colony: no change. */

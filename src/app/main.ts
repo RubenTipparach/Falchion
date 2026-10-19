@@ -26,6 +26,8 @@ import { NebulaLayer } from '../render/map/NebulaLayer';
 import { LowResBackground } from '../render/map/LowResBackground';
 import { touchFirst } from '../ui/dom';
 import { OrbitStick } from '../ui/OrbitStick';
+import { LoadingPill } from '../ui/LoadingPill';
+import { ShaderWarmup } from '../render/planets/surface/ShaderWarmup';
 import { NebulaSkyboxLayer } from '../render/map/NebulaSkyboxLayer';
 import { GalaxyDiscLayer } from '../render/map/GalaxyDiscLayer';
 import { StarfieldLayer } from '../render/map/StarfieldLayer';
@@ -253,6 +255,15 @@ async function bootstrap(): Promise<void> {
       return covered && Math.max(0, covered - Math.max(0, topBar.el.getBoundingClientRect().bottom - box.top));
     });
   }
+  // Planet close-ups: compile their shaders up front once the game is up, and say so; then show
+  // the same pill while a planet's close-up is being built (change surface-perf).
+  const pill = new LoadingPill();
+  app.append(pill.el);
+  const warmup = new ShaderWarmup();
+  let warming = false;
+  warmup.onProgress((ready, total) => { warming = ready < total; pill.set(warming ? `Preparing planet surfaces · ${ready}/${total}` : null, total ? ready / total : null); });
+  setTimeout(() => { try { warmup.start(map.renderer, lite); } catch (e) { console.warn('shader warm-up', e); } }, 2500);
+  setInterval(() => { if (!warming) pill.set(surface.status.building ? 'Building the surface' : null); }, 200);
   // Touch screens: a joystick to orbit the view (the battle's camera while one is open), kept above
   // the bottom sheet on a phone.
   if (lite) {

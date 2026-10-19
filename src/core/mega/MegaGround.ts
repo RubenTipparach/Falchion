@@ -56,8 +56,9 @@ const SHAPES: Readonly<Record<MegaSurfaceType, ShapeTable>> = {
   ringworld: { radiusKm: 1.5e7, widthKm: 1.2e6, featureKm: 1800, reliefKm: 3.2, sea: 0.02, cityCellKm: 260, cityKm: [5, 22], roamKm: 15000 },
   'dyson-sphere': { radiusKm: 3e7, widthKm: 0, featureKm: 2400, reliefKm: 4, sea: -0.02, cityCellKm: 300, cityKm: [6, 26], roamKm: 15000 },
   'alderson-disk': { radiusKm: 0, widthKm: 0, featureKm: 2000, reliefKm: 3.6, sea: 0.05, cityCellKm: 280, cityKm: [5, 20], roamKm: 15000 },
-  // One habitat of the swarm: a spinning cylinder, land strips between windows.
-  'dyson-swarm': { radiusKm: 4, widthKm: 32, featureKm: 7, reliefKm: 0.22, sea: 0.12, cityCellKm: 5, cityKm: [0.5, 1.1], roamKm: 16 },
+  // One habitat of the swarm: a spinning cylinder, land strips between windows. Its land is the
+  // painted O'Neill stripe (the render side): the height here only rolls it gently, with no seas.
+  'dyson-swarm': { radiusKm: 4, widthKm: 32, featureKm: 7, reliefKm: 0.05, sea: -0.6, cityCellKm: 5, cityKm: [0.5, 1.1], roamKm: 16 },
 };
 
 /** The ground of a megastructure: its shape and where on the noise its land is. */
@@ -178,7 +179,7 @@ export function cityIn(def: MegaGroundDef, i: number, j: number): MegaCity | nul
   const x = (i + rng.range(0.25, 0.75)) * cell, z = (j + rng.range(0.25, 0.75)) * cell;
   const land = groundNoise(def, x, z, 6) - def.sea;
   // On land, and not up in the mountains.
-  if (land < 0.03 || land > 0.32) return null;
+  if (def.type !== 'dyson-swarm' && (land < 0.03 || land > 0.32)) return null;
   const size = rng.next();
   const r = def.cityKm[0] + (def.cityKm[1] - def.cityKm[0]) * size * size;
   return { x, z, r, level: Math.max(rawHeight(def, x, z, 7), def.reliefKm * 0.02), size };

@@ -341,6 +341,7 @@ export class MegaSurfaceLayer implements MapLayer {
     b.towers.setCities(this.altKm < 80 ? nearCities : []);
     b.towers.mesh.visible = this.altKm < 80;
     b.trees.update(renderer, this.focus, alt);
+    b.habitat?.update(this.focus, b.uniforms.uDay.value as number);
 
     const autoClear = renderer.autoClear;
     renderer.autoClear = false;
@@ -382,7 +383,8 @@ export class MegaSurfaceLayer implements MapLayer {
       // A habitat: its mirrors open and close on a day; the habitat spins once in two minutes.
       day = smoothstep(-0.35, 0.25, Math.sin((2 * Math.PI * t) / 180) + 0.25);
       su.uSpin.value = (2 * Math.PI * t) / 120 + this.focus[0] / def.radiusKm;
-      su.uStarPos.value.set(0.25, 0.35, -1);
+      // The star is down the axis (the mirrors throw its light in through the windows).
+      su.uStarPos.value.set(0, 0, -1);
       su.uStarRad.value = 0.03;
     }
     u.uSun.value.copy(sun);

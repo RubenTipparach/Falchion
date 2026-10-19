@@ -14,3 +14,4 @@
 ## 4. Clutter and polish
 - [x] 4.1 Shrubs and boulders beside the trees, by how wet and how high the land is; thinning to the window's edge
 - [x] 4.2 Far land blurred to its average once its features are smaller than a pixel (the shell's far side)
+- [x] 4.3 The swarm habitat after Star Crew Bridge Simulator's O'Neill cylinder: its painted land stripe with rivers and lakes, close-up detail, dome machinery on the end caps, mirrors that open by day, cloud puffs from its cloud map, the light down the axis (textures in public/textures/oneill)

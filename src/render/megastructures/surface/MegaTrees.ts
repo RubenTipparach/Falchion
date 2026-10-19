@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { propGeometry } from '../../planets/surface/FloraModels';
 import { smoothstep } from '../../../core/surface/Noise';
+import { HABITAT_LAND_GLSL, landDefines } from './MegaTerrain';
 import { MAX_MEGA_CITIES, MEGA_GROUND_GLSL } from './megaGround.glsl';
 
 /**
@@ -27,6 +28,7 @@ const PLACE_VERT = /* glsl */ `void main() { gl_Position = vec4(position.xy, 0.0
 
 const PLACE_FRAG = /* glsl */ `
 ${MEGA_GROUND_GLSL}
+${HABITAT_LAND_GLSL}
 uniform vec2 uFocus;
 uniform vec2 uOrigin;
 uniform float uCell;
@@ -57,6 +59,12 @@ void main() {
   float wet = snoise(q * 0.8 + vec3(40.0, 11.0, 7.0));
   float groves = snoise(q * 120.0 + vec3(5.0)) * 0.5 + 0.5;
   float forest = smoothstep(-0.45, -0.05, wet) * mix(0.25, 1.0, smoothstep(0.3, 0.6, groves + wet * 0.25)) * (1.0 - smoothstep(0.5, 0.75, e));
+#ifdef HABITAT
+  // The painted land says where: woods where it is darkest green, none in its rivers.
+  vec4 land = textureLod(uLandMap, habitatUv(site), 0.0);
+  if (land.a > 0.35) { gl_FragColor = none; return; }
+  forest = smoothstep(0.0, 0.08, land.g - max(land.r, land.b) * 1.05) * (1.0 - smoothstep(0.35, 0.6, land.g + land.r));
+#endif
   // Thinning out toward the window's edge, so the trees fade off instead of stopping at a line.
   vec2 fromMid = abs(vec2(c) - (uOrigin + uHalfK));
   float edge = max(fromMid.x, fromMid.y) / uHalfK;
@@ -134,7 +142,7 @@ export class MegaTrees {
     this.k = lite ? 72 : 128;
     this.quad.frustumCulled = false;
     this.place = new THREE.ShaderMaterial({
-      vertexShader: PLACE_VERT, fragmentShader: PLACE_FRAG,
+      vertexShader: PLACE_VERT, fragmentShader: PLACE_FRAG, defines: landDefines(uniforms),
       uniforms: { ...uniforms, uOrigin: { value: new THREE.Vector2() }, uCell: { value: CELL_KM }, uHalfK: { value: this.k / 2 } }, depthTest: false, depthWrite: false,
     });
     this.quad.material = this.place;

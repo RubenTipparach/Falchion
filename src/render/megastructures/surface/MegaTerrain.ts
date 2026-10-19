@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { MegaCity, MegaGroundDef } from '../../../core/mega/MegaGround';
+import { habitatArt } from './habitatArt';
 import { MAX_MEGA_CITIES, MEGA_GROUND_GLSL } from './megaGround.glsl';
 
 /**
@@ -52,8 +53,37 @@ export function landUniforms(def: MegaGroundDef): Record<string, THREE.IUniform>
     uTime: { value: 0 },
     uHalfWidth: { value: def.widthKm > 0 ? def.widthKm / 2 : 1e12 },
     uHabitat: { value: def.type === 'dyson-swarm' ? 1 : 0 },
+    ...(def.type === 'dyson-swarm' ? habitatUniforms() : {}),
   };
 }
+
+/** A habitat's painted land (Star Crew's O'Neill stripe, its rivers and its close-up detail). */
+function habitatUniforms(): Record<string, THREE.IUniform> {
+  const art = habitatArt();
+  return { uLandMap: { value: art.land }, uLandDetail: { value: art.landDetail }, uDetailMean: { value: art.detailMean } };
+}
+
+/** Shader switches for the structure the uniforms are for. */
+export const landDefines = (u: Record<string, THREE.IUniform>): Record<string, string> => (u.uHabitat.value > 0.5 ? { HABITAT: '' } : {});
+
+/**
+ * GLSL (HABITAT only): the painted land at a site: rgb, and in alpha its rivers and lakes. The
+ * stripe is painted once across each land strip (mirrored on the middle one), once along.
+ */
+export const HABITAT_LAND_GLSL = /* glsl */ `
+#ifdef HABITAT
+uniform sampler2D uLandMap;
+uniform sampler2D uLandDetail;
+uniform vec3 uDetailMean;
+vec2 habitatUv(vec2 site) {
+  vec2 ws = wrapSite(site);
+  float t6 = fract(ws.x / (6.28318530718 * uRadius) + 1.0 / 12.0) * 6.0;
+  float u = fract(t6);
+  if (mod(floor(t6), 4.0) > 1.5) u = 1.0 - u;
+  return vec2(u, clamp(ws.y / (2.0 * uHalfWidth) + 0.5, 0.0, 1.0));
+}
+#endif
+`;
 
 /** Put the cities the land should flatten and draw into the uniforms. */
 export function setCities(u: Record<string, THREE.IUniform>, cities: readonly MegaCity[]): void {
@@ -107,6 +137,7 @@ void main() {
 
 const TERRAIN_FRAG = /* glsl */ `
 ${MEGA_GROUND_GLSL}
+${HABITAT_LAND_GLSL}
 uniform vec2 uFocus;
 uniform vec2 uFinerCentre;
 uniform float uFinerE;
@@ -139,6 +170,20 @@ void main() {
   float h = vH + wander;
   vec2 gd = groundDetail(vSite, fw);
   vec3 col = landColour(vSite, h, vSlope, fw);
+#ifdef HABITAT
+  {
+    // The painted stripe: fields, woods and towns, its rivers and lakes; close up, the detail map
+    // tiled every 280 m (not on the water), fading out with distance.
+    vec4 land = texture2D(uLandMap, habitatUv(vSite));
+    vec3 det = texture2D(uLandDetail, wrapSite(vSite) / 0.28).rgb / max(uDetailMean, vec3(0.05));
+    float water = smoothstep(0.35, 0.65, land.a);
+    float near = 1.0 - smoothstep(0.35, 2.6, length(uCam - vPos));
+    col = land.rgb * mix(vec3(1.0), det, near * (1.0 - water) * 0.6);
+    col = mix(col, vec3(0.06, 0.2, 0.26), water * 0.85);
+    h = water > 0.5 ? -0.001 : max(h, 0.0005);
+    gd *= 0.4;
+  }
+#endif
   if (h >= 0.0) {
     // Fields, groves and tufts: brightness and a touch of hue, more on grass than on rock or snow.
     float soft = 1.0 - smoothstep(0.65, 1.0, h / uRelief);
@@ -190,7 +235,12 @@ void main() {
   // Light: the sun (overhead on a ring or a sphere, low on a disc), the sky's light, and the sea's glint.
   vec3 L = sunAt(rel);
   float ndl = max(dot(n, L), 0.0);
+#ifdef HABITAT
+  // Mirror light through the windows, as Star Crew lights its O'Neill land.
+  vec3 lit = col * uSunCol * (0.45 + 0.55 * ndl) * uDay;
+#else
   vec3 lit = col * (uSunCol * ndl * 0.82 + vec3(0.3, 0.36, 0.46) * (0.3 + 0.2 * n.y)) * uDay;
+#endif
   if (h < 0.0) {
     vec3 hv = normalize(L - view);
     lit += uSunCol * pow(max(dot(n, hv), 0.0), 120.0) * 0.8 * uDay;
@@ -229,7 +279,7 @@ export class MegaTerrain {
   constructor(readonly uniforms: Record<string, THREE.IUniform>, count: number) {
     for (let i = 0; i < count; i++) {
       const mat = new THREE.ShaderMaterial({
-        vertexShader: TERRAIN_VERT, fragmentShader: TERRAIN_FRAG, side: THREE.DoubleSide,
+        vertexShader: TERRAIN_VERT, fragmentShader: TERRAIN_FRAG, side: THREE.DoubleSide, defines: landDefines(uniforms),
         uniforms: {
           ...uniforms,
           uLevelCentre: { value: new THREE.Vector2() }, uSpacing: { value: 1 }, uE: { value: 1 }, uOuter: { value: i === count - 1 ? 1 : 0 },

@@ -61,6 +61,8 @@ export const BIOME_YIELDS: Readonly<Record<string, Partial<Record<Resource, numb
   aurora: { credits: 4, faith: 2, gases: 2 },
   bones: { goods: 3, faith: 2, metals: 1 },
   deadtech: { metals: 5, crystals: 2 },
+  diamond: { crystals: 9, credits: 3 },
+  canyon: { metals: 4, crystals: 2, goods: 1 },
 };
 
 /** Science shards a year from a colony's world itself (machines that still remember something). */

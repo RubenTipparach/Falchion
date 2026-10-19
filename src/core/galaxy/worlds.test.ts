@@ -44,8 +44,8 @@ describe('worlds: existing planets keep their type', () => {
     expect(refined / total).toBeLessThan(0.45);
   });
 
-  it('has 21 types, each with a look and yields; only the original nine are rolled first', () => {
-    expect(BIOMES.length).toBe(21);
+  it('has 23 types, each with a look and yields; only the original nine are rolled first', () => {
+    expect(BIOMES.length).toBe(23);
     expect(BASE_BIOMES.map((b) => b.id)).toEqual(['terran', 'ocean', 'jungle', 'desert', 'ice', 'volcanic', 'toxic', 'barren', 'gas']);
     for (const b of BIOMES) {
       expect(PLANET_LOOKS[b.id], b.id).toBeDefined();

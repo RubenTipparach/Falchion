@@ -9,6 +9,9 @@ import { MAX_SETTLEMENTS } from '../../../core/surface/SurfaceLayout';
 import { ATMOSPHERE_GLSL } from '../atmosphere.glsl';
 import { LIGHT_MAP_GLSL } from '../NightLightMap';
 import { NOISE_GLSL } from '../noise.glsl';
+import { RELIEF_GLSL } from '../relief.glsl';
+import { PATTERN_GLSL } from '../patterns.glsl';
+import { CRATER_DEPTH, EYE_DEPTH, VOLCANO_HEIGHT } from '../../../core/surface/Terrain';
 
 /** Most settlements the terrain shader flattens and draws streets for (main city, cities and towns). */
 export const MAX_SITES = MAX_SETTLEMENTS;
@@ -21,15 +24,21 @@ export const ROAD_MIN_PX = 1.4;
 
 /** Terrain height, flattened under settlements and dug out for the mine pit (mirrors SurfaceTerrain.shapedHeight). */
 const TERRAIN_GLSL = /* glsl */ `
+${RELIEF_GLSL}
 uniform vec3 uSeed; uniform float uDetail; uniform float uSea; uniform float uCraters; uniform float uDry;
+uniform float uCanyons; uniform float uVolcanoes; uniform float uLocked;
 uniform vec4 uCityA[${MAX_SITES}]; uniform vec4 uCityB[${MAX_SITES}]; uniform vec4 uCityC[${MAX_SITES}]; uniform int uCityN;
 uniform vec4 uPit; uniform float uPitDepth;
+/** rawHeight in core/surface/Terrain.ts: noise, ridges and the landforms (RELIEF_GLSL), in the same order. */
 float rawH(vec3 d, float oct) {
   vec3 p = d * uDetail + uSeed;
   float h = fbmN(p, oct);
-  if (uCraters > 0.5) h += (ridged(p * 1.6) - 0.6) * 0.5;
+  if (uCraters > 0.5) h += craters(p, oct) * ${CRATER_DEPTH.toFixed(3)};
   float land = smoothstep(uSea + 0.03, uSea + 0.5, h);
   h += land * (ridged(p * 2.0 + vec3(5.1)) - 0.55) * 0.5;
+  if (uCanyons > 0.0) h -= canyonDepth(canyonCut(p, uCanyons), uCanyons);
+  if (uVolcanoes > 0.5) h += volcanoes(p, uSeed, uDetail).x * ${VOLCANO_HEIGHT.toFixed(3)};
+  if (uLocked > 0.0) h -= lockedEye(d.x, h, uLocked) * ${EYE_DEPTH.toFixed(3)};
   return h;
 }
 float shapedH(vec3 d, float oct) {
@@ -123,11 +132,16 @@ uniform sampler2D uLightMap;
 #ifdef SEA_GLOW
 uniform vec3 uSeaGlow;
 #endif
+#ifdef GLITTER
+uniform vec3 uGlitter;
+#endif
 varying vec3 vDir; varying vec3 vN; varying vec3 vW; varying float vH;
 ${NOISE_GLSL}
 ${TERRAIN_GLSL}
 ${PATCH_GLSL}
 ${LIGHT_MAP_GLSL}
+${ATMOSPHERE_GLSL}
+${PATTERN_GLSL}
 /**
  * Detail noise anchored to the planet: the two power-of-two frequencies either side of f, blended
  * by where f falls between them. Zooming changes only the blend (detail fades in and out); a
@@ -163,6 +177,8 @@ void main() {
   float coarse = snoise(p * 6.0);
   vec3 col; vec3 em = vec3(0.0); float spec = 0.0; float cracks = 0.0;
   bool water = uDry < 0.5 && h < uSea;
+  // A locked world's water beyond its sunward basin is frozen (as the system view draws it).
+  float iced = uLocked > 0.0 ? 1.0 - smoothstep(uLocked - 0.25, uLocked - 0.05, dir.x + snoise(p * 3.0) * 0.05) : 0.0;
   if (water) {
     col = mix(uC0, uC1, smoothstep(uSea - 0.45, uSea, h));
     col = mix(col, uC1 * 1.25 + vec3(0.0, 0.06, 0.05), smoothstep(uSea - 0.05, uSea, h) * 0.6);
@@ -185,7 +201,51 @@ void main() {
     if (uSnow > 0.5) col = mix(col, vec3(0.93, 0.95, 1.0), smoothstep(uSea + 0.5, uSea + 0.62, h + fine * 0.04));
     if (uLava > 0.5) cracks = smoothstep(0.8, 0.96, ridged(p * 1.3 + vec3(0.0, uTime * 0.01, 0.0)) + fine * 0.03);
   }
-  float caps = smoothstep(uIce, uIce + 0.06, abs(dir.y) + h * 0.12 + fine * 0.02);
+  if (uLocked > 0.0) {
+    // The frozen side: sea ice, and the land under snow beyond the basin's shore.
+    float shore = 1.0 - smoothstep(uLocked - 0.3, uLocked - 0.05, dir.x + fine * 0.01);
+    vec3 iceCol = mix(vec3(0.6, 0.7, 0.8), vec3(0.9, 0.94, 0.98), smoothstep(-0.3, 0.4, h + coarse * 0.15)) * (0.94 + 0.06 * fine);
+    float frozen = water ? iced : smoothstep(0.25, 0.75, shore + coarse * 0.2);
+    col = mix(col, iceCol, frozen);
+    spec *= 1.0 - frozen;
+  }
+  // Craters by their albedo, as from orbit: dark floors, bright rims and ejecta.
+  if (uCraters > 0.5) col *= 1.0 + clamp(craters(p, 7.0) * 1.6, -0.4, 0.35);
+  // Canyon walls: darker, banded strata (as from orbit); the bands fade where they would alias.
+  if (uCanyons > 0.0) {
+    float cut = canyonCut(p, uCanyons);
+    float bands = 1.0 - smoothstep(0.5, 1.5, fwidth(h * 40.0));
+    // The walls in the planet's own darker strata (the pale cliff rock would outline every step of the mesh).
+    col = mix(col, mix(uC1, uC2, 0.5 + 0.5 * sin(h * 23.0 + fine * 0.3) * bands), smoothstep(0.15, 0.6, cut) * 0.7);
+    col *= 1.0 - cut * (0.25 + 0.12 * sin(h * 40.0 + fine * 0.5) * bands);
+  }
+  // Volcanoes: ash cones, a glowing caldera rim and lava rivers down the flanks.
+  if (uVolcanoes > 0.5) {
+    vec2 v = volcanoes(p, uSeed, uDetail);
+    col = mix(col, uC3 * 1.25 + vec3(0.04), clamp(v.x * 1.2, 0.0, 0.6));
+    float lava = v.y * (0.75 + 0.25 * fine);
+    em += uGlow * lava * 1.8;
+    col = mix(col, uGlow * 0.5, lava * 0.6);
+  }
+#ifdef GLITTER
+  {
+    vec3 fc = floor(dir * 260.0 * max(1.0, uFine / 40.0));
+    float facet = hash13(fc + floor(uSeed));
+    vec3 Vg = normalize(uCam - vW);
+    float glint = step(0.93, facet) * pow(max(dot(reflect(-L, n), Vg), 0.0), 6.0) * (0.6 + 0.4 * sin(uTime * 3.0 + facet * 60.0));
+    em += uGlitter * glint * 2.0 * day;
+    spec = max(spec, 0.6);
+  }
+#endif
+#ifdef PATTERN
+  {
+    vec3 patE = vec3(0.0);
+    float dusk = 1.0 - smoothstep(-0.2, 0.3, ndlS);
+    col = surfacePattern(dir, p, h, col, 1.0, uClose, dusk, spec, patE);
+    em += patE;
+  }
+#endif
+  float caps = uLocked > 0.0 ? 0.0 : smoothstep(uIce, uIce + 0.06, abs(dir.y) + h * 0.12 + fine * 0.02);
   col = mix(col, vec3(0.92, 0.95, 1.0) * (0.92 + 0.08 * fine), caps);
   spec *= 1.0 - caps;
 

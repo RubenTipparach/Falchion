@@ -36,8 +36,11 @@ export const BIOMES: readonly BiomeDef[] = [
   { id: 'magma', name: 'Magma', color: '#ff6a1a', adjacent: ['volcanic'], weight: 0, settle: 'never', blurb: 'A molten crust baking close to its star.' },
   { id: 'acid', name: 'Acid', color: '#c6e83a', adjacent: ['toxic', 'hazy'], weight: 0, blurb: 'Glowing seas of acid under yellow cloud.' },
   { id: 'aurora', name: 'Aurora', color: '#7affc4', adjacent: ['ice', 'terran'], weight: 0, blurb: 'A fierce magnetic field: curtains of light round both poles.' },
-  { id: 'bones', name: 'Bone', color: '#e8dcc0', adjacent: ['desert', 'barren'], weight: 0, blurb: 'The skeletons of creatures the size of mountain ranges.' },
+  { id: 'bones', name: 'Bone', color: '#e8dcc0', adjacent: ['desert', 'barren'], weight: 0, blurb: 'A dead world: plains of bleached bones, dead forests and dry salt flats where its seas were.' },
   { id: 'deadtech', name: 'Dead Machine', color: '#8a8f96', adjacent: ['barren', 'choir'], weight: 0, blurb: 'A technologically dead civilisation: its machines rust where they stopped.' },
+  // ── Change planet-audit ──
+  { id: 'diamond', name: 'Diamond', color: '#a8c8f0', adjacent: ['barren', 'volcanic'], weight: 0, blurb: 'A carbon world: graphite plains and diamond crust that glitters in the starlight.' },
+  { id: 'canyon', name: 'Canyon', color: '#c8744a', adjacent: ['desert', 'rust', 'barren'], weight: 0, blurb: 'Rift valleys miles deep cut across the whole world, like Mars’s Valles Marineris.' },
 ];
 
 /** Biomes the first roll can give (the original nine, in their original order: the roll depends on it). */
@@ -82,6 +85,9 @@ export const REFINEMENTS: readonly Refinement[] = [
   { to: 'rust', from: ['desert', 'barren'], chance: () => 0.25 },
   { to: 'swamp', from: ['jungle', 'ocean', 'toxic'], chance: () => 0.3 },
   { to: 'storm', from: ['ocean', 'jungle', 'terran', 'toxic'], chance: () => 0.14 },
+  // Change planet-audit (after every older rule, so no world refined before changes).
+  { to: 'diamond', from: ['barren', 'volcanic', 'desert'], chance: (c) => (c.starKind === 'white-dwarf' ? 0.2 : hot(c) ? 0.06 : 0.025) },
+  { to: 'canyon', from: ['barren', 'desert'], chance: () => 0.2 },
 ];
 
 /** Can this biome be settled by a colony ship? */

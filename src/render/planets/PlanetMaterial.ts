@@ -4,7 +4,9 @@ import { Rng } from '../../core/rng/Rng';
 import { LIGHT_MAP_GLSL, NO_LIGHTS } from './NightLightMap';
 import { NOISE_GLSL } from './noise.glsl';
 import { ATMOSPHERE_GLSL, atmosphereDefines } from './atmosphere.glsl';
-import { surfaceLookOf, type SurfaceLook } from '../../core/surface/Terrain';
+import { CRATER_DEPTH, EYE_DEPTH, VOLCANO_HEIGHT, surfaceLookOf, type SurfaceLook } from '../../core/surface/Terrain';
+import { RELIEF_GLSL } from './relief.glsl';
+import { PATTERN_GLSL, PATTERN_IDS } from './patterns.glsl';
 
 const KIND: Record<PlanetLook['kind'], number> = { rocky: 0, gas: 1, lava: 2 };
 
@@ -24,64 +26,6 @@ void main() {
   vNormalW = normalize(normalMatrix * normal);
   gl_Position = projectionMatrix * mv;
 }`;
-
-/**
- * Optional features (change worlds-and-stars), each compiled in only for a look that asks for it
- * (#define), so every older look compiles to exactly the shader it had. The weather (haze,
- * lightning, aurora) is in ATMOSPHERE_GLSL, shared with the close-up; hash13 and cubeUV too.
- */
-const FEATURES_GLSL = /* glsl */ `
-#ifdef PATTERN
-/** Antialiased line: 1 within halfW of an integer of g (at least about a pixel wide). */
-float gridLine(float g, float halfW) { float fw = fwidth(g); float w = max(halfW, fw * 0.6); float d = abs(g - floor(g + 0.5)); return 1.0 - smoothstep(w - fw * 0.5, w + fw * 0.5, d); }
-#if PATTERN == 4
-/**
- * Giant skeletons, one round each of six directions (an octahedron turned by the seed, so every
- * side shows one): a spine, a skull and a cage of ribs curving back. 1 on bone, and a halo (y)
- * where the bone's shadow darkens the ground.
- */
-vec2 bonesAt(vec3 d) {
-  float bone = 0.0, halo = 0.0;
-  float ca = cos(uSeed.x * 0.37), sa = sin(uSeed.x * 0.37), cb = cos(uSeed.y * 0.29), sb = sin(uSeed.y * 0.29);
-  for (int i = 0; i < 6; i++) {
-    float fi = float(i);
-    vec3 c = i == 0 ? vec3(1.0, 0.0, 0.0) : i == 1 ? vec3(-1.0, 0.0, 0.0) : i == 2 ? vec3(0.0, 1.0, 0.0) : i == 3 ? vec3(0.0, -1.0, 0.0) : i == 4 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 0.0, -1.0);
-    c = vec3(c.x * ca - c.z * sa, c.y, c.x * sa + c.z * ca);
-    c = vec3(c.x, c.y * cb - c.z * sb, c.y * sb + c.z * cb);
-    float k = dot(d, c);
-    if (k < 0.55) continue;
-    vec3 up = abs(c.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
-    vec3 t1 = normalize(cross(up, c)), t2 = cross(c, t1);
-    float a = uSeed.z * 0.53 + fi * 1.9;
-    vec3 e1 = t1 * cos(a) + t2 * sin(a), e2 = cross(c, e1);
-    vec3 q = d / k - c;
-    float sc = 1.15 + 0.4 * fract(sin(fi * 12.9898 + uSeed.x) * 43758.5);
-    float u = dot(q, e1) / sc, v = dot(q, e2) / sc;
-    float L = 0.5;
-    if (abs(u) > L + 0.2 || abs(v) > 0.4) continue;
-    // Spine with knobbly vertebrae; it tapers into a tail.
-    float vert = 0.022 + 0.008 * smoothstep(0.3, 0.5, abs(fract(u * 18.0) - 0.5) * 2.0);
-    float sw = vert * mix(0.45, 1.0, smoothstep(-L, -0.15, u));
-    float spine = (1.0 - smoothstep(sw * 0.7, sw, abs(v))) * step(-L, u) * step(u, L);
-    // The cage: ribs from u = -0.22 to 0.32, longest in the middle, arcing back from the spine.
-    float cage = clamp((u + 0.22) / 0.54, 0.0, 1.0);
-    float ribLen = 0.3 * sqrt(max(0.0, 1.0 - pow(cage * 2.0 - 1.0, 2.0)));
-    float uu = (u + 1.1 * v * v) / 0.085;
-    float rib = gridLine(uu, 0.14) * step(abs(v), ribLen) * step(0.015, abs(v)) * step(-0.24, u) * step(u, 0.34);
-    // Skull ahead of the spine, with dark eye sockets.
-    vec2 sk = vec2((u - L - 0.07) / 1.35, v);
-    float skull = 1.0 - smoothstep(0.055, 0.068, length(sk));
-    float eyes = 1.0 - smoothstep(0.012, 0.02, length(vec2(u - L - 0.085, abs(v) - 0.03)));
-    float b = max(max(spine, rib), skull) * (1.0 - eyes * 0.8);
-    bone = max(bone, b);
-    float near = max(max(1.0 - smoothstep(sw, sw * 2.6, abs(v)), 0.0) * step(-L, u) * step(u, L), 1.0 - smoothstep(0.068, 0.1, length(sk)));
-    halo = max(halo, max(near, gridLine(uu, 0.3) * step(abs(v), ribLen + 0.02) * step(-0.25, u) * step(u, 0.35)));
-  }
-  return vec2(bone, halo);
-}
-#endif
-#endif
-`;
 
 const FRAG = /* glsl */ `
 uniform vec3 uC0; uniform vec3 uC1; uniform vec3 uC2; uniform vec3 uC3;
@@ -103,11 +47,16 @@ uniform vec3 uSeaGlow;
 #ifdef HAZE
 uniform float uHaze;
 #endif
+uniform float uCanyons; uniform float uVolcanoes;
+#ifdef GLITTER
+uniform vec3 uGlitter;
+#endif
 varying vec3 vObj; varying vec3 vNormalW; varying vec3 vPosW;
 ${NOISE_GLSL}
 ${LIGHT_MAP_GLSL}
 ${ATMOSPHERE_GLSL}
-${FEATURES_GLSL}
+${RELIEF_GLSL}
+${PATTERN_GLSL}
 void main() {
   vec3 n = normalize(vNormalW);
   vec3 L = normalize(uStarPos - vPosW);
@@ -116,7 +65,7 @@ void main() {
   float lat = abs(vObj.y);
   float ndl = dot(n, L);
   float day = smoothstep(-0.12, 0.35, ndl);
-  vec3 col; vec3 emissive = vec3(0.0); float spec = 0.0;
+  vec3 col; vec3 emissive = vec3(0.0); float spec = 0.0; float hRel = 0.0;
 
 #if KIND == 1
   // Gas giant: warped latitude bands with a storm.
@@ -130,23 +79,31 @@ void main() {
   float storm = smoothstep(0.22, 0.0, distance(vObj, stormC) + snoise(p * 4.0) * 0.04);
   col = mix(col, uC3, storm * 0.85);
 #else
+  // Height as the close-up's (rawHeight, core/surface/Terrain.ts), at the system view's octaves.
   float h = fbm(p);
-  if (uCraters > 0.5) {
-    float cr = ridged(p * 1.6);
-    h += (cr - 0.6) * 0.5;
-  }
+  float crater = uCraters > 0.5 ? craters(p, 7.0) : 0.0;
+  h += crater * ${CRATER_DEPTH.toFixed(3)};
+  float cut = uCanyons > 0.0 ? canyonCut(p, uCanyons) : 0.0;
+  h -= canyonDepth(cut, uCanyons);
+  vec2 volc = uVolcanoes > 0.5 ? volcanoes(p, uSeed, uDetail) : vec2(0.0);
+  h += volc.x * ${VOLCANO_HEIGHT.toFixed(3)};
+  // The landforms alone shade the relief below (the fine noise would only alias at this size).
+  hRel = crater * ${CRATER_DEPTH.toFixed(3)} - canyonDepth(cut, uCanyons) + volc.x * ${VOLCANO_HEIGHT.toFixed(3)};
 #ifdef SEA_GLOW
   vec3 seaE = vec3(0.0);
 #endif
 #ifdef LOCKED
-  // Tidally locked: the sea lies where the star stands overhead (the angle to the star, so it
-  // faces the star however the globe turns), a shore of bare ground, then ice to a frozen night.
-  float sub = ndl + h * 0.22;
-  if (sub > uLocked) {
-    col = mix(uC1, uC0, smoothstep(uLocked, uLocked + 0.4, sub));
-    spec = 1.0;
+  // Tidally locked (change planet-audit): the planet keeps its +x pole to the star (SystemLayer
+  // turns it so), and the sea fills the sunward basin there (lockedEye, as the close-up bakes it).
+  // Beyond the basin's shore the land gives way to ice, to a frozen night side.
+  float eye = lockedEye(vObj.x, h, uLocked);
+  h -= eye * ${EYE_DEPTH.toFixed(3)};
+  if (h < uSea) {
+    float iced = 1.0 - smoothstep(uLocked - 0.25, uLocked - 0.05, vObj.x + snoise(p * 3.0) * 0.05);
+    col = mix(mix(uC0, uC1, smoothstep(uSea - 0.45, uSea, h)), vec3(0.82, 0.88, 0.94), iced);
+    spec = 1.0 - iced;
   } else {
-    float shore = 1.0 - smoothstep(uLocked - 0.22, uLocked, sub);
+    float shore = 1.0 - smoothstep(uLocked - 0.3, uLocked - 0.05, vObj.x);
     vec3 land = mix(uC2, uC3, smoothstep(-0.2, 0.4, h)) * (0.85 + 0.15 * snoise(p * 6.0));
     vec3 ice = mix(vec3(0.55, 0.66, 0.78), vec3(0.9, 0.94, 0.98), smoothstep(-0.3, 0.4, h + snoise(p * 5.0) * 0.15));
     col = mix(land, ice, smoothstep(0.25, 0.75, shore + snoise(p * 3.0) * 0.2));
@@ -167,6 +124,23 @@ void main() {
     col *= 0.85 + 0.3 * snoise(p * 6.0) * 0.5;
   }
 #endif
+  // Craters read from orbit by their albedo, as the Moon's do: dark floors, bright rims and ejecta.
+  col *= 1.0 + clamp(crater * 1.6, -0.4, 0.35);
+  // Volcano flanks: pale ash, so the cones stand out from the dark plains.
+  col = mix(col, uC3 * 1.25 + vec3(0.04), clamp(volc.x * 1.2, 0.0, 0.6));
+  // Canyon walls: darker, banded strata.
+  col *= 1.0 - cut * (0.3 + 0.12 * sin(h * 40.0) * (1.0 - smoothstep(0.5, 1.5, fwidth(h * 40.0))));
+  // Volcanoes: lava in the calderas and down the flanks.
+  emissive += uGlow * volc.y * 1.8;
+  col = mix(col, uGlow * 0.5, volc.y * 0.6);
+#ifdef GLITTER
+  // Diamond facets: sparks where a facet catches the star.
+  vec3 fc = floor(vObj * 260.0);
+  float facet = hash13(fc + floor(uSeed));
+  float glint = step(0.93, facet) * pow(max(dot(reflect(-L, n), V), 0.0), 6.0) * (0.6 + 0.4 * sin(uTime * 3.0 + facet * 60.0));
+  emissive += uGlitter * glint * 2.0 * day;
+  spec = max(spec, 0.6);
+#endif
   #if KIND == 2
     float cracks = smoothstep(0.82, 0.97, ridged(p * 1.3 + vec3(0.0, uTime * 0.01, 0.0)));
     emissive += uGlow * cracks * 2.2;
@@ -185,66 +159,7 @@ void main() {
   // Night here reaches a little past the terminator, so a thumbnail's thin night side still shows lights.
   float dusk = 1.0 - smoothstep(-0.2, 0.3, ndl);
   vec3 patE = vec3(0.0);
-  vec3 cu = cubeUV(vObj);
-  #if PATTERN == 1
-  // City world: blocks of grey and metal, streets and avenues; gold lights over the whole night.
-  vec2 g = cu.xy * 9.0;
-  vec2 bid = floor(g);
-  float bh = hash13(vec3(bid, cu.z) + floor(uSeed));
-  float dist = fbm(vObj * 3.0 + uSeed);
-  vec3 block = mix(uC1, uC3, bh) * (0.8 + 0.35 * hash13(vec3(floor(g * 3.0), cu.z + 7.0)));
-  block = mix(block, mix(uC2, vec3(0.62, 0.6, 0.55), 0.4), smoothstep(0.1, 0.5, dist) * 0.5);
-  float street = max(gridLine(g.x, 0.07), gridLine(g.y, 0.07));
-  float avenue = max(gridLine(cu.x * 3.0, 0.03), gridLine(cu.y * 3.0, 0.03));
-  col = mix(block, uC0, max(street * 0.8, avenue));
-  spec = 0.25;
-  float windows = step(0.45, hash13(vec3(floor(g * 4.0), cu.z + 3.0)));
-  float dense = 0.55 + 0.45 * smoothstep(-0.4, 0.4, dist);
-  patE = uGlow * (windows * 0.35 * dense + street * 0.7 + avenue * 1.3) * (dusk * 1.6 + 0.06);
-  #elif PATTERN == 2
-  // Dead machine world: rusting plates, seams and dead blocks; a few dying lights.
-  vec2 g = cu.xy * 11.0;
-  vec2 pid = floor(g), f = fract(g);
-  float ph = hash13(vec3(pid, cu.z) + floor(uSeed));
-  vec2 g3 = cu.xy * 3.5;
-  float blk = hash13(vec3(floor(g3), cu.z + 11.0) + floor(uSeed));
-  vec3 plate = mix(uC1, uC2, ph) * (0.75 + 0.5 * step(0.7, blk));
-  float rust = smoothstep(0.0, 0.5, fbm(vObj * 4.0 + uSeed.zxy) + h * 0.4);
-  plate = mix(plate, uC3 * (0.8 + 0.4 * snoise(p * 9.0)), rust * 0.75);
-  // Bevel: lit top-left edge, shadowed bottom-right, dark seams.
-  plate *= 1.0 + 0.25 * (1.0 - smoothstep(0.0, 0.1, f.x)) - 0.3 * smoothstep(0.88, 1.0, f.y);
-  float seam = max(gridLine(g.x, 0.05), gridLine(g.y, 0.05));
-  float trench = max(gridLine(g3.x, 0.04), gridLine(g3.y, 0.04));
-  col = mix(plate, uC0, max(seam * 0.85, trench));
-  spec = 0.4 * (1.0 - rust);
-  vec3 lid = vec3(floor(cu.xy * 22.0), cu.z);
-  float lh = hash13(lid + floor(uSeed) + 5.0);
-  float lamp = step(0.95, lh) * (1.0 - smoothstep(0.1, 0.42, length(fract(cu.xy * 22.0) - 0.5)));
-  float flicker = smoothstep(0.2, 0.5, fract(uTime * (0.1 + lh * 0.3) + lh * 17.0)) * (0.7 + 0.3 * sin(uTime * 13.0 + lh * 40.0));
-  patE = uGlow * lamp * flicker * (dusk * 1.8 + 0.9);
-  #elif PATTERN == 3
-  // Choir world: circuit traces over a pale dead crust, pulses running along them.
-  vec2 g = cu.xy * 12.0;
-  vec2 cid = floor(g);
-  float hx = hash13(vec3(cid.x + 0.5, floor(g.y + 0.5), cu.z) + floor(uSeed));
-  float hy = hash13(vec3(floor(g.x + 0.5), cid.y + 0.5, cu.z + 9.0) + floor(uSeed));
-  float trX = gridLine(g.y, 0.05) * step(0.45, hx);
-  float trY = gridLine(g.x, 0.05) * step(0.45, hy);
-  vec2 nd = g - floor(g + 0.5);
-  float node = (1.0 - smoothstep(0.1, 0.16, length(nd))) * step(0.6, hash13(vec3(floor(g + 0.5), cu.z + 4.0)));
-  float trace = max(max(trX, trY), node);
-  float pulse = pow(0.5 + 0.5 * sin((g.x + g.y) * 0.9 - uTime * 2.2 + cu.z * 1.7), 6.0);
-  float breathe = 0.55 + 0.45 * sin(uTime * 0.7 + fbm(vObj * 2.0 + uSeed) * 6.0);
-  col = mix(col, col * 0.55, trace * 0.8);
-  patE = uGlow * trace * (0.35 + 1.2 * pulse) * breathe * (dusk * 1.3 + 0.8);
-  #elif PATTERN == 4
-  // Bone world: ivory skeletons over a scored pale desert.
-  float score = ridged(vec3(vObj.x * 9.0, vObj.y * 2.0, vObj.z * 9.0) + uSeed);
-  col *= 0.88 + 0.22 * smoothstep(0.55, 0.95, score);
-  vec2 bo = bonesAt(vObj);
-  col *= 1.0 - bo.y * 0.45;
-  col = mix(col, vec3(0.98, 0.95, 0.87), bo.x);
-  #endif
+  col = surfacePattern(vObj, p, h, col, 1.0, 0.0, dusk, spec, patE);
 #endif
   // Clouds drift slowly (the close-up's cloud shell draws the same ones).
   float cloud = cloudCover(vObj, uSeed, uDetail, uTime, uClouds);
@@ -277,22 +192,41 @@ void main() {
 #endif
 #endif
 
+  // Relief: the height shades the surface (a bump from its screen-space slope), so craters,
+  // canyons and volcanoes stand out from orbit as they do in the close-up. The sphere's radius in
+  // view units is the ratio of its position's change to its unit direction's.
+  float relief = 1.0;
+#if KIND != 1
+  // Derivatives outside the branch (they are undefined in non-uniform control flow).
+  vec3 dpx = dFdx(vPosW), dpy = dFdy(vPosW);
+  float R = length(dpx) / max(length(dFdx(vObj)), 1e-7);
+  float bh = hRel * 0.045 * R;
+  vec3 r1 = cross(dpy, n), r2 = cross(n, dpx);
+  float det = dot(dpx, r1);
+  vec3 grad = sign(det) * (dFdx(bh) * r1 + dFdy(bh) * r2);
+  // Faded out where the relief changes faster than the pixels can follow (a small, far planet).
+  float sharp = 1.0 - smoothstep(0.15, 0.4, fwidth(hRel));
+  if (spec < 0.5) {
+    vec3 nb = normalize(abs(det) * n - grad);
+    relief = mix(1.0, clamp(1.0 + (dot(nb, L) - ndl) * 1.8, 0.35, 1.5), sharp);
+  }
+#endif
   vec3 H = normalize(L + V);
   float sp = pow(max(dot(n, H), 0.0), 40.0) * spec * day;
-  vec3 lit = col * (0.03 + 0.97 * day) * uStarColor + sp * 0.6 * uStarColor + emissive;
+  vec3 lit = col * (0.03 + 0.97 * day * relief) * uStarColor + sp * 0.6 * uStarColor + emissive;
   float rim = pow(1.0 - max(dot(n, V), 0.0), 2.5);
   lit += uAtmo * rim * uAtmoStrength * (0.15 + 0.85 * smoothstep(-0.3, 0.6, ndl));
   gl_FragColor = vec4(lit, 1.0);
 }`;
 
-const PATTERN: Record<NonNullable<PlanetLook['pattern']>, number> = { city: 1, machine: 2, circuit: 3, bones: 4 };
 
 /** The #defines for a look's optional features (none for a look without them: the original shader). */
 function featureDefines(s: SurfaceLook): Record<string, number> {
   const d: Record<string, number> = atmosphereDefines(s);
   if (s.locked !== undefined) d.LOCKED = 1;
   if (s.seaGlow) d.SEA_GLOW = 1;
-  if (s.pattern) d.PATTERN = PATTERN[s.pattern];
+  if (s.pattern) d.PATTERN = PATTERN_IDS[s.pattern];
+  if (s.glitter) d.GLITTER = 1;
   return d;
 }
 
@@ -317,6 +251,7 @@ export function createPlanetMaterial(look: PlanetLook, seed: number, opts: { lig
       // Optional features (read only where their #define is on).
       uLocked: { value: s.locked ?? 0 }, uAurora: { value: c(s.aurora ?? '#000000') }, uLightning: { value: s.lightning ?? 0 },
       uSeaGlow: { value: c(s.seaGlow ?? '#000000') }, uHaze: { value: s.haze ?? 0 },
+      uCanyons: { value: s.canyons }, uVolcanoes: { value: s.volcanoes ? 1 : 0 }, uGlitter: { value: c(s.glitter ?? '#000000') },
     },
     vertexShader: VERT,
     fragmentShader: FRAG,

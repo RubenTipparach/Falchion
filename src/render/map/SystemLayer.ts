@@ -46,6 +46,8 @@ interface OrbitingPlanet {
   readonly label: CSS2DObject;
   /** Turned so far (radians). */
   spin: number;
+  /** Tidally locked: its sunward pole stays on the star (no spin). */
+  readonly locked: boolean;
   /** Key of the night lights shown (what stands on the planet), null for none, undefined before the first check. */
   lightsKey?: string | null;
 }
@@ -224,8 +226,10 @@ export class SystemLayer implements MapLayer {
     sys.starLabel.element.style.opacity = labelFade;
     for (const p of sys.planets) {
       p.pivot.rotation.y = p.phase + t * p.speed;
-      p.spin += dt * SPIN;
-      p.mesh.rotation.y = p.spin;
+      if (!p.locked) {
+        p.spin += dt * SPIN;
+        p.mesh.rotation.y = p.spin;
+      }
       p.mesh.parent!.visible = p.planet.id !== this.heldId;
       p.material.uniforms.uTime.value = t;
       p.label.visible = showLabels;
@@ -293,7 +297,13 @@ export class SystemLayer implements MapLayer {
       mesh.onBeforeRender = (_r, _s, camera) => {
         material.uniforms.uStarPos.value.copy(this.starWorld).applyMatrix4(camera.matrixWorldInverse);
       };
-      mesh.rotation.z = rng.range(-0.4, 0.4);
+      // A tilted axis; a tidally locked world (change planet-audit) instead keeps its sunward pole
+      // (+x, where its basin is) to the star: no tilt, no spin (the roll is still drawn, so the
+      // planets after it keep their looks).
+      const tilt = rng.range(-0.4, 0.4);
+      const locked = look.locked !== undefined;
+      if (locked) mesh.rotation.set(0, Math.PI, 0);
+      else mesh.rotation.z = tilt;
       const pivot = new THREE.Object3D();
       const holder = new THREE.Object3D();
       holder.position.set(orbit, 0, 0);
@@ -313,7 +323,7 @@ export class SystemLayer implements MapLayer {
       holder.add(lbl);
       pivot.add(holder);
       root.add(pivot);
-      planets.push({ planet, pivot, mesh, material, radius, phase: rng.range(0, Math.PI * 2), speed: ORBIT_RATE / Math.pow(orbit * 12, 1.5), label: lbl, spin: this.lastTime * SPIN });
+      planets.push({ planet, pivot, mesh, material, radius, phase: rng.range(0, Math.PI * 2), speed: ORBIT_RATE / Math.pow(orbit * 12, 1.5), label: lbl, spin: this.lastTime * SPIN, locked });
     }
     this.lightsDirty = true;
     const belts = this.buildBelts(star, root, visual, orbits, firstOrbit);

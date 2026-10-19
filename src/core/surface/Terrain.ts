@@ -1,6 +1,7 @@
 import type { PlanetLook, PlanetPattern, SurfaceKind } from '../../content/planetLooks';
 import { Rng } from '../rng/Rng';
 import { fbmN, ridged4, smoothstep } from './Noise';
+import { canyonCut, canyonDepth, craters, lockedEye, volcanoes } from './Relief';
 
 /** A direction or point in a planet's own frame (unit sphere = the planet). */
 export type Vec3 = readonly [number, number, number];
@@ -38,6 +39,12 @@ export interface SurfaceLook {
   readonly seaGlow?: string;
   readonly pattern?: PlanetPattern;
   readonly haze?: number;
+  /** Canyon networks: how deep they cut (0: none). */
+  readonly canyons: number;
+  /** Volcanoes with lava in their calderas. */
+  readonly volcanoes: boolean;
+  /** Colour of the glitter on a diamond world's facets. */
+  readonly glitter?: string;
 }
 
 /**
@@ -60,19 +67,34 @@ export function surfaceLookOf(look: PlanetLook, seed: number): SurfaceLook {
     glow, cityGlow: look.kind === 'lava' || look.pattern === 'machine' || look.pattern === 'circuit' ? '#ffd27a' : glow,
     dry: look.sea < -1, craters: !!look.craters, snow: look.sea >= -1 && look.ice > 0.3 && look.ice < 1,
     locked: look.locked, aurora: look.aurora, lightning: look.lightning, seaGlow: look.seaGlow, pattern: look.pattern, haze: look.haze,
+    canyons: look.canyons ?? 0, volcanoes: !!look.volcanoes, glitter: look.glitter,
   };
 }
 
 /** Octaves of the globe's baked heightmap; the detail patch near the camera adds more on the GPU. */
 export const BASE_OCTAVES = 7;
 
-/** Terrain height (about -1..1) at a unit direction: continents, mountain ridges and craters. */
+/** How strongly craters dent the ground. */
+export const CRATER_DEPTH = 1.8;
+/** How tall volcanoes stand. */
+export const VOLCANO_HEIGHT = 2.0;
+/** How deep a locked world's sunward eye sinks (below its sea). */
+export const EYE_DEPTH = 0.9;
+
+/**
+ * Terrain height (about -1..1) at a unit direction: continents and mountain ridges, then the
+ * landforms (Relief.ts): craters, canyons, volcanoes and a locked world's sunward basin. The GLSL
+ * rawH (surface/shaders.ts) and the system view (PlanetMaterial) follow the same order.
+ */
 export function rawHeight(look: SurfaceLook, x: number, y: number, z: number, octaves = BASE_OCTAVES): number {
   const px = x * look.detail + look.seed[0], py = y * look.detail + look.seed[1], pz = z * look.detail + look.seed[2];
   let h = fbmN(px, py, pz, octaves);
-  if (look.craters) h += (ridged4(px * 1.6, py * 1.6, pz * 1.6) - 0.6) * 0.5;
+  if (look.craters) h += craters(px, py, pz, octaves) * CRATER_DEPTH;
   const land = smoothstep(look.sea + 0.03, look.sea + 0.5, h);
   if (land > 0) h += land * (ridged4(px * 2 + 5.1, py * 2 + 5.1, pz * 2 + 5.1) - 0.55) * 0.5;
+  if (look.canyons > 0) h -= canyonDepth(canyonCut(px, py, pz, look.canyons), look.canyons);
+  if (look.volcanoes) h += volcanoes(px, py, pz, look.seed[0], look.seed[1], look.seed[2], look.detail)[0] * VOLCANO_HEIGHT;
+  if (look.locked !== undefined) h -= lockedEye(x, h, look.locked) * EYE_DEPTH;
   return h;
 }
 

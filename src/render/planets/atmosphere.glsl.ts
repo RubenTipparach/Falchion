@@ -16,7 +16,7 @@ float cloudCover(vec3 d, vec3 seed, float detail, float time, float amount) {
   float c = fbm(d * (detail * 1.4) + seed.zxy + vec3(time * 0.015, 0.0, time * 0.008));
   return smoothstep(0.05, 0.55, c) * amount;
 }
-#if defined(LIGHTNING) || defined(PATTERN)
+#if defined(LIGHTNING) || defined(PATTERN) || defined(GLITTER)
 float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
 /** Cube-map coordinates of a direction: xy in -1..1 on its face, z the face (0..5). */
 vec3 cubeUV(vec3 d) {
@@ -48,7 +48,7 @@ vec4 hazeDeck(vec3 d, vec3 seed, float time, float amount, vec3 cloudCol, vec3 b
     vec3 q = d / k - sc;
     float r = length(q);
     float ang = atan(dot(q, a2), dot(q, a1));
-    float arm = 0.5 + 0.5 * sin(ang * 2.0 + log(r + 0.02) * 7.0 - time * 0.2 + hz * 2.0);
+    float arm = 0.5 + 0.5 * sin(ang * 2.0 + log(r + 0.02) * 7.0 - time * 0.07 + hz * 2.0);
     float reach = 1.0 - smoothstep(0.15, 0.6, r);
     swirl = max(swirl, arm * reach);
     cover *= 1.0 - (1.0 - smoothstep(0.02, 0.05, r)) * 0.8;
@@ -70,9 +70,9 @@ float lightningAt(vec3 d, vec3 seed, float time, float rate) {
   vec2 lc = vec2(0.25) + 0.5 * vec2(l1, hash13(lid + 41.7));
   float ld = length(fract(lq) - lc);
   float lphase = fract(time * rate * (0.25 + l1 * 0.5) + l2 * 13.0);
-  float lon = step(lphase, 0.08) * step(0.3, l2);
+  float lon = step(lphase, 0.05) * step(0.45, l2);
   float flick = 0.55 + 0.45 * sin(lphase * 260.0);
-  return lon * flick * ((1.0 - smoothstep(0.0, 0.45, ld)) * 0.75 + (1.0 - smoothstep(0.0, 0.08, ld)) * 1.4);
+  return lon * flick * ((1.0 - smoothstep(0.0, 0.45, ld)) * 0.55 + (1.0 - smoothstep(0.0, 0.08, ld)) * 1.0);
 }
 #endif
 #ifdef AURORA

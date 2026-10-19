@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "spec:validate": "openspec validate --all --strict",
-    "thumbs": "node tools/thumbs/shoot.mjs"
+    "thumbs": "node tools/thumbs/shoot.mjs",
+    "planets": "node tools/planets/shoot.mjs"
   },
   "dependencies": {
     "three": "^0.169.0"

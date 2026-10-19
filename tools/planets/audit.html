@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Planet Type Audit</title>
+<style>
+  body { margin: 0; padding: 16px; background: #0b0f17; color: #c9d4e3; font: 12px system-ui, sans-serif; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .row.head .name { color: #8fb3d9; font-weight: 600; width: var(--tile, 300px); text-align: center; }
+  .row.head .name:first-child { width: 120px; text-align: left; }
+  .row > .name:first-child { width: 120px; display: grid; gap: 2px; }
+  .row small { color: #7f8ea3; }
+  img { border-radius: 6px; background: #05070c; }
+  img.missing { outline: 2px solid #ff5d5d; }
+</style>
+</head>
+<body>
+<div id="audit"></div>
+<script type="module">
+  import { planetAudit } from '/src/render/planets/planetAudit.ts';
+  planetAudit(document.getElementById('audit'));
+</script>
+</body>
+</html>

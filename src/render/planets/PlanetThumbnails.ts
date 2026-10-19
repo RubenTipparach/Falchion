@@ -31,7 +31,9 @@ export class PlanetThumbnails {
     material.uniforms.uStarPos.value.set(-6, 4, 2);
     material.uniforms.uTime.value = 5;
     const sphere = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 40), material);
-    sphere.rotation.z = 0.25;
+    // A tidally locked world shows its sunward basin (its +x pole), turned toward the light and the viewer.
+    if (look.locked !== undefined) sphere.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), new THREE.Vector3(-0.6, 0.4, 0.7).normalize());
+    else sphere.rotation.z = 0.25;
     this.scene.add(sphere);
     let ring: THREE.Mesh | null = null;
     if (look.ringChance && new Rng(hashSeed(planet.id, 'ringroll')).chance(look.ringChance)) {

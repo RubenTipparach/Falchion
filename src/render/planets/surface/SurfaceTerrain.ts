@@ -4,6 +4,7 @@ import { BASE_OCTAVES, SurfaceLook, frameAt, rawHeight } from '../../../core/sur
 import { smoothstep } from '../../../core/surface/Noise';
 import { NO_LIGHTS } from '../NightLightMap';
 import { atmosphereDefines } from '../atmosphere.glsl';
+import { PATTERN_IDS } from '../patterns.glsl';
 import { AMP, ATMO_FRAG, ATMO_VERT, AURORA_FRAG, BASE_OCT, BASE_VERT, CLOUD_FRAG, MAX_SITES, PATCH_VERT, SHELL_VERT, TERRAIN_FRAG } from './shaders';
 
 /** Quality knobs: desktop full, touch-first devices lighter. */
@@ -71,6 +72,8 @@ export class SurfaceTerrain {
     this.uniforms = {
       uSeed: { value: new THREE.Vector3(...look.seed) }, uDetail: { value: look.detail }, uSea: { value: look.sea },
       uCraters: { value: look.craters ? 1 : 0 }, uDry: { value: look.dry ? 1 : 0 },
+      uCanyons: { value: look.canyons }, uVolcanoes: { value: look.volcanoes ? 1 : 0 }, uLocked: { value: look.locked ?? 0 },
+      uGlitter: { value: c(look.glitter ?? '#000000') },
       uCityA: { value: cityA }, uCityB: { value: cityB }, uCityC: { value: cityC }, uCityN: { value: Math.min(sites.length, MAX_SITES) },
       uPit: { value: new THREE.Vector4(0, 1, 0, 0.001) }, uPitDepth: { value: 0 },
       uC0: { value: c(look.palette[0]) }, uC1: { value: c(look.palette[1]) }, uC2: { value: c(look.palette[2]) }, uC3: { value: c(look.palette[3]) },
@@ -83,7 +86,10 @@ export class SurfaceTerrain {
       uBaseN: { value: quality.baseCells }, uLightMap: { value: lights ?? NO_LIGHTS },
       uSeaGlow: { value: c(look.seaGlow ?? '#000000') },
     };
-    const defines: Record<string, number> = { ...(quality.lite ? { LITE: 1 } : {}), ...(look.seaGlow ? { SEA_GLOW: 1 } : {}) };
+    const defines: Record<string, number> = {
+      ...(quality.lite ? { LITE: 1 } : {}), ...(look.seaGlow ? { SEA_GLOW: 1 } : {}),
+      ...(look.pattern ? { PATTERN: PATTERN_IDS[look.pattern] } : {}), ...(look.glitter ? { GLITTER: 1 } : {}),
+    };
     // Transparent only so the globe can crossfade over planet view; it writes depth as an opaque mesh would.
     this.baseMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: BASE_VERT, fragmentShader: TERRAIN_FRAG, defines: { ...defines, IS_BASE: 1 }, transparent: true });
     this.patchMat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: PATCH_VERT, fragmentShader: TERRAIN_FRAG, defines, transparent: true, side: THREE.DoubleSide });
@@ -96,7 +102,8 @@ export class SurfaceTerrain {
     const weather = atmosphereDefines(look);
     const U = this.uniforms;
     this.cloudMat = new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, premultipliedAlpha: true, defines: weather,
+      // Both sides: from the ground the deck is an overcast sky.
+      transparent: true, depthWrite: false, premultipliedAlpha: true, defines: weather, side: THREE.DoubleSide,
       uniforms: {
         uSeed: U.uSeed, uDetail: U.uDetail, uSun: U.uSun, uCam: U.uCam, uTime: U.uTime, uC3: U.uC3, uAtmo: U.uAtmo, uAtmoStrength: U.uAtmoStrength,
         uCloud: { value: c(look.cloudColor) },
@@ -268,10 +275,11 @@ export class SurfaceTerrain {
     U.uFine.value = Math.min(Math.max(36 / o.d, 30), 9000);
     U.uFar.value = smoothstep(0.06, 0.6, o.d);
     U.uClose.value = 1 - smoothstep(0.02, 0.35, o.alt);
-    // The clouds thin out below low orbit, so the ground shows; the aurora stays to the ground.
+    // The clouds thin out below low orbit, so the ground shows; the aurora stays to the ground. A
+    // world under a thick deck (a storm world, a hazy one) keeps it overhead: an overcast sky.
     const above = smoothstep(0.06, 0.4, o.alt);
     if (this.clouds) {
-      const f = above * o.fade;
+      const f = Math.max(above, (this.look.haze ?? 0) > 0.5 ? 0.8 : 0) * o.fade;
       this.cloudMat.uniforms.uFade.value = f;
       this.clouds.visible = f > 0.01;
     }

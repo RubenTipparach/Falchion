@@ -1,4 +1,5 @@
 import type { Resource } from '../../content/resources';
+import { cleanBattleRecord, type BattleRecord } from './BattleRecord';
 
 /**
  * An empire's battle log: every raid on its worlds and fleets, every round of a battle at sea,
@@ -35,16 +36,38 @@ export interface BattleLogEntry {
   readonly plunder?: Partial<Record<Resource, number>>;
   /** One line for people. */
   readonly summary: string;
+  /**
+   * The battle's rounds as the battle view draws them, our side first (change battle-replay): a
+   * raid or an assault keeps all its rounds; a battle at sea keeps the round this entry logs.
+   */
+  readonly records?: readonly BattleRecord[];
 }
 
 /** Entries kept: the oldest go first. */
 export const BATTLE_LOG_CAP = 60;
+/** Entries that keep their rounds for replaying: the newest (the save goes to the browser every year). */
+export const REPLAY_CAP = 24;
+/** Rounds one entry keeps (a raid fights at most 8). */
+const MAX_RECORDS = 8;
 
-/** The log with a new entry on top (its id made unique), bounded. */
+/** The log with a new entry on top (its id made unique), bounded; only the newest keep their rounds. */
 export function logBattle(log: readonly BattleLogEntry[] | undefined, entry: Omit<BattleLogEntry, 'id'>): BattleLogEntry[] {
   const list = log ?? [];
   const same = list.filter((e) => e.year === entry.year && e.kind === entry.kind).length;
-  return [{ ...entry, id: `${entry.year}:${entry.kind}:${same}` }, ...list].slice(0, BATTLE_LOG_CAP);
+  const top: BattleLogEntry = { ...entry, id: `${entry.year}:${entry.kind}:${same}`, ...(entry.records?.length ? { records: entry.records.slice(0, MAX_RECORDS) } : {}) };
+  if (!top.records) delete (top as { records?: unknown }).records;
+  return [top, ...list].slice(0, BATTLE_LOG_CAP).map((e, i) => (i >= REPLAY_CAP && e.records ? withoutRecords(e) : e));
+}
+
+const withoutRecords = (e: BattleLogEntry): BattleLogEntry => {
+  const { records: _, ...rest } = e;
+  return rest;
+};
+
+/** An entry's rounds from a save or the server, checked and bounded (untrusted: they came over the wire). */
+export function cleanRecords(x: unknown): BattleRecord[] {
+  if (!Array.isArray(x)) return [];
+  return x.slice(0, MAX_RECORDS).map(cleanBattleRecord).filter((r): r is BattleRecord => !!r);
 }
 
 /** Attacks on us logged after the entry last read (all of them when none was read, or it has gone). */

@@ -27,6 +27,11 @@ export interface BattleTarget {
   readonly fleetId: string | null;
   /** Where it is fought (a system's name, or deep space). */
   readonly place: string;
+  /**
+   * A battle from the log played back (change battle-replay): every round in turn on its own
+   * clock, from `from` (the view's time, seconds), instead of the latest round over the world year.
+   */
+  readonly replay?: { readonly rounds: readonly BattleRecord[]; readonly from: number; readonly year: number };
 }
 
 /** What the view needs from the game. */
@@ -82,10 +87,14 @@ export interface BattleFrame {
   readonly fleetId: string | null;
   readonly place: string;
   readonly breakingOff: boolean;
+  /** Playing a battle back from the log: which round of how many, and the year it was fought. */
+  readonly replay: { readonly round: number; readonly of: number; readonly year: number } | null;
 }
 
 /** Seconds a round lasts: one world year is one real minute. */
 const ROUND_SECONDS = 60;
+/** Seconds a round lasts in a replay, and the pause between rounds. */
+const REPLAY_ROUND = 20, REPLAY_GAP = 2;
 
 /**
  * The battle view (src/render/battle): a layer in the map's LayerStack that, while open, covers
@@ -120,6 +129,11 @@ export class BattleLayer implements MapLayer {
     return this.target !== null;
   }
 
+  /** The view's clock (seconds): where a replay starts from. */
+  get now(): number {
+    return Math.max(0, this.lastTime);
+  }
+
   get current(): BattleTarget | null {
     return this.target;
   }
@@ -136,16 +150,39 @@ export class BattleLayer implements MapLayer {
 
   /** The battle's state from the game: a new round replaces the one on stage. */
   setTarget(target: BattleTarget): void {
-    const same = this.target && this.target.key === target.key && this.target.tick === target.tick && this.target.record.round === target.record.round;
+    const same = this.target && this.target.key === target.key && this.target.tick === target.tick && this.target.record.round === target.record.round && this.target.replay === target.replay;
     this.target = target;
+    this.replayAt = 0;
     if (same && this.stage) return;
+    this.stage = this.stageFor(target, target.replay ? target.replay.rounds[0] : target.record);
+  }
+
+  /** The round of a replay on stage (its index). */
+  private replayAt = 0;
+
+  /** Put a round on stage. */
+  private stageFor(target: BattleTarget, record: BattleRecord): BattleStage {
     this.stage?.dispose();
-    this.stage = new BattleStage(this.factory);
-    if (this.env) this.stage.scene.environment = this.env;
-    const seed = hashSeed(target.key, target.tick, target.record.round);
+    const stage = new BattleStage(this.factory);
+    if (this.env) stage.scene.environment = this.env;
+    const seed = hashSeed(target.key, target.tick, record.round);
     // Wider spacing: every ship is a wing of four hulls (BattleStage WING).
-    this.script = buildScript(target.record, this.classes, { seed, R: ROUND_SECONDS, spacing: 22 });
-    this.stage.setScript(this.script, target.sides, seed);
+    this.script = buildScript(record, this.classes, { seed, R: target.replay ? REPLAY_ROUND : ROUND_SECONDS, spacing: 22 });
+    stage.setScript(this.script, target.sides, seed);
+    return stage;
+  }
+
+  /** The round on stage. */
+  private record(target: BattleTarget): BattleRecord {
+    return target.replay ? target.replay.rounds[this.replayAt] ?? target.record : target.record;
+  }
+
+  /** Play a replay again from its first round. */
+  restartReplay(): void {
+    const t = this.target;
+    if (!t?.replay) return;
+    this.setTarget({ ...t, replay: { ...t.replay, from: this.lastTime } });
+    this.rig.reset();
   }
 
   close(): void {
@@ -172,9 +209,19 @@ export class BattleLayer implements MapLayer {
     this.lastTime = view.time;
   }
 
-  /** Seconds into the round on stage. */
+  /** Seconds into the round on stage (a replay moves on to its next round when this one is done). */
   private time(): number {
-    return this.target ? Math.max(0, (this.host.worldTime() - this.target.tick) * ROUND_SECONDS) : 0;
+    const t = this.target;
+    if (!t) return 0;
+    if (!t.replay) return Math.max(0, (this.host.worldTime() - t.tick) * ROUND_SECONDS);
+    const n = t.replay.rounds.length, step = REPLAY_ROUND + REPLAY_GAP;
+    const into = Math.max(0, this.lastTime - t.replay.from);
+    const i = Math.min(n - 1, Math.floor(into / step));
+    if (i !== this.replayAt) {
+      this.replayAt = i;
+      this.stage = this.stageFor(t, t.replay.rounds[i]);
+    }
+    return into - i * step;
   }
 
   /** Follow the fleets: their centroid, pulled back as they stand apart. */
@@ -194,6 +241,8 @@ export class BattleLayer implements MapLayer {
   }
 
   overlay(renderer: THREE.WebGLRenderer): void {
+    // A replay may move on to its next round here: before the stage is read.
+    this.time();
     const target = this.target, stage = this.stage, script = this.script;
     if (!target || !stage || !script) return;
     const w = renderer.domElement.clientWidth || 1, h = renderer.domElement.clientHeight || 1;
@@ -236,11 +285,15 @@ export class BattleLayer implements MapLayer {
 
   private frame(target: BattleTarget, stage: BattleStage, sc: BattleScript, t: number, ending: StageEnding, w: number, h: number): BattleFrame {
     const R = sc.R;
-    const decided = outcome(target.record, this.classes);
+    const record = this.record(target);
+    const replay = target.replay ? { round: this.replayAt + 1, of: target.replay.rounds.length, year: target.replay.year } : null;
+    const lastOfReplay = !!replay && replay.round === replay.of;
+    const decided = outcome(record, this.classes);
     const leaving = ending.flee[0] || ending.flee[1];
     let end: BattleEnd = null;
-    if (t >= R) end = decided ?? (leaving ? (ending.flee[0] && ending.chase[1] ? 'pursued' : 'broke-off') : null);
-    const state: BattleFrame['state'] = end ? 'over' : t >= R ? 'waiting' : 'fighting';
+    if (t >= R && (!replay || lastOfReplay)) end = decided ?? (leaving ? (ending.flee[0] && ending.chase[1] ? 'pursued' : 'broke-off') : null);
+    // A replay is over after its last round whatever came of it; between rounds it waits a moment.
+    const state: BattleFrame['state'] = end || (lastOfReplay && t >= R) ? 'over' : t >= R ? 'waiting' : 'fighting';
     const names = [target.sides[0].name, target.sides[1].name] as const;
     const colors = [target.sides[0].color, target.sides[1].color] as const;
     const project = (p: THREE.Vector3) => {
@@ -282,19 +335,21 @@ export class BattleLayer implements MapLayer {
     }
     const meter = fleetMeter(sc, t, end);
     return {
-      round: target.record.round, band: sc.band, nextIn: state === 'fighting' ? Math.max(0, R - t) : null, state, end, names, colors,
-      empires: [target.sides[0].empire, target.sides[1].empire], meter, bars, tags, caption: this.caption(target, sc, end, state, ending),
-      fleetId: target.fleetId, place: target.place, breakingOff: ending.flee[0],
+      round: record.round, band: sc.band, nextIn: state === 'fighting' ? Math.max(0, R - t) : null, state, end, names, colors,
+      empires: [target.sides[0].empire, target.sides[1].empire], meter, bars, tags, caption: this.caption(target, record, sc, end, state, ending),
+      fleetId: target.fleetId, place: target.place, breakingOff: ending.flee[0], replay,
     };
   }
 
-  private caption(target: BattleTarget, sc: BattleScript, end: BattleEnd, state: BattleFrame['state'], ending: StageEnding): readonly [string, string] {
-    const r = target.record, [a, b] = [target.sides[0].name, target.sides[1].name];
+  private caption(target: BattleTarget, r: BattleRecord, sc: BattleScript, end: BattleEnd, state: BattleFrame['state'], ending: StageEnding): readonly [string, string] {
+    const [a, b] = [target.sides[0].name, target.sides[1].name];
     const round = r.round;
     if (end === 'victory') return ['Victory.', `${a} destroyed ${b} at ${target.place} in round ${round}.`];
     if (end === 'defeat') return [`${a} was destroyed`, `by ${b} of ${target.sides[1].empire} at ${target.place} in round ${round}.`];
     if (end === 'pursued') return ['Breaking off: pursued.', `${b} is faster and gives chase. Overtaken next year, the battle goes on.`];
     if (end === 'broke-off') return [ending.flee[0] ? `${a} broke off.` : `${b} broke off.`, 'The fleets part: the battle ends here unless a faster fleet gives chase.'];
+    if (target.replay && state === 'over') return ['Replay over.', `The battle went on past round ${round}, or one side broke off: see the battle log for how it ended.`];
+    if (target.replay && state === 'waiting') return ['Next round.', 'The fleets close for the next round.'];
     if (state === 'waiting') return ['Next round.', 'The fleets close for the next round: it is fought as the world year turns.'];
     const pct = (x: number) => `${Math.round(x * 100)}%`;
     if (sc.band === 'long') {

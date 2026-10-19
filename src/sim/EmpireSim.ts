@@ -9,7 +9,7 @@ import { BUILDINGS, slotsOf } from '../content/buildings';
 import { buildYears, hasWarships, isSurveyClass, isWarship, REPAIR, specOf, warshipsOf, type RepairSite } from '../content/logistics';
 import { SHIP_CLASSES, ShipClassDef } from '../content/shipClasses';
 import { BattleResult, CombatBonuses, Damage, menderRepair, repairDamage, resolveAssault, resolveBattle, Side, Squadron } from '../core/combat/Combat';
-import { recordRound } from '../core/combat/BattleRecord';
+import { battleRecords, recordRound } from '../core/combat/BattleRecord';
 import { logBattle, tallyLost, tallyOf, type BattleLogEntry } from '../core/combat/BattleLog';
 import { ROLE_TRAIT } from '../core/ships/ClassDesign';
 import { bonusOf, canAfford, capsOf, Colony, contractPrice, EconomyTables, FLOW_LOG, miningYield, maxPolicies, maxSpies, pay, Presence, resolveTurn, tradePctOf, type Flow, type Stockpile, type Transfer, type TurnReport } from '../core/economy/Economy';
@@ -1609,7 +1609,7 @@ export class EmpireSim {
       foe: target.name, foeEmpire: target.owner, outcome: result.captured ? 'won' : 'lost',
       lost: tallyLost(committed, result.survivors), killed: result.space ? tallyLost(target.planet.garrison.ships, result.space.survivors[1]) : {},
       ...(result.space?.captured[0].length ? { boarded: tallyOf(result.space.captured[0]) } : {}), ...(result.space?.captured[1].length ? { taken: tallyOf(result.space.captured[1]) } : {}),
-      summary,
+      summary, ...(result.space ? { records: battleRecords(result.space, 0, this.classById) } : {}),
     });
     this.deps.store.update({ empire: { ...s.empire, research }, engaged: [...s.engaged, targetId], economy: { ...s.economy, colonies } });
     this.adjustGroup(groupId, delta, undefined, result.damage);
@@ -1674,7 +1674,7 @@ export class EmpireSim {
       outcome: result.winner === index ? 'won' : result.winner === other ? 'lost' : 'ongoing',
       lost: tallyLost(force.ships, result.survivors[index]), killed: tallyLost(foe.ships, result.survivors[other]),
       ...(result.captured[index].length ? { boarded: tallyOf(result.captured[index]) } : {}), ...(result.captured[other].length ? { taken: tallyOf(result.captured[other]) } : {}),
-      summary: overtaken ? `Overtaken while breaking off: ${text}` : text,
+      summary: overtaken ? `Overtaken while breaking off: ${text}` : text, ...(view ? { records: [view] } : {}),
     });
   }
 
@@ -2933,7 +2933,7 @@ export class EmpireSim {
           foe: raiders, foeEmpire: def.name, outcome: result.winner === 1 ? 'won' : result.winner === 0 ? 'lost' : 'draw',
           lost: tallyLost(fighting, result.survivors[1]), killed: tallyLost(raid.ships, result.survivors[0]),
           ...(result.captured[1].length ? { boarded: tallyOf(result.captured[1]) } : {}), ...(result.captured[0].length ? { taken: tallyOf(result.captured[0]) } : {}),
-          summary: text,
+          summary: text, records: battleRecords(result, 1, this.classById),
         };
       } else lost = true;
     }

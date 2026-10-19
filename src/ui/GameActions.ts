@@ -232,6 +232,8 @@ export interface GameActions {
   retreat(fleetId: string): void;
   /** Open the battle view on a fleet's battle at sea (a view, not an order). */
   watchBattle(fleetId: string): void;
+  /** Play a battle back from the log in the battle view (a view, not an order). */
+  replayBattle(entryId: string): void;
   /** Leave the battle view, back to the map. */
   leaveBattle(): void;
   /** Standing orders a fleet follows on its own. */

@@ -7,6 +7,8 @@ import { icon } from './icons';
 export interface BattleHudActions {
   leave(): void;
   retreat(fleetId: string): void;
+  /** Play the replay on screen again from its first round. */
+  replayAgain(): void;
 }
 
 /** The battle view's camera, as the HUD's input surface steers it. */
@@ -40,6 +42,7 @@ export class BattleHud {
   private readonly nextText = h('span', {});
   private readonly phase = h('span', { class: 'bv-phase' });
   private readonly retreatBtn = h('button', { class: 'btn danger bv-retreat', type: 'button' }, 'Retreat');
+  private readonly againBtn = h('button', { class: 'btn bv-again', type: 'button', title: 'Play the battle again from its first round', hidden: true }, icon('play'), ' Replay again');
   private readonly caption = h('p', { class: 'bv-caption' });
   private readonly tags = new Map<string, HTMLElement>();
   private readonly cache = new Map<HTMLElement, string>();
@@ -52,9 +55,10 @@ export class BattleHud {
       h('div', { class: 'st-row bar' }, this.pctA, h('div', { class: 'st-bar' }, h('i', { class: 'a' }), h('i', { class: 'b' }), h('em', {})), this.pctB),
     );
     this.retreatBtn.addEventListener('click', () => { if (this.fleetId) this.actions.retreat(this.fleetId); });
+    this.againBtn.addEventListener('click', () => this.actions.replayAgain());
     const back = h('button', { class: 'btn bv-back', type: 'button', title: 'Back to the map (Esc)', 'aria-label': 'Back to the map', onclick: () => this.actions.leave() }, icon('close'), h('span', { class: 'bv-label' }, 'Back'));
     const dock = h('div', { class: 'bv-dock' },
-      h('div', { class: 'bv-row' }, back, h('div', { class: 'bv-clock' }, this.roundText, this.nextText), this.phase, this.retreatBtn),
+      h('div', { class: 'bv-row' }, back, h('div', { class: 'bv-clock' }, this.roundText, this.nextText), this.phase, this.retreatBtn, this.againBtn),
       this.caption);
     this.el.append(this.input, this.layer, this.meter, dock);
     this.bindInput();
@@ -73,11 +77,15 @@ export class BattleHud {
     this.fleetId = f.fleetId;
     this.renderMeter(f);
     this.syncTags([...f.bars.map((b) => this.barItem(b)), ...f.tags.map((t) => this.tagItem(t))]);
-    this.text(this.roundText, f.end === 'broke-off' ? `Broke off <em>· after round ${f.round}</em>` : f.end === 'pursued' ? `Breaking off <em>· round ${f.round}</em>`
+    const rp = f.replay;
+    this.text(this.roundText, rp ? `Replay · Y${rp.year} <em>· round ${rp.round} of ${rp.of}</em>`
+      : f.end === 'broke-off' ? `Broke off <em>· after round ${f.round}</em>` : f.end === 'pursued' ? `Breaking off <em>· round ${f.round}</em>`
       : f.state === 'over' ? `Battle over <em>· round ${f.round}</em>` : `Round ${f.round} <em>of ∞</em>`);
-    this.text(this.nextText, f.state === 'fighting' && f.nextIn !== null ? `next round in <b>${fmtClock(f.nextIn)}</b><span class="bv-sub"> · one round a year</span>`
+    this.againBtn.hidden = !rp;
+    this.text(this.nextText, rp ? (f.state === 'over' ? (f.end === 'victory' ? `${esc(f.names[1])} was destroyed` : f.end === 'defeat' ? `${esc(f.names[0])} was destroyed` : 'end of the record') : f.state === 'waiting' ? 'next round…' : `round ${f.round} of the battle`)
+      : f.state === 'fighting' && f.nextIn !== null ? `next round in <b>${fmtClock(f.nextIn)}</b><span class="bv-sub"> · one round a year</span>`
       : f.state === 'waiting' ? 'next round as the year turns' : f.end === 'victory' ? `${esc(f.names[1])} was destroyed` : f.end === 'defeat' ? `${esc(f.names[0])} was destroyed` : f.end === 'pursued' ? `pursued: ${esc(f.names[1])} catches up next year` : 'the fleets have parted');
-    const phase = f.state === 'over' ? (f.end === 'victory' ? 'Won' : f.end === 'defeat' ? 'Lost' : f.end === 'pursued' ? 'Pursuit' : 'Retreat') : BAND_LABEL[f.band];
+    const phase = f.state === 'over' ? (f.end === 'victory' ? 'Won' : f.end === 'defeat' ? 'Lost' : f.end === 'pursued' ? 'Pursuit' : rp ? 'End' : 'Retreat') : BAND_LABEL[f.band];
     // Phones show the band without "range", so the countdown keeps its room.
     this.text(this.phase, f.state === 'over' ? phase : `${phase.replace(' range', '')}<span class="bv-sub"> range</span>`);
     this.phase.style.color = f.state === 'over' ? (f.end === 'victory' ? '#6ee7a8' : '#ff5d5d') : BAND_COLOR[f.band];

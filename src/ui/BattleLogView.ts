@@ -37,6 +37,8 @@ export interface BattleLogOptions {
   /** The battle at sea a fleet is still fighting (Watch), if any. */
   readonly watchable: (fleetId: string) => boolean;
   readonly watch: (fleetId: string) => void;
+  /** Play the battle back from the log, round by round (change battle-replay). */
+  readonly replay: (e: BattleLogEntry) => void;
   readonly locate: (e: BattleLogEntry) => void;
 }
 
@@ -67,6 +69,7 @@ function entryView(e: BattleLogEntry, o: BattleLogOptions): HTMLElement {
         h('b', {}, `${KIND[e.kind]}${e.round ? ` · round ${e.round}` : ''}`),
         e.attacked ? h('span', { class: 'tag bad', title: 'We were attacked' }, 'ATTACKED') : '',
         h('span', { class: 'small muted' }, ` ${e.ours} vs ${e.foe}${e.foeEmpire && e.foeEmpire !== e.foe ? ` (${e.foeEmpire})` : ''} · ${e.place?.name ?? 'deep space'}`)),
+      e.records?.length ? h('button', { class: 'log-replay', title: 'Replay this battle', 'aria-label': 'Replay this battle', onclick: (ev: Event) => { ev.preventDefault(); ev.stopPropagation(); o.replay(e); } }, icon('play')) : h('span', { class: 'log-replay-none' }),
       h('span', { class: `log-outcome ${tone}` }, label)),
     h('div', { class: 'log-body' },
       h('p', { class: 'small' }, e.summary),
@@ -77,5 +80,6 @@ function entryView(e: BattleLogEntry, o: BattleLogOptions): HTMLElement {
       row('Plundered', plunder, 'bad'),
       h('div', { class: 'row' },
         e.place ? h('button', { class: 'btn', onclick: () => o.locate(e) }, icon('locate'), ' Locate') : '',
+        e.records?.length ? h('button', { class: 'btn', onclick: () => o.replay(e) }, icon('play'), ' Replay') : '',
         e.fleetId && o.watchable(e.fleetId) ? h('button', { class: 'btn watch', onclick: () => o.watch(e.fleetId!) }, icon('battle'), ' Watch battle') : '')));
 }

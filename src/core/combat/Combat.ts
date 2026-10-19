@@ -65,8 +65,16 @@ export interface RoundLog {
   readonly losses: readonly [number, number];
   readonly captured: readonly [number, number];
   readonly notes: readonly string[];
-  /** A round at sea's breakdown (resolveRound only). */
+  /** The round's breakdown (what the battle view draws). */
   readonly detail?: RoundDetail;
+  /** Each side's ships going into the round, and the damage each class carried in (resolveBattle). */
+  readonly before?: readonly [RoundForce, RoundForce];
+}
+
+/** A side as it went into a round. */
+export interface RoundForce {
+  readonly ships: readonly Squadron[];
+  readonly damage?: Tally;
 }
 
 export interface BattleResult {
@@ -277,23 +285,41 @@ export function resolveBattle(a: Side, d: Side, classes: readonly ShipClassDef[]
     if (!fighting(sides[0]) || !fighting(sides[1])) break;
     const band = bandOf(r);
     const notes: string[] = [];
+    // What the battle view needs to replay the round (recorded only: it changes nothing below).
+    const forceOf = (gs: Group[]): RoundForce => {
+      const damage = damageOf(gs);
+      return { ships: alive(gs).map((g) => ({ classId: g.def.id, count: g.count })), ...(Object.keys(damage).length ? { damage } : {}) };
+    };
+    const before = [forceOf(sides[0]), forceOf(sides[1])] as const;
+    const hull = [Object.fromEntries(sides[0].map((g) => [g.def.id, g.hull])), Object.fromEntries(sides[1].map((g) => [g.def.id, g.hull]))] as const;
+    const lostBy: [Record<string, number>, Record<string, number>] = [{}, {}];
     const out0 = outputOf(sides[0], sides[1], bon[0], bon[1], band, rng);
     const out1 = outputOf(sides[1], sides[0], bon[1], bon[0], band, rng);
     const dmg0 = out0.total, dmg1 = out1.total;
-    const lost1 = applyFire(sides[1], out0.by);
-    const lost0 = applyFire(sides[0], out1.by);
+    const lost1 = applyFire(sides[1], out0.by, lostBy[1]);
+    const lost0 = applyFire(sides[0], out1.by, lostBy[0]);
     const cap0 = capture(sides[0], sides[1], bon[0], band);
     const cap1 = capture(sides[1], sides[0], bon[1], band);
     merge(captured[0], cap0);
     merge(captured[1], cap1);
     repair(sides[0], bon[0]);
     repair(sides[1], bon[1]);
+    const woundsOf = (gs: Group[]) => rounded(Object.fromEntries(alive(gs).map((g) => [g.def.id, Math.min(g.wound, g.count * g.hull)])));
+    const detail: RoundDetail = {
+      lostBy: [rounded(lostBy[0]), rounded(lostBy[1])],
+      takenBy: [rounded(tallyOf(cap1)), rounded(tallyOf(cap0))],
+      by: [rounded(out0.by), rounded(out1.by)],
+      jam: [Math.round(out0.jam * 1000) / 1000, Math.round(out1.jam * 1000) / 1000],
+      flak: [Math.round(out0.flak * 1000) / 1000, Math.round(out1.flak * 1000) / 1000],
+      hull: [hull[0], hull[1]],
+      wounds: [woundsOf(sides[0]), woundsOf(sides[1])],
+    };
     if (r === 3) notes.push('Fleets close to medium range');
     if (r === 5) notes.push('Knife-fight range');
     const c0 = cap0.reduce((s, x) => s + x.count, 0), c1 = cap1.reduce((s, x) => s + x.count, 0);
     if (c0) notes.push(`${a.name} boarded ${c0} ship${c0 > 1 ? 's' : ''}`);
     if (c1) notes.push(`${d.name} boarded ${c1} ship${c1 > 1 ? 's' : ''}`);
-    rounds.push({ round: r, band, damage: [Math.round(dmg0), Math.round(dmg1)], losses: [lost0, lost1], captured: [c0, c1], notes });
+    rounds.push({ round: r, band, damage: [Math.round(dmg0), Math.round(dmg1)], losses: [lost0, lost1], captured: [c0, c1], notes, detail, before });
   }
 
   const hp = (gs: Group[]) => alive(gs).reduce((s, g) => s + g.count * g.hull - g.wound, 0);

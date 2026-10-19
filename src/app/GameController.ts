@@ -17,7 +17,8 @@ import { classDesign } from '../core/ships/ClassDesign';
 import type { ShipDesign } from '../core/ships/ShipDesign';
 import type { FleetMovement } from '../core/fleet/Fleet';
 import type { BattleLayer, BattleSide, BattleTarget } from '../render/battle/BattleLayer';
-import type { StageEnding } from '../render/battle/BattleStage';
+import { NO_ENDING, type StageEnding } from '../render/battle/BattleStage';
+import { cleanRecords } from '../core/combat/BattleLog';
 import type { BattleMarkerLayer } from '../render/map/BattleMarkerLayer';
 import type { ForeignBattle } from './ServerSync';
 import { ownClaim } from './ServerSync';
@@ -238,7 +239,51 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
   }
 
   leaveBattle(): void {
+    const wasReplay = !!this.view.battle.current?.replay;
     this.view.battle.close();
+    // Back to the panel the replay was started from (the War Room's battle log).
+    const back = this.replayFrom;
+    this.replayFrom = null;
+    if (wasReplay && back && !this.openPanelId()) this.openPanel(back);
+  }
+
+  /** The panel a replay was started from, opened again when it is left. */
+  private replayFrom: PanelId | null = null;
+
+  /**
+   * Play back a battle from the log (change battle-replay): every round it kept, in the battle
+   * view, on its own clock. A battle at sea is logged a round an entry: its earlier rounds come
+   * from the entries before it.
+   */
+  replayBattle(entryId: string): void {
+    const log = this.state.battleLog ?? [];
+    const entry = log.find((e) => e.id === entryId);
+    if (!entry) return;
+    let rounds = cleanRecords(entry.records);
+    if ((entry.kind === 'sea' || entry.kind === 'pursuit') && entry.round && entry.fleetId) {
+      const byRound = new Map<number, BattleRecord>();
+      for (const e of log) {
+        if ((e.kind !== 'sea' && e.kind !== 'pursuit') || e.fleetId !== entry.fleetId || e.foe !== entry.foe || !e.round || e.round > entry.round || e.year > entry.year) continue;
+        const r = cleanRecords(e.records)[0];
+        if (r && !byRound.has(e.round)) byRound.set(e.round, r);
+      }
+      // The rounds that run unbroken up to this one.
+      const run: BattleRecord[] = [];
+      for (let k = entry.round; byRound.has(k); k--) run.unshift(byRound.get(k)!);
+      if (run.length) rounds = run;
+    }
+    if (!rounds.length) return this.dispatch('That battle was logged before replays were kept: only its summary is left.');
+    const s = this.state;
+    // The panels make way for the battle view while it plays.
+    this.replayFrom = this.openPanelId() ?? this.replayFrom;
+    for (const panel of Object.values(this.view.panels)) panel.close();
+    this.view.topBar.setActivePanel(null);
+    const us = entry.fleetId ? `${this.myKey}:${entry.fleetId}` : `${this.myKey}:dock`;
+    this.view.battle.open({
+      key: `log:${entry.id}`, tick: entry.year, record: rounds[0], fleetId: null, place: entry.place?.name ?? 'deep space',
+      sides: [{ ...this.sideOf(us, entry.ours, ''), name: entry.ours, empire: s.identity?.name ?? s.playerName }, { ...this.sideOf(`log-foe:${entry.foe}`, entry.foe, entry.foeEmpire), color: '#f2a541' }],
+      replay: { rounds, from: this.view.battle.now, year: entry.year },
+    });
   }
 
   private battleTarget(key: string): BattleTarget | null {
@@ -272,6 +317,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
 
   /** Who is breaking off (sailing away from the battle's hex) and who gives chase. */
   battleEnding = (target: BattleTarget): StageEnding => {
+    if (target.replay) return NO_ENDING;
     const s = this.state;
     const movementOf = (key: string): FleetMovement | null => {
       if (key.startsWith(`${this.myKey}:`)) return s.fleets.find((f) => f.id === key.slice(key.indexOf(':') + 1))?.movement ?? null;

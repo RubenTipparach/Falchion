@@ -7,7 +7,7 @@ import { tierOf } from '../../core/npc/Reputation';
 import { Drawer } from '../Drawer';
 import type { CombatOutcome, FleetGroup, GameActions, GameQueries, WarTarget } from '../GameActions';
 import { locateButton, storesView } from '../widgets';
-import { clear, h } from '../dom';
+import { clear, h, keepScroll } from '../dom';
 import { unseenAttacks } from '../../core/combat/BattleLog';
 import { battleLogView, lastSeenBattle, markBattlesSeen } from '../BattleLogView';
 
@@ -64,18 +64,21 @@ export class WarRoomPanel extends Drawer {
 
   private renderLog(): void {
     const log = this.store.state.battleLog;
+    keepScroll(this.logBox, () => {
     clear(this.logBox);
     this.logBox.append(battleLogView(log, {
       onlyAttacks: this.onlyAttacks,
       setOnlyAttacks: (on) => { this.onlyAttacks = on; this.renderLog(); },
       watchable: (fleetId) => !!this.q.battleOf(fleetId),
       watch: (fleetId) => this.actions.watchBattle(fleetId),
+      replay: (e) => this.actions.replayBattle(e.id),
       locate: (e) => {
         const star = e.place ? this.q.starById(`${e.place.q},${e.place.r}`) : null;
         if (e.fleetId && this.store.state.fleets.some((f) => f.id === e.fleetId)) return this.actions.focusFleet(e.fleetId, false);
         if (star) { this.actions.select(star); this.actions.flyTo(star, false); }
       },
     }));
+    });
     markBattlesSeen(log);
   }
 

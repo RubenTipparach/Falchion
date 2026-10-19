@@ -20,6 +20,7 @@ export const ICONS = {
   crate: svg('<path d="M3 8l9-4 9 4-9 4z"/><path d="M3 8v8l9 4 9-4V8"/><path d="M12 12v8"/>', 22),
   trade: svg('<path d="M4 8h13l-3-3M20 16H7l3 3"/>'),
   battle: svg('<path d="M5 19L19 5M14 5h5v5"/><path d="M19 19L5 5M5 10V5h5"/>'),
+  play: svg('<path d="M8 5l11 7-11 7z" fill="currentColor"/>'),
   relations: svg('<path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"/>'),
   anomaly: svg('<path d="M12 12m-2 0a2 2 0 1 0 4 0a4 4 0 1 0-8 0a6 6 0 1 0 12 0a8 8 0 1 0-16 0"/>'),
   derelict: svg('<path d="M4 14l6-6 3 3 7-7"/><path d="M14 4h6v6"/><path d="M4 20h16"/>'),

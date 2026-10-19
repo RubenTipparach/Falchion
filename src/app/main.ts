@@ -204,7 +204,7 @@ async function bootstrap(): Promise<void> {
   // Battles at sea: a marker on the map for each one you can see, and the view that covers the map to watch one.
   const battleMarkers = map.layers.add(new BattleMarkerLayer((key) => controller.openBattle(key)));
   const battle = map.layers.add(new BattleLayer(factory, SHIP_CLASSES, { worldTime: () => controller.worldTime(), ending: (t) => controller.battleEnding(t), lite }));
-  const battleHud = new BattleHud({ leave: () => controller.leaveBattle(), retreat: (id) => controller.retreat(id) }, battle.controls);
+  const battleHud = new BattleHud({ leave: () => controller.leaveBattle(), retreat: (id) => controller.retreat(id), replayAgain: () => battle.restartReplay() }, battle.controls);
   battle.onFrame = (f) => battleHud.render(f);
 
   const zoomCfg = map.controller.zoom.config;

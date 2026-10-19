@@ -1,5 +1,5 @@
 import type { ShipClassDef } from '../../content/shipClasses';
-import { bandOf, type Band, type RoundDetail, type Squadron, type Tally } from './Combat';
+import { bandOf, type Band, type BattleResult, type RoundDetail, type Squadron, type Tally } from './Combat';
 
 /** A fleet as it went into a round: its ships and the damage each class group carried (hull points). */
 export interface ForceView {
@@ -62,6 +62,20 @@ export function recordRound(detail: RoundDetail, round: number, before: Pair<For
     wounds: swap(detail.wounds, flip),
     start: start ?? [strengthOf(before[0].ships, classes), strengthOf(before[1].ships, classes)],
   };
+}
+
+/**
+ * Every round of a whole battle (resolveBattle: a raid, an assault's fight in orbit) as the battle
+ * view replays it, the fleet on side `index` as side 0. Rounds without a breakdown are skipped.
+ */
+export function battleRecords(result: BattleResult, index: 0 | 1, classes: ReadonlyMap<string, ShipClassDef>): BattleRecord[] {
+  const out: BattleRecord[] = [];
+  for (const r of result.rounds) {
+    if (!r.detail || !r.before) continue;
+    const before: Pair<ForceView> = index === 0 ? [r.before[0], r.before[1]] : [r.before[1], r.before[0]];
+    out.push(recordRound(r.detail, r.round, before, index, classes, out[0]?.start ?? null));
+  }
+  return out;
 }
 
 /** The same round seen from the other fleet. */

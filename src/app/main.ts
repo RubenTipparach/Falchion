@@ -33,6 +33,7 @@ import { GalaxyDiscLayer } from '../render/map/GalaxyDiscLayer';
 import { StarfieldLayer } from '../render/map/StarfieldLayer';
 import { SystemLayer } from '../render/map/SystemLayer';
 import { SurfaceLayer } from '../render/planets/surface/SurfaceLayer';
+import { MegaSurfaceLayer } from '../render/megastructures/surface/MegaSurfaceLayer';
 import { BattleLayer } from '../render/battle/BattleLayer';
 import { MegaBeaconLayer } from '../render/map/MegaBeaconLayer';
 import { BattleMarkerLayer } from '../render/map/BattleMarkerLayer';
@@ -187,6 +188,8 @@ async function bootstrap(): Promise<void> {
   store.subscribe((s, prev) => { if (s.turn !== prev.turn) system.refreshFields(); });
   // Surface view: the focused planet's close-up, below planet view (draws its own scene when near).
   const surface = map.layers.add(new SurfaceLayer({ zoom: map.controller.zoom, input: map.controller, frame: (id) => system.planetFrame(id), hold: (id) => system.holdPlanet(id), canvas: map.canvas, lite }));
+  // Landing on a megastructure: its own close-up (change mega-surfaces).
+  const mega = map.layers.add(new MegaSurfaceLayer({ zoom: map.controller.zoom, input: map.controller, canvas: map.canvas, lite }));
   // Megastructures are seen from across the galaxy (change megastructures).
   map.layers.add(new MegaBeaconLayer(galaxy.megastructures().map((m) => {
     const star = galaxy.starAt(m.hex)!;
@@ -242,7 +245,7 @@ async function bootstrap(): Promise<void> {
   controller.onFocusPlanet = () => starInfo.showPlanet();
   app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, cityLocator.el, dispatches.el, battleHud.el, ...Object.values(panels).map((p) => p.el));
 
-  controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system, surface, battle, battleMarkers });
+  controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system, surface, mega, battle, battleMarkers });
   // Phones: the star, planet and fleet card is a bottom sheet; keep what you look at centred above it.
   if (lite) {
     const phone = window.matchMedia('(max-width: 720px)');
@@ -312,7 +315,7 @@ async function bootstrap(): Promise<void> {
     if (e.key === 'g' || e.key === 'G') controller.toggleView();
     if (e.key === '/') { e.preventDefault(); controller.openPanel('search'); return; }
     if (e.key === 'Escape' && store.state.selectedFleet) { controller.selectFleet(null); return; }
-    if (e.key === 'Escape' && surface.status.active) { controller.leaveSurface(); return; }
+    if (e.key === 'Escape' && (surface.status.active || mega.status.active)) { controller.leaveSurface(); return; }
     if (e.key === 'Escape') { if (store.state.selectedPlanet && store.state.selected) controller.focusPlanet(store.state.selected, null); else controller.select(null); }
     if (e.key === 'h' || e.key === 'H') controller.flyTo(world.home, true);
     if (import.meta.env.DEV && e.key === 'Enter' && tag !== 'BUTTON') controller.skipYear();

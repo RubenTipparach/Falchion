@@ -33,6 +33,9 @@ import type { SectorOverlayLayer } from '../render/map/SectorOverlayLayer';
 import type { SelectionLayer } from '../render/map/SelectionLayer';
 import { SYSTEM_EXTENT, SYSTEM_VIEW_WIDTH, SystemLayer, planetRadius } from '../render/map/SystemLayer';
 import type { SurfaceLayer, SurfaceTarget } from '../render/planets/surface/SurfaceLayer';
+import type { MegaSurfaceLayer, MegaSurfaceTarget } from '../render/megastructures/surface/MegaSurfaceLayer';
+import { hasMegaSurface } from '../core/mega/MegaGround';
+import { starColor } from '../render/stars/StarVisuals';
 import { foreignSeat, type SettlementInput } from '../core/surface/SurfaceLayout';
 import type { Drawer } from '../ui/Drawer';
 import type { CityEntry, FleetInfo, GameActions, GameQueries, LandingSpot, PanelId } from '../ui/GameActions';
@@ -63,6 +66,8 @@ export interface ViewDeps {
   readonly system: SystemLayer;
   /** The planet close-up below planet view. */
   readonly surface: SurfaceLayer;
+  /** Landed on a megastructure (change mega-surfaces). */
+  readonly mega: MegaSurfaceLayer;
   /** The battle view, and the map's markers of battles you can watch. */
   readonly battle: BattleLayer;
   readonly battleMarkers: BattleMarkerLayer;
@@ -430,6 +435,8 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
   /** Follow a planet; `altitude` null keeps the zoom where it is. */
   private followPlanet(planet: Planet, altitude: number | null = PLANET_ALTITUDE): void {
     if (this.state.selectedPlanet?.id !== planet.id) return;
+    // Landed on a megastructure: its close-up has the zoom.
+    if (this.view.mega.status.active) altitude = null;
     // Until the system is drawn (a slow device may not be there yet), follow its star.
     const star = this.starById(planet.starId);
     const fallback = star ? new THREE.Vector3(star.position.x, 0, star.position.z) : null;
@@ -438,6 +445,13 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
 
   /** Descend to a rocky planet's surface (its capital or main city): focuses it first if need be. */
   land(star: StarSystem, planet: Planet, at?: LandingSpot): void {
+    if (hasMegaSurface(planet.biome)) {
+      // A megastructure you can stand on (change mega-surfaces): its own close-up.
+      if (this.state.selectedPlanet?.id !== planet.id || this.state.selectedFleet) this.focusPlanet(star, planet);
+      this.refreshSurface();
+      this.view.mega.land();
+      return;
+    }
     if (planet.biome === 'gas' || isMegastructure(planet.biome)) return;
     if (this.state.selectedPlanet?.id !== planet.id || this.state.selectedFleet) this.focusPlanet(star, planet);
     else if (!this.view.map.controller.following) this.followPlanet(planet, null);
@@ -455,6 +469,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
 
   /** On the surface: rise back to planet view. */
   leaveSurface(): void {
+    if (this.view.mega.status.active) return this.view.mega.leave();
     const planet = this.state.selectedPlanet;
     if (planet && !this.view.map.controller.following) this.followPlanet(planet, null);
     this.view.surface.leave(PLANET_ALTITUDE);
@@ -479,8 +494,17 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     return { planet, radius: planetRadius(planet), colony, survey: done ? `Unsettled · surveyed (${done.kind})` : 'Unsettled · not yet surveyed' };
   }
 
+  /** The megastructure you can land on, if the selected world is one (change mega-surfaces). */
+  megaTarget(planet: Planet | null): MegaSurfaceTarget | null {
+    if (!planet || !hasMegaSurface(planet.biome)) return null;
+    const star = this.starById(planet.starId);
+    const light = new THREE.Color(star ? starColor(star) : '#fff4e0').lerp(new THREE.Color('#ffffff'), 0.6);
+    return { id: planet.id, type: planet.biome, seed: hashSeed(planet.id, 'mega'), light };
+  }
+
   private refreshSurface(): void {
     this.view.surface.setTarget(this.surfaceTarget(this.state.selectedPlanet));
+    this.view.mega.setTarget(this.megaTarget(this.state.selectedPlanet));
     // Night lights in the system view come from the same colonies.
     this.view.system.refreshLights();
   }
@@ -730,8 +754,9 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     this.view.topBar.setGalaxyMode(view.galaxyMode);
     // Ships glide through the current year toward next year's position.
     this.view.fleets.setTime(this.fleetTime());
-    const surface = this.view.surface.status;
+    const surface = this.view.surface.status, mega = this.view.mega.status;
     if (surface.engaged) return this.view.hud.setSurface(surface.altitudeKm, view.altitude);
+    if (mega.engaged) return this.view.hud.setSurface(mega.altitudeKm, view.altitude);
     const mode = this.state.selectedPlanet ? 'Planet view' : view.visibleWidth < SYSTEM_VIEW_WIDTH ? 'System view' : view.visibleWidth < 420 ? 'Hex view' : view.visibleWidth < 7_000 ? 'Sector view' : 'Galaxy view';
     const pxPerLy = this.view.map.viewportWidth() / view.visibleWidth;
     this.view.hud.setScale(view.visibleWidth, pxPerLy, mode, view.altitude);

@@ -132,6 +132,12 @@ export class MapCameraController {
     else this.flyAltitude = altitude;
   }
 
+  /** Drop a dive or glide under way (a close-up has taken the zoom over). */
+  cancelFlight(): void {
+    this.flyAltitude = null;
+    this.flyTarget = null;
+  }
+
   get following(): boolean {
     return this.follow !== null;
   }

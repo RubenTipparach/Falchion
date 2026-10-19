@@ -1,3 +1,4 @@
+import { hasMegaSurface } from '../core/mega/MegaGround';
 import type { GameState } from '../app/GameState';
 import type { Store } from '../app/Store';
 import type { StarSystem } from '../core/galaxy/GalaxyModel';
@@ -257,6 +258,7 @@ export class StarInfoPanel {
         cache || crateWaiting ? h('button', { class: 'btn primary collect', title: 'Gather what this world holds', onclick: () => collectWithFx(portrait, () => this.actions.collectPlanet(p)) }, icon('crate'), ' Collect') : '',
         done && !colony && canSettle ? h('button', { class: 'btn', disabled: typeof ark === 'string', title: typeof ark === 'string' ? ark : 'The ark lands its colonists and spends its supply; it goes back for more', onclick: () => this.actions.settle(p) }, icon('build'), ' Settle') : '',
         p.biome !== 'gas' && !biome?.megastructure ? h('button', { class: 'btn land', title: colony ? `Descend to ${colony.name.replace(/ \(capital\)$/, '')}` : 'Descend to the surface', onclick: () => this.actions.land(star, p) }, icon('land'), ' Land') : '',
+        hasMegaSurface(p.biome) ? h('button', { class: 'btn land', title: `Descend to the ${biome?.name ?? 'structure'}'s land`, onclick: () => this.actions.land(star, p) }, icon('land'), ' Land') : '',
         h('button', { class: 'btn', onclick: () => this.actions.focusPlanet(star, null) }, 'Back to system')),
     );
   }

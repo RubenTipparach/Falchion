@@ -8,6 +8,7 @@ Hex-based, at-scale 4X MMO (three.js + TypeScript, Discord integration planned).
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run build` — production build
 - `npx openspec list` / `npx openspec validate --all` — spec-driven workflow
+- `npm run planets:bench` — surface close-up frame time per planet type (run before and after touching surface shaders or flora)
 
 ## CI / deploy
 `.github/workflows/deploy.yml` runs on every push to every branch: typecheck, tests, spec

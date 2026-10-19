@@ -53,7 +53,7 @@ export async function planetAudit(root: HTMLElement): Promise<void> {
     const images: string[] = [];
     try {
       images.push(systemView(look, seed, camera, shot));
-      images.push(...await surfaceViews(look, seed, camera, shot, biome.id));
+      images.push(...await surfaceViews(look, seed, camera, shot, biome.id, renderer));
     } catch (e) {
       console.warn('audit', biome.id, e);
     }
@@ -156,7 +156,7 @@ function systemView(look: typeof PLANET_LOOKS[string], seed: number, camera: THR
 }
 
 /** The surface terrain (the close-up's globe and detail patch) from orbit, mid range and the ground. */
-async function surfaceViews(look: typeof PLANET_LOOKS[string], seed: number, camera: THREE.PerspectiveCamera, shot: (s: THREE.Scene) => string, biome: string): Promise<string[]> {
+async function surfaceViews(look: typeof PLANET_LOOKS[string], seed: number, camera: THREE.PerspectiveCamera, shot: (s: THREE.Scene) => string, biome: string, renderer: THREE.WebGLRenderer): Promise<string[]> {
   const terrain = new SurfaceTerrain(surfaceLookOf(look, seed), [], FULL_QUALITY, null);
   while (!terrain.bakeStep()) await new Promise((r) => setTimeout(r, 0));
   const scene = new THREE.Scene();
@@ -176,7 +176,7 @@ async function surfaceViews(look: typeof PLANET_LOOKS[string], seed: number, cam
     camera.updateMatrixWorld();
     const focus = target.clone();
     terrain.update({ cam: camera.position, focus, d: cam.distanceTo(focus), alt, sun: SUN, time: 0, fade: 1 });
-    flora.update(cam.distanceTo(focus));
+    flora.update(cam.distanceTo(focus), renderer);
     return shot(scene);
   };
   const out: string[] = [];

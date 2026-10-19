@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PLANET_LOOKS } from '../../content/planetLooks';
-import { canyonCut, craters, lockedEye, volcanoes } from './Relief';
+import { CRATER_LAYERS, canyonCut, craterLayer, craters, lockedEye, volcanoes } from './Relief';
 import { rawHeight, surfaceLookOf } from './Terrain';
 
 /** Even-ish directions over the sphere (a Fibonacci spiral). */
@@ -19,6 +19,18 @@ describe('relief landforms (change planet-audit)', () => {
     // Most of a barren world lies in or round a crater.
     expect(hs.filter((h) => h !== 0).length / hs.length).toBeGreaterThan(0.5);
     expect(craters(1.5, 2.5, 3.5, 7)).toBe(craters(1.5, 2.5, 3.5, 7));
+  });
+
+  it('searching only the cells a crater can reach changes nothing (change surface-perf)', () => {
+    let n = 0;
+    for (const [scale, salt, density] of CRATER_LAYERS) {
+      for (const [x, y, z] of dirs(3000)) {
+        const p = [x * 3.7 * scale + 5.1, y * 3.7 * scale - 2.3, z * 3.7 * scale + 8.9] as const;
+        expect(craterLayer(...p, salt, density)).toBe(craterLayer(...p, salt, density, true));
+        if (craterLayer(...p, salt, density) !== 0) n++;
+      }
+    }
+    expect(n).toBeGreaterThan(3000);
   });
 
   it('canyons cut 0..1, and a canyon world is cut across far more of its surface', () => {

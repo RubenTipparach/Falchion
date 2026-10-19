@@ -284,7 +284,7 @@ export class SurfaceLayer implements MapLayer {
     if (fade < 0.004) { b.labels.hide(); return; }
     b.terrain.update({ cam: this.camera.position, focus, d, alt: shot.alt, sun, time: this.time, fade });
     b.settlements.group.visible = u > -0.05;
-    b.flora.update(d);
+    b.flora.update(d, renderer);
     const pxAtOne = (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / Math.max(1, renderer.domElement.height);
     b.settlements.setPointScale(1 / pxAtOne);
     b.roads.setPixelSize(pxAtOne);

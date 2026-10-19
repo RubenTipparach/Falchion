@@ -18,8 +18,13 @@ bool rFeature(vec3 c, float salt, float density, out vec4 f, out float h) {
 }
 float craterLayer(vec3 q, float salt, float density) {
   vec3 fq = floor(q);
+  // A crater reaches at most 0.75 of a cell from its centre (centre 0.2..0.8 across its cell,
+  // radius up to 0.44, felt out to 1.7 radii), so only the neighbours on a point's own side of
+  // each axis can reach it, unless it is near the middle: usually 8 cells, not 27 (change surface-perf).
+  vec3 t = q - fq;
+  ivec3 lo = ivec3(mix(vec3(-1.0), vec3(0.0), step(0.55, t))), hi = ivec3(mix(vec3(0.0), vec3(1.0), step(0.45, t)));
   float sum = 0.0;
-  for (int k = -1; k <= 1; k++) for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+  for (int k = lo.z; k <= hi.z; k++) for (int j = lo.y; j <= hi.y; j++) for (int i = lo.x; i <= hi.x; i++) {
     vec4 f; float hh;
     if (!rFeature(fq + vec3(float(i), float(j), float(k)), salt, density, f, hh)) continue;
     float d = length(q - f.xyz) / f.w;

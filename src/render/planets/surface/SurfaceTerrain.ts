@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import type { Settlement } from '../../../core/surface/SurfaceLayout';
-import { BASE_OCTAVES, SurfaceLook, frameAt, rawHeight } from '../../../core/surface/Terrain';
+import { BASE_OCTAVES, SurfaceLook, frameAt } from '../../../core/surface/Terrain';
 import { smoothstep } from '../../../core/surface/Noise';
+import { CUBE_FACES, bakeFace, radiusOfHeight, shapedHeight, type BakeJob, type BakedFace, type Pit } from '../../../core/surface/GlobeBake';
+import { bakePool } from './BakePool';
 import { NO_LIGHTS } from '../NightLightMap';
 import { atmosphereDefines } from '../atmosphere.glsl';
 import { PATTERN_IDS } from '../patterns.glsl';
@@ -26,18 +28,12 @@ export const LITE_QUALITY: SurfaceQuality = { baseCells: 64, patchCells: 96, max
 /** Radius of the cloud shell, above the highest ground (about 1.023), and of the aurora's, above it. */
 const CLOUD_R = 1.034, AURORA_R = 1.04;
 
-/** The cube's faces: normal, then the two axes across it. */
-const FACES: ReadonlyArray<readonly [readonly number[], readonly number[], readonly number[]]> = [
-  [[1, 0, 0], [0, 0, -1], [0, 1, 0]], [[-1, 0, 0], [0, 0, 1], [0, 1, 0]],
-  [[0, 1, 0], [1, 0, 0], [0, 0, -1]], [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
-  [[0, 0, 1], [1, 0, 0], [0, 1, 0]], [[0, 0, -1], [-1, 0, 0], [0, 1, 0]],
-];
-
 /**
  * A planet's terrain at surface scale (radius 1): a globe baked on the CPU from the same noise as
  * the planet-view shader, a high-detail patch displaced on the GPU near the camera, the planet-view
  * shader's weather (clouds, haze, storms and auroras, ATMOSPHERE_GLSL) on shells above it, and an
- * atmosphere shell. The globe bakes one cube face per `bakeStep` so no frame stalls.
+ * atmosphere shell. The globe's six faces bake in parallel in Web Workers (BakePool), or one a
+ * `bakeStep` where there are none, so no frame stalls.
  */
 export class SurfaceTerrain {
   readonly group = new THREE.Group();
@@ -52,8 +48,11 @@ export class SurfaceTerrain {
   private readonly atmo: THREE.Mesh | null;
   private readonly atmoMat: THREE.ShaderMaterial;
   private base: THREE.Mesh | null = null;
-  private faces: THREE.BufferGeometry[] = [];
-  private pit: { dir: THREE.Vector3; radius: number; depth: number } | null = null;
+  private faces: BakedFace[] = [];
+  /** Faces baking in workers (all six at once), once started. */
+  private baking: Promise<BakedFace[]> | null = null;
+  private baked: BakedFace[] | null = null;
+  private pit: Pit | null = null;
 
   /**
    * `lights` is the planet's night-light map (shared with the system view), drawn from orbit; the
@@ -135,32 +134,18 @@ export class SurfaceTerrain {
 
   /** The Deep Mine's pit, dug into the terrain (call before baking). */
   setPit(dir: THREE.Vector3, radius: number, depth: number): void {
-    this.pit = { dir: dir.clone(), radius, depth };
+    this.pit = { dir: [dir.x, dir.y, dir.z], radius, depth };
     this.uniforms.uPit.value.set(dir.x, dir.y, dir.z, radius);
     this.uniforms.uPitDepth.value = depth;
   }
 
   /** Terrain height under the settlements' plateaus and the pit (the GPU's shapedH). */
   shapedHeight(x: number, y: number, z: number, octaves = BASE_OCTAVES): number {
-    let h = rawHeight(this.look, x, y, z, octaves);
-    for (const c of this.sites) {
-      const ch = Math.hypot(x - c.dir[0], y - c.dir[1], z - c.dir[2]);
-      const f = 1 - smoothstep(c.flatIn, c.flatOut, ch);
-      if (f > 0) h += (c.level - h) * f;
-    }
-    if (this.pit) {
-      const pc = Math.hypot(x - this.pit.dir.x, y - this.pit.dir.y, z - this.pit.dir.z) / this.pit.radius;
-      if (pc < 1) {
-        const t = 1 - pc;
-        h -= (this.pit.depth * (Math.floor(t * 5) + smoothstep(0.65, 1, t * 5 - Math.floor(t * 5)))) / 5;
-      }
-    }
-    return h;
+    return shapedHeight(this.look, this.sites, this.pit, x, y, z, octaves);
   }
 
   radiusOf(h: number): number {
-    const e = this.look.dry ? Math.max((h + 0.6) * 0.5, 0) : Math.max(h - this.look.sea, 0);
-    return 1 + AMP * e;
+    return radiusOfHeight(this.look, h, AMP);
   }
 
   /** Ground radius under a unit direction. */
@@ -172,67 +157,32 @@ export class SurfaceTerrain {
     return this.base !== null;
   }
 
-  /** Bake the next cube face; true once the globe is complete. */
+  /**
+   * Bake the globe; true once it is complete. With workers, the first call sends all six faces off
+   * and later calls only check whether they are back; without, each call bakes one face here.
+   */
   bakeStep(): boolean {
     if (this.base) return true;
-    this.faces.push(this.bakeFace(this.faces.length));
-    if (this.faces.length < FACES.length) return false;
-    const geo = mergeFaces(this.faces);
-    this.faces.forEach((f) => f.dispose());
+    const pool = bakePool();
+    if (pool) {
+      this.baking ??= Promise.all(CUBE_FACES.map((_, f) => pool.bake(this.job(f)))).then((faces) => (this.baked = faces));
+      if (!this.baked) return false;
+      this.faces = this.baked;
+    } else {
+      this.faces.push(bakeFace(this.job(this.faces.length)));
+      if (this.faces.length < CUBE_FACES.length) return false;
+    }
+    this.base = new THREE.Mesh(mergeFaces(this.faces), this.baseMat);
     this.faces = [];
-    this.base = new THREE.Mesh(geo, this.baseMat);
+    this.baked = null;
     this.base.frustumCulled = false;
     this.group.add(this.base);
     return true;
   }
 
-  /**
-   * One face of the cube-sphere. Heights come from a grid one cell wider on every side, so normals
-   * are central differences of neighbours (no extra noise per vertex) and agree across face edges.
-   */
-  private bakeFace(f: number): THREE.BufferGeometry {
-    const N = this.quality.baseCells, M = N + 3;
-    const [n, u, v] = FACES[f];
-    const P = new Float32Array(M * M * 3), H = new Float32Array(M * M);
-    for (let j = 0; j < M; j++) for (let i = 0; i < M; i++) {
-      const s = Math.tan((((i - 1) / N) * 2 - 1) * (Math.PI / 4)), t = Math.tan((((j - 1) / N) * 2 - 1) * (Math.PI / 4));
-      let x = n[0] + u[0] * s + v[0] * t, y = n[1] + u[1] * s + v[1] * t, z = n[2] + u[2] * s + v[2] * t;
-      const l = Math.hypot(x, y, z);
-      x /= l; y /= l; z /= l;
-      const h = this.shapedHeight(x, y, z), r = this.radiusOf(h);
-      const k = j * M + i;
-      P[k * 3] = x * r; P[k * 3 + 1] = y * r; P[k * 3 + 2] = z * r;
-      H[k] = h;
-    }
-    const V = (N + 1) * (N + 1);
-    const pos = new Float32Array(V * 3), nor = new Float32Array(V * 3), hh = new Float32Array(V);
-    const a = new THREE.Vector3(), b = new THREE.Vector3(), nn = new THREE.Vector3(), d = new THREE.Vector3();
-    for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
-      const k = (j + 1) * M + (i + 1), o = j * (N + 1) + i;
-      a.set(P[(k + 1) * 3] - P[(k - 1) * 3], P[(k + 1) * 3 + 1] - P[(k - 1) * 3 + 1], P[(k + 1) * 3 + 2] - P[(k - 1) * 3 + 2]);
-      b.set(P[(k + M) * 3] - P[(k - M) * 3], P[(k + M) * 3 + 1] - P[(k - M) * 3 + 1], P[(k + M) * 3 + 2] - P[(k - M) * 3 + 2]);
-      nn.crossVectors(a, b).normalize();
-      d.set(P[k * 3], P[k * 3 + 1], P[k * 3 + 2]);
-      if (nn.dot(d) < 0) nn.negate();
-      pos.set([P[k * 3], P[k * 3 + 1], P[k * 3 + 2]], o * 3);
-      nor.set([nn.x, nn.y, nn.z], o * 3);
-      hh[o] = H[k];
-    }
-    // Wind each face counter-clockwise seen from outside.
-    const outward = new THREE.Vector3(...u).cross(new THREE.Vector3(...v)).dot(new THREE.Vector3(...n)) > 0;
-    const idx = new Uint32Array(N * N * 6);
-    let ii = 0;
-    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-      const A = j * (N + 1) + i, B = A + 1, C = A + N + 1, D = C + 1;
-      idx.set(outward ? [A, B, D, A, D, C] : [A, D, B, A, C, D], ii);
-      ii += 6;
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-    g.setAttribute('aH', new THREE.BufferAttribute(hh, 1));
-    g.setIndex(new THREE.BufferAttribute(idx, 1));
-    return g;
+  private job(face: number): BakeJob {
+    const plateaus = this.sites.map((s) => ({ dir: s.dir, flatIn: s.flatIn, flatOut: s.flatOut, level: s.level }));
+    return { look: this.look, plateaus, pit: this.pit, cells: this.quality.baseCells, face, amp: AMP };
   }
 
   /**
@@ -291,7 +241,6 @@ export class SurfaceTerrain {
 
   dispose(): void {
     this.group.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose(); });
-    this.faces.forEach((f) => f.dispose());
     this.baseMat.dispose();
     this.patchMat.dispose();
     this.cloudMat.dispose();
@@ -324,19 +273,18 @@ function patchGeometry(cells: number): THREE.BufferGeometry {
   return g;
 }
 
-function mergeFaces(faces: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const V = faces.reduce((n, f) => n + f.getAttribute('position').count, 0);
-  const I = faces.reduce((n, f) => n + f.index!.count, 0);
+function mergeFaces(faces: readonly BakedFace[]): THREE.BufferGeometry {
+  const V = faces.reduce((n, f) => n + f.height.length, 0);
+  const I = faces.reduce((n, f) => n + f.index.length, 0);
   const pos = new Float32Array(V * 3), nor = new Float32Array(V * 3), hh = new Float32Array(V), idx = new Uint32Array(I);
   let v = 0, i = 0;
   for (const f of faces) {
-    pos.set(f.getAttribute('position').array as Float32Array, v * 3);
-    nor.set(f.getAttribute('normal').array as Float32Array, v * 3);
-    hh.set(f.getAttribute('aH').array as Float32Array, v);
-    const src = f.index!.array;
-    for (let k = 0; k < src.length; k++) idx[i + k] = src[k] + v;
-    v += f.getAttribute('position').count;
-    i += src.length;
+    pos.set(f.position, v * 3);
+    nor.set(f.normal, v * 3);
+    hh.set(f.height, v);
+    for (let k = 0; k < f.index.length; k++) idx[i + k] = f.index[k] + v;
+    v += f.height.length;
+    i += f.index.length;
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));

@@ -21,11 +21,17 @@ function feature(cx: number, cy: number, cz: number, salt: number, density: numb
   return { x: cx + 0.2 + (0.6 * b) / 289, y: cy + 0.2 + (0.6 * c) / 289, z: cz + 0.2 + (0.6 * d) / 289, r: 0.16 + (0.28 * e) / 289, a };
 }
 
-/** Craters of one size: bowls below the ground with raised rims, depth by size. */
-function craterLayer(x: number, y: number, z: number, salt: number, density: number): number {
+/**
+ * Craters of one size: bowls below the ground with raised rims, depth by size. Only the cells
+ * whose craters can reach the point are searched, as the shader's craterLayer (`everyCell` searches
+ * all 27, for the test that says it makes no difference).
+ */
+export function craterLayer(x: number, y: number, z: number, salt: number, density: number, everyCell = false): number {
   const fx = Math.floor(x), fy = Math.floor(y), fz = Math.floor(z);
+  const lo = (t: number) => (t >= 0.55 && !everyCell ? 0 : -1), hi = (t: number) => (t >= 0.45 || everyCell ? 1 : 0);
+  const tx = x - fx, ty = y - fy, tz = z - fz;
   let sum = 0;
-  for (let k = -1; k <= 1; k++) for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+  for (let k = lo(tz); k <= hi(tz); k++) for (let j = lo(ty); j <= hi(ty); j++) for (let i = lo(tx); i <= hi(tx); i++) {
     const f = feature(fx + i, fy + j, fz + k, salt, density);
     if (!f) continue;
     const d = Math.hypot(x - f.x, y - f.y, z - f.z) / f.r;

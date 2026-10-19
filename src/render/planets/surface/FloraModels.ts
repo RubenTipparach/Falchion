@@ -70,15 +70,19 @@ function leaf(a: number, y0: number, len: number, w: number, droop: number): THR
 }
 
 
-/** A tapering limb along a path of points: one cylinder a segment, radius `r0` at the start to `r1` at the end. */
-function limb(points: readonly THREE.Vector3[], r0: number, r1: number, color = '', o: PartOpts = { tint: true }): THREE.BufferGeometry[] {
+/**
+ * A tapering limb along a path of points: one cylinder a segment, radius `r0` at the start to `r1`
+ * at the end, with `sides` sides; `open` leaves the ends uncapped (where segments overlap, the caps
+ * are hidden anyway).
+ */
+function limb(points: readonly THREE.Vector3[], r0: number, r1: number, color = '', o: PartOpts = { tint: true }, sides = 6, open = false): THREE.BufferGeometry[] {
   const out: THREE.BufferGeometry[] = [];
   const upY = new THREE.Vector3(0, 1, 0);
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i], b = points[i + 1];
     const len = a.distanceTo(b);
     const t0 = i / (points.length - 1), t1 = (i + 1) / (points.length - 1);
-    const g = new THREE.CylinderGeometry(r0 + (r1 - r0) * t1, r0 + (r1 - r0) * t0, len * 1.04, 6);
+    const g = new THREE.CylinderGeometry(r0 + (r1 - r0) * t1, r0 + (r1 - r0) * t0, len * 1.04, sides, 1, open);
     const q = new THREE.Quaternion().setFromUnitVectors(upY, b.clone().sub(a).normalize());
     g.applyMatrix4(new THREE.Matrix4().compose(a.clone().add(b).multiplyScalar(0.5), q, new THREE.Vector3(1, 1, 1)));
     out.push(part(g, color, o));
@@ -91,6 +95,12 @@ function arc(yaw: number, x0: number, from: [number, number], mid: [number, numb
   const c = new THREE.QuadraticBezierCurve(new THREE.Vector2(...from), new THREE.Vector2(...mid), new THREE.Vector2(...to));
   return c.getPoints(n).map((p) => new THREE.Vector3(x0, p.y, 0).add(new THREE.Vector3(Math.cos(yaw) * p.x, 0, Math.sin(yaw) * p.x)));
 }
+
+/**
+ * A bone: a limb with five open sides. Bone worlds are thick with them, and every vertex is drawn
+ * for every prop (change surface-perf): a skeleton is a third of what it was.
+ */
+const bone = (points: readonly THREE.Vector3[], r0: number, r1: number) => limb(points, r0, r1, '', { tint: true }, 5, true);
 
 const ring = (n: number) => Array.from({ length: n }, (_, i) => (i / n) * Math.PI * 2);
 
@@ -181,9 +191,9 @@ const BUILDERS: Readonly<Record<PropKind, () => THREE.BufferGeometry[]>> = {
   // Bone worlds (change surface-flora): the dead, in the round. A unit long, lying along x.
   bones: () => [
     // A thigh bone with knuckled ends, and a broken one across it.
-    ...limb([new THREE.Vector3(-0.42, 0.05, 0), new THREE.Vector3(0.42, 0.05, 0)], 0.045, 0.04),
-    ...[[-0.45, 0.06], [-0.45, -0.06], [0.45, 0.06], [0.45, -0.06]].map(([x, z]) => part(at(new THREE.IcosahedronGeometry(0.075, 1), x, 0.07, z), '', { tint: true })),
-    ...limb([new THREE.Vector3(-0.05, 0.04, -0.3), new THREE.Vector3(0.2, 0.06, 0.25)], 0.03, 0.025),
+    ...bone([new THREE.Vector3(-0.42, 0.05, 0), new THREE.Vector3(0.42, 0.05, 0)], 0.045, 0.04),
+    ...[[-0.45, 0.06], [-0.45, -0.06], [0.45, 0.06], [0.45, -0.06]].map(([x, z]) => part(at(new THREE.IcosahedronGeometry(0.075, 0), x, 0.07, z), '', { tint: true })),
+    ...bone([new THREE.Vector3(-0.05, 0.04, -0.3), new THREE.Vector3(0.2, 0.06, 0.25)], 0.03, 0.025),
     part(jitter(at(new THREE.IcosahedronGeometry(0.06, 0), 0.22, 0.05, 0.28), 0.015, 12), '', { tint: true }),
   ],
   ribcage: () => [
@@ -191,26 +201,26 @@ const BUILDERS: Readonly<Record<PropKind, () => THREE.BufferGeometry[]>> = {
     ...[-0.4, -0.27, -0.14, -0.01, 0.12, 0.25, 0.38].map((x, i) => part(at(new THREE.BoxGeometry(0.075, 0.06, 0.07), x, 0.1 + Math.sin((i / 6) * Math.PI) * 0.06, 0, 0, 0, 0.1), '', { tint: true })),
     ...[-0.3, -0.18, -0.06, 0.06, 0.18].flatMap((x) => [1, -1].flatMap((side) => {
       const h = 0.5 - Math.abs(x) * 0.6;
-      return limb(arc(side * Math.PI / 2, x, [0, 0.14], [0.32, 0.18 + h * 0.6], [0.18, 0.2 + h]), 0.022, 0.012);
+      return bone(arc(side * Math.PI / 2, x, [0, 0.14], [0.32, 0.18 + h * 0.6], [0.18, 0.2 + h], 4), 0.022, 0.012);
     })),
     part(jitter(at(new THREE.IcosahedronGeometry(0.12, 1), 0.56, 0.13, 0, 0, 0, 0.2, [1.35, 0.85, 0.9]), 0.02, 9), '', { tint: true }),
     part(at(new THREE.SphereGeometry(0.035, 6, 4), 0.62, 0.17, 0.07), '#141008'),
     part(at(new THREE.SphereGeometry(0.035, 6, 4), 0.62, 0.17, -0.07), '#141008'),
-    ...[1, -1].flatMap((side) => limb(arc(side * Math.PI / 2, 0.52, [0.06, 0.2], [0.18, 0.3], [0.12, 0.45], 4), 0.03, 0.006)),
+    ...[1, -1].flatMap((side) => bone(arc(side * Math.PI / 2, 0.52, [0.06, 0.2], [0.18, 0.3], [0.12, 0.45], 4), 0.03, 0.006)),
   ],
   skeleton: () => [
     // A great beast fallen on its side: spine, ribs sprung open, four legs, a long horned skull.
-    ...limb([-0.5, -0.3, -0.1, 0.1, 0.3, 0.45].map((x, i) => new THREE.Vector3(x, 0.12 + Math.sin((i / 5) * Math.PI) * 0.1, 0.05 * Math.sin(i))), 0.04, 0.03),
-    ...[-0.25, -0.12, 0.01, 0.14, 0.27].flatMap((x, i) => limb(arc(Math.PI / 2 + (i % 2 ? 0.15 : -0.1), x, [0, 0.2], [0.25, 0.42 - Math.abs(x) * 0.4], [0.38, 0.16]), 0.024, 0.01)),
-    ...[-0.32, 0.3].flatMap((x) => [0.4, 1.0].flatMap((yaw) => limb([new THREE.Vector3(x, 0.1, 0), new THREE.Vector3(x + Math.cos(yaw) * 0.12, 0.05, -0.18), new THREE.Vector3(x + Math.cos(yaw) * 0.22, 0.02, -0.34)], 0.03, 0.02))),
+    ...bone([-0.5, -0.3, -0.1, 0.1, 0.3, 0.45].map((x, i) => new THREE.Vector3(x, 0.12 + Math.sin((i / 5) * Math.PI) * 0.1, 0.05 * Math.sin(i))), 0.04, 0.03),
+    ...[-0.25, -0.12, 0.01, 0.14, 0.27].flatMap((x, i) => bone(arc(Math.PI / 2 + (i % 2 ? 0.15 : -0.1), x, [0, 0.2], [0.25, 0.42 - Math.abs(x) * 0.4], [0.38, 0.16], 4), 0.024, 0.01)),
+    ...[-0.32, 0.3].flatMap((x) => [0.4, 1.0].flatMap((yaw) => bone([new THREE.Vector3(x, 0.1, 0), new THREE.Vector3(x + Math.cos(yaw) * 0.12, 0.05, -0.18), new THREE.Vector3(x + Math.cos(yaw) * 0.22, 0.02, -0.34)], 0.03, 0.02))),
     part(jitter(at(new THREE.IcosahedronGeometry(0.11, 1), 0.6, 0.12, 0.02, 0, 0, -0.15, [1.6, 0.8, 0.85]), 0.02, 13), '', { tint: true }),
     part(at(new THREE.SphereGeometry(0.03, 6, 4), 0.66, 0.16, 0.08), '#141008'),
-    ...limb(arc(-Math.PI / 2, 0.58, [0.06, 0.18], [0.2, 0.32], [0.08, 0.5], 4), 0.032, 0.006),
+    ...bone(arc(-Math.PI / 2, 0.58, [0.06, 0.18], [0.2, 0.32], [0.08, 0.5], 4), 0.032, 0.006),
   ],
   tusk: () => [
     // Two great tusks (or the last ribs of something buried) curving up out of the ground.
-    ...limb(arc(0, -0.12, [0, -0.05], [0.25, 0.75], [0.5, 1.0], 8), 0.07, 0.012),
-    ...limb(arc(Math.PI * 0.85, 0.12, [0, -0.05], [0.2, 0.55], [0.38, 0.72], 7), 0.055, 0.01),
+    ...bone(arc(0, -0.12, [0, -0.05], [0.25, 0.75], [0.5, 1.0], 6), 0.07, 0.012),
+    ...bone(arc(Math.PI * 0.85, 0.12, [0, -0.05], [0.2, 0.55], [0.38, 0.72], 5), 0.055, 0.01),
     part(jitter(at(new THREE.IcosahedronGeometry(0.12, 0), 0, 0.02, 0, 0, 0, 0, [1.6, 0.5, 1.2]), 0.03, 14), '#4a3e2e'),
   ],
   spire: () => [

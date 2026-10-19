@@ -617,18 +617,26 @@ void main() {
   gl_FragColor = vec4(lit, vAlpha * uFade * far);
 }`;
 
+/** Kinds a flora layer can hold (the longest table in src/content/flora.ts has six). */
+export const MAX_FLORA_KINDS = 8;
+
 /**
  * Flora and props (change surface-flora): one instanced draw per prop kind. Each instance is a
  * cell of a grid on the cube face under the detail patch's centre, anchored to the planet, so the
  * same cell always holds the same prop; the cell's hash picks its kind, place, size, turn and
  * colour, and noise gathers them into groves. Each stands on the ground exactly as drawn (the
  * patch's own height), never in water, cities or (living things) on ice and snow.
+ *
+ * Where a cell's prop stands costs a terrain evaluation, so it is worked out once a cell
+ * (change surface-perf): FLORA_PLACE_FRAG writes it to a texture, a texel a cell, and every vertex
+ * of the prop reads it (PLACED). Without float render targets the vertex shader works it out
+ * itself, once a vertex, as it used to. Either way only the cells the CPU listed for a kind are
+ * drawn (floraCells.ts, attribute aCell).
  */
-export const FLORA_VERT = /* glsl */ `
-attribute float aTint; attribute float aEmit;
-uniform float uSpacing, uK, uFill, uLo, uHi, uSizeA, uSizeB, uCluster, uClusterFreq, uSalt, uLiving, uStretch, uSway, uFlora, uIce, uSnow, uTime, uWet;
-uniform vec3 uColA, uColB;
-varying vec3 vCol; varying vec3 vNw; varying vec3 vUp; varying vec3 vW; varying vec3 vLoc; varying vec3 vLocN; varying float vEmit; varying float vSeed;
+const FLORA_GLSL = /* glsl */ `
+uniform float uSpacing, uK, uFill, uSalt, uFlora, uIce, uSnow;
+uniform float uELo[${MAX_FLORA_KINDS}], uEHi[${MAX_FLORA_KINDS}], uELiving[${MAX_FLORA_KINDS}], uEWet[${MAX_FLORA_KINDS}], uECluster[${MAX_FLORA_KINDS}], uEClusterFreq[${MAX_FLORA_KINDS}];
+uniform int uEN;
 ${NOISE_GLSL}
 ${TERRAIN_GLSL}
 ${PATCH_GLSL}
@@ -641,43 +649,94 @@ uvec3 pcg3(uvec3 v) {
   return v;
 }
 float rnd(uvec3 k, uint i) { return float(pcg3(k + uvec3(i * 7919u, i * 104729u, i * 31u)).x & 0xffffffu) / 16777216.0; }
-void hide() { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vCol = vec3(0.0); vNw = vec3(0.0, 1.0, 0.0); vUp = vNw; vW = vec3(0.0); vLoc = vec3(0.0); vLocN = vNw; vEmit = 0.0; vSeed = 0.0; }
-void main() {
-  if (uFlora <= 0.0 || uPatchOn < 0.5) { hide(); return; }
-  vec3 n, fu, fv;
+uvec3 cellKey(vec2 cell, uint face) { return uvec3(ivec3(int(cell.x), int(cell.y), int(face) * 977 + int(uSalt))); }
+// The window round the patch centre: its face, the centre in face coordinates and the first cell.
+void floraWindow(out vec3 n, out vec3 fu, out vec3 fv, out vec2 c, out vec2 origin, out uint face) {
   faceOf(uPC, n, fu, fv);
   float dn = dot(uPC, n);
-  vec2 c = vec2(dot(uPC, fu), dot(uPC, fv)) / dn;
-  float id = float(gl_InstanceID);
-  vec2 cell = floor(c / uSpacing) + vec2(mod(id, uK), floor(id / uK)) - floor(uK * 0.5);
-  uint face = uint(dot(abs(n), vec3(0.0, 2.0, 4.0)) + (dot(n, vec3(1.0)) > 0.0 ? 1.0 : 0.0));
-  uvec3 key = uvec3(ivec3(int(cell.x), int(cell.y), int(face) * 977 + int(uSalt)));
+  c = vec2(dot(uPC, fu), dot(uPC, fv)) / dn;
+  origin = floor(c / uSpacing) - floor(uK * 0.5);
+  face = uint(dot(abs(n), vec3(0.0, 2.0, 4.0)) + (dot(n, vec3(1.0)) > 0.0 ? 1.0 : 0.0));
+}
+// Where a cell's prop stands: xyz the ground point under it, w its kind plus how far it has grown
+// (0..0.999); w below zero when nothing grows there.
+vec4 placeCell(vec2 cell, uint face, vec3 n, vec3 fu, vec3 fv, vec2 c) {
+  vec4 none = vec4(0.0, 0.0, 0.0, -1.0);
+  uvec3 key = cellKey(cell, face);
   // The cell's kind: every kind in a layer reads the same roll, so they share the cells.
   float pick = rnd(key, 1u);
-  if (pick < uLo || pick >= uHi) { hide(); return; }
+  int e = -1;
+  for (int i = 0; i < ${MAX_FLORA_KINDS}; i++) {
+    if (i >= uEN) break;
+    if (pick >= uELo[i] && pick < uEHi[i]) { e = i; break; }
+  }
+  if (e < 0) return none;
   vec2 st = (cell + 0.15 + 0.7 * vec2(rnd(key, 2u), rnd(key, 3u))) * uSpacing;
   vec3 dir = normalize(n + fu * st.x + fv * st.y);
   // Shrinks away toward the window's edge and as the layer fades with height, never popping.
   float edgeW = length(st - c) / (uK * 0.5 * uSpacing);
   float keep = uFill * uFlora * (1.0 - smoothstep(0.7, 1.0, edgeW));
-  if (uCluster > 0.0) keep *= mix(1.0, smoothstep(-0.1, 0.35, snoise(dir * uClusterFreq + vec3(uSalt * 0.37))), uCluster);
+  if (uECluster[e] > 0.0) keep *= mix(1.0, smoothstep(-0.1, 0.35, snoise(dir * uEClusterFreq[e] + vec3(uSalt * 0.37))), uECluster[e]);
   float grow = clamp((keep - rnd(key, 4u)) / 0.12, 0.0, 1.0);
-  if (grow <= 0.0) { hide(); return; }
+  if (grow <= 0.0) return none;
   float edge = patchEdge(dir);
-  if (patchMorph(edge) > 0.0) { hide(); return; }
+  if (patchMorph(edge) > 0.0) return none;
   float h = shapedH(dir, patchOctaves(edge));
   // Out of the water, unless it grows in the shallows (it then stands on the bed, up through the water).
-  if (uDry < 0.5 && h < uSea + 0.004 && (uWet <= 0.0 || h < uSea - uWet)) { hide(); return; }
-  if (uLiving > 0.5) {
-    if (abs(dir.y) > uIce - 0.03) { hide(); return; }
-    if (uSnow > 0.5 && h > uSea + 0.5) { hide(); return; }
-    if (uLocked > 0.0 && dir.x < uLocked - 0.25) { hide(); return; }
+  if (uDry < 0.5 && h < uSea + 0.004 && (uEWet[e] <= 0.0 || h < uSea - uEWet[e])) return none;
+  if (uELiving[e] > 0.5) {
+    if (abs(dir.y) > uIce - 0.03) return none;
+    if (uSnow > 0.5 && h > uSea + 0.5) return none;
+    if (uLocked > 0.0 && dir.x < uLocked - 0.25) return none;
   }
   for (int i = 0; i < ${MAX_SITES}; i++) {
     if (i >= uCityN) break;
-    if (length(dir - uCityA[i].xyz) < uCityB[i].y * 1.05) { hide(); return; }
+    if (length(dir - uCityA[i].xyz) < uCityB[i].y * 1.05) return none;
   }
-  float r = radiusOf(h);
+  return vec4(dir * radiusOf(h), float(e) + min(grow, 0.999));
+}
+`;
+
+/** The placement pass: a texel a cell of the window, as placeCell says. */
+export const FLORA_PLACE_VERT = /* glsl */ `
+void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+
+export const FLORA_PLACE_FRAG = /* glsl */ `
+${FLORA_GLSL}
+void main() {
+  if (uFlora <= 0.0 || uPatchOn < 0.5) { gl_FragColor = vec4(0.0, 0.0, 0.0, -1.0); return; }
+  vec3 n, fu, fv; vec2 c, origin; uint face;
+  floraWindow(n, fu, fv, c, origin, face);
+  gl_FragColor = placeCell(origin + floor(gl_FragCoord.xy), face, n, fu, fv, c);
+}`;
+
+export const FLORA_VERT = /* glsl */ `
+attribute float aTint; attribute float aEmit;
+// The cell this instance draws: x, y and its cube face (floraCells.ts).
+attribute vec3 aCell;
+uniform float uEntry, uSizeA, uSizeB, uStretch, uSway, uTime;
+uniform vec3 uColA, uColB;
+uniform sampler2D uPlace;
+varying vec3 vCol; varying vec3 vNw; varying vec3 vUp; varying vec3 vW; varying vec3 vLoc; varying vec3 vLocN; varying float vEmit; varying float vSeed;
+${FLORA_GLSL}
+void hide() { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vCol = vec3(0.0); vNw = vec3(0.0, 1.0, 0.0); vUp = vNw; vW = vec3(0.0); vLoc = vec3(0.0); vLocN = vNw; vEmit = 0.0; vSeed = 0.0; }
+void main() {
+  if (uFlora <= 0.0 || uPatchOn < 0.5) { hide(); return; }
+  vec3 n, fu, fv; vec2 c, origin; uint face;
+  floraWindow(n, fu, fv, c, origin, face);
+  // The CPU listed cells for its own idea of the window: skip any the GPU's window leaves out.
+  vec2 t = aCell.xy - origin;
+  if (uint(aCell.z) != face || t.x < 0.0 || t.y < 0.0 || t.x >= uK || t.y >= uK) { hide(); return; }
+#ifdef PLACED
+  vec4 g = texelFetch(uPlace, ivec2(t), 0);
+#else
+  vec4 g = placeCell(aCell.xy, face, n, fu, fv, c);
+#endif
+  if (g.w < 0.0 || floor(g.w) != uEntry) { hide(); return; }
+  float grow = g.w - uEntry;
+  vec3 dir = normalize(g.xyz);
+  float r = length(g.xyz);
+  uvec3 key = cellKey(aCell.xy, face);
   float size = mix(uSizeA, uSizeB, pow(rnd(key, 6u), 2.0)) * grow;
   float ys = mix(1.0, uStretch, pow(rnd(key, 7u), 1.5));
   float yaw = rnd(key, 5u) * 6.2831853;

@@ -335,7 +335,7 @@ export class MegaSurfaceLayer implements MapLayer {
     u.uCam.value.copy(cam);
     u.uCamAlt.value = alt;
     u.uTime.value = this.time;
-    b.sky.place(cam, far * 0.8, b.terrain.extent * 0.92);
+    b.sky.place(cam, far * 0.8, b.terrain.extent * 0.92, (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / Math.max(1, renderer.domElement.height));
     // Towers near cities close by; trees right round the camera.
     const nearCities = this.cities.filter((c) => Math.hypot(c.x - this.focus[0], c.z - this.focus[1]) < TOWER_REACH_KM + c.r);
     b.towers.setCities(this.altKm < 80 ? nearCities : []);

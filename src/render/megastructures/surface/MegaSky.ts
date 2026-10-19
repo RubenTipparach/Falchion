@@ -43,6 +43,7 @@ uniform vec3 uStarPos;
 uniform float uStarRad;
 uniform float uNearKm;
 uniform float uSpin;
+uniform float uPixelAngle;
 varying vec3 vDir;
 const float PI = 3.14159265359;
 float hash13(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
@@ -67,6 +68,21 @@ float squaresDay(float a) {
   float x = fract((a - uSquarePhase) / (2.0 * PI / ${SQUARES.n}.0));
   float m = min(x, 1.0 - x);
   return smoothstep(${(SQUARES.cover / 2 - 0.03).toFixed(3)}, ${(SQUARES.cover / 2 + 0.03).toFixed(3)}, m);
+}
+/**
+ * The land dist km away: its colour, blurred to the land's average as a pixel there spans more
+ * than its features (the far side of a shell is 60 million km off: its continents are specks).
+ */
+vec3 farLand(vec2 site, float dist) {
+  float fp = dist * uPixelAngle;
+  float blur = smoothstep(uFeature * 0.03, uFeature * 0.4, fp);
+  vec3 c = vec3(0.0);
+  if (blur < 0.999) c = landColour(site, max(rawHeight(site, min(octavesAt(dist), 5.0)), -0.001), 0.0, fp);
+  // Far enough that its continents are specks: seas and lands far wider stand in.
+  vec3 q = vec3(wrapSite(site) / (uFeature * 1500.0) + uOffset.xy, uOffset.z + 50.0);
+  float macro = snoise(q) * 0.6 + snoise(q * 2.7 + vec3(4.0)) * 0.3;
+  vec3 avg = mix(vec3(0.05, 0.13, 0.24), mix(vec3(0.2, 0.32, 0.13), vec3(0.42, 0.38, 0.27), smoothstep(0.1, 0.5, snoise(q * 1.7 + vec3(9.0)))), smoothstep(-0.05, 0.05, macro));
+  return mix(c, avg, blur);
 }
 vec3 lightLand(vec3 col, vec2 site, float day, float sunUp) {
   vec3 lit = col * (uSunCol * sunUp + vec3(0.3, 0.36, 0.46) * 0.35) * day;
@@ -110,8 +126,7 @@ void main() {
         float dist = tl * uUnit;
         if (dist > uNearKm) {
           vec2 site = uFocus + vec2(a * uUnit, p.z * uUnit);
-          float h = max(rawHeight(site, min(octavesAt(dist), 5.0)), -0.001);
-          hitCol = airOver(lightLand(landColour(site, h, 0.0, 0.0), site, squaresDay(a), 1.0), d, dist);
+          hitCol = airOver(lightLand(farLand(site, dist), site, squaresDay(a), 1.0), d, dist);
         } else hitCol = col;
       } else {
         // Past the land's edge: the rim wall, or out to space.
@@ -138,8 +153,9 @@ void main() {
         float ang = 2.0 * asin(clamp(length(dc - vec3(0.0, -1.0, 0.0)) * 0.5, 0.0, 1.0));
         vec2 u = length(dc.xz) > 1e-9 ? normalize(dc.xz) : vec2(1.0, 0.0);
         vec2 site = uFocus + u * ang * uUnit;
-        float h = max(rawHeight(site, min(octavesAt(dist), 5.0)), -0.001);
-        hitCol = airOver(lightLand(landColour(site, h, 0.0, 0.0), site, 1.0, 1.0), d, dist);
+        hitCol = airOver(lightLand(farLand(site, dist), site, 1.0, 1.0), d, dist);
+        // Looking up through the air, the far side is a pattern in the blue, not a ceiling.
+        if (d.y > 0.0) hitCol = mix(hitCol, col, 0.6 * exp(-max(uCamAlt, 0.0) / 30.0) * smoothstep(0.0, 0.3, d.y));
       } else hitCol = col;
     }
   } else if (uMode < 2.5) {
@@ -153,8 +169,7 @@ void main() {
         float dist = tl * uUnit;
         if (dist > uNearKm) {
           vec2 site = uFocus + p.xz * uUnit;
-          float h = max(rawHeight(site, min(octavesAt(dist), 5.0)), -0.001);
-          vec3 c = landColour(site, h, 0.0, 0.0);
+          vec3 c = farLand(site, dist);
           // Scorched toward the star, frozen far out.
           c = mix(vec3(0.42, 0.24, 0.14), c, smoothstep(0.3, 0.65, rS));
           c = mix(c, vec3(0.86, 0.9, 0.95), smoothstep(1.7, 2.4, rS));
@@ -183,7 +198,7 @@ void main() {
   if (t < 0.0) {
     vec3 s = normalize(uStarPos - o);
     float sd = dot(d, s);
-    col += uSunCol * (smoothstep(cos(uStarRad), cos(uStarRad * 0.9), sd) * 6.0 + pow(max(sd, 0.0), 2000.0) * 2.0 + pow(max(sd, 0.0), 60.0) * 0.25) * sunVis;
+    col += uSunCol * (smoothstep(cos(uStarRad), cos(uStarRad * 0.9), sd) * 6.0 + pow(max(sd, 0.0), 2000.0) * 1.5 + pow(max(sd, 0.0), 300.0) * 0.35 + pow(max(sd, 0.0), 30.0) * 0.05) * sunVis;
     col += vec3(0.8, 0.85, 1.0) * starField(d) * clamp(1.0 - skyLum * 4.0, 0.0, 1.0);
   } else col = hitCol;
   gl_FragColor = vec4(col, 1.0);
@@ -202,7 +217,7 @@ export class MegaSky {
         uMode: { value: SKY_MODE[def.type] }, uFarCam: { value: new THREE.Vector3() }, uUnit: { value: this.unitKm },
         uRingZ: { value: 0 }, uHalfW: { value: def.widthKm / 2 / this.unitKm }, uWall: { value: 6000 / this.unitKm },
         uSquarePhase: { value: 0 }, uStarPos: { value: new THREE.Vector3(0, 1, 0) }, uStarRad: { value: 0.012 },
-        uNearKm: { value: 0 }, uSpin: { value: 0 },
+        uNearKm: { value: 0 }, uSpin: { value: 0 }, uPixelAngle: { value: 0.002 },
       },
     });
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), mat);
@@ -215,13 +230,14 @@ export class MegaSky {
   }
 
   /** Centre the sky on the camera (km, focus frame), `radius` inside the camera's far plane. */
-  place(cam: THREE.Vector3, radius: number, nearKm: number): void {
+  place(cam: THREE.Vector3, radius: number, nearKm: number, pixelAngle: number): void {
     this.mesh.position.copy(cam);
     this.mesh.scale.setScalar(radius);
     this.mesh.updateMatrixWorld();
     const u = this.uniforms;
     u.uFarCam.value.copy(cam).divideScalar(this.unitKm);
     u.uNearKm.value = nearKm;
+    u.uPixelAngle.value = pixelAngle;
   }
 
   dispose(): void {

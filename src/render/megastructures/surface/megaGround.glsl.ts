@@ -125,11 +125,14 @@ vec3 bendDir(vec2 rel, vec3 v) {
 }
 
 /** The land's colour: sea, shore, grass and forest by how wet it is, dry plains, rock and snow. */
-vec3 landColour(vec2 site, float h, float slope, float detail) {
+vec3 landColour(vec2 site, float h, float slope, float fw) {
   site = wrapSite(site);
   vec3 q = vec3(site / uFeature + uOffset.xy, uOffset.z);
   float wet = snoise(q * 0.8 + vec3(40.0, 11.0, 7.0));
-  float mott = snoise(q * 14.0 + vec3(3.0)) * 0.6 + snoise(q * 61.0 + vec3(9.0)) * 0.4 * detail;
+  // Mottling, each scale gone before it is smaller than a pixel (fw: a pixel's size, km).
+  float m14 = 1.0 - smoothstep(uFeature / 14.0 * 0.1, uFeature / 14.0 * 0.4, fw);
+  float m61 = 1.0 - smoothstep(uFeature / 61.0 * 0.1, uFeature / 61.0 * 0.4, fw);
+  float mott = (m14 > 0.0 ? snoise(q * 14.0 + vec3(3.0)) * 0.6 * m14 : 0.0) + (m61 > 0.0 ? snoise(q * 61.0 + vec3(9.0)) * 0.4 * m61 : 0.0);
   if (h < 0.0) {
     float depth = clamp(-h / (uRelief * 0.35), 0.0, 1.0);
     return mix(vec3(0.08, 0.32, 0.38), vec3(0.015, 0.06, 0.16), sqrt(depth));
@@ -199,7 +202,7 @@ vec3 skyColour(vec3 dir) {
   // Dawn: a low sun warms the sky round it.
   float toward = max(dot(normalize(vec3(dir.x, 0.0, dir.z) + 1e-6), normalize(vec3(uSun.x, 0.0, uSun.z) + 1e-6)), 0.0);
   day = mix(day, vec3(0.95, 0.55, 0.3), uDawn * (1.0 - smoothstep(0.0, 0.35, abs(e))) * toward * 0.75);
-  day += uSunCol * pow(max(dot(dir, uSun), 0.0), 12.0) * 0.5;
+  day += uSunCol * pow(max(dot(dir, uSun), 0.0), 24.0) * 0.3;
   vec3 night = mix(vec3(0.02, 0.03, 0.06), vec3(0.04, 0.05, 0.09), 1.0 - abs(e));
   vec3 c = mix(night, day, uDay);
   return c * mix(0.0, 1.0, thick) * smoothstep(-0.25, 0.0, e + (1.0 - thick) * 0.25);

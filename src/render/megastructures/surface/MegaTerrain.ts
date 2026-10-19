@@ -132,14 +132,13 @@ void main() {
   }
   // A pixel's size on the land (taken here, before any loop).
   float fw = length(fwidth(vSite));
-  float detail = 1.0 - smoothstep(0.02, 0.2, fw);
   // Below the mesh: the shore wanders between the vertices instead of running straight, and the
   // ground takes a texture at every height.
   vec2 dl = vSite - uDetailOrigin;
   float wander = (snoise(vec3(dl / (vSpacing * 2.6), 1.0)) * 0.65 + snoise(vec3(dl / (vSpacing * 1.1), 2.0)) * 0.35) * min(vSpacing * 0.18, uRelief * 0.03);
   float h = vH + wander;
   vec2 gd = groundDetail(vSite, fw);
-  vec3 col = landColour(vSite, h, vSlope, detail);
+  vec3 col = landColour(vSite, h, vSlope, fw);
   if (h >= 0.0) {
     // Fields, groves and tufts: brightness and a touch of hue, more on grass than on rock or snow.
     float soft = 1.0 - smoothstep(0.65, 1.0, h / uRelief);

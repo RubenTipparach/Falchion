@@ -1,5 +1,5 @@
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
-import { Hex, hexAdd, worldToHex } from '../core/hex/Hex';
+import { Hex, hexAdd } from '../core/hex/Hex';
 import { hash01, hashSeed } from '../core/rng/Rng';
 import type { TerritoryClaim } from '../render/map/TerritoryLayer';
 
@@ -22,15 +22,8 @@ export interface World {
 export function createWorld(galaxy: GalaxyModel, playerKey?: string, homeHint?: Hex | null): World {
   const starNear = (h: Hex): StarSystem | null => galaxy.nearestStar(h, 60);
 
-  // Home on a spiral arm around 18,000 ly from the core.
-  let best = { d: -1, x: 0, z: 0 };
-  for (let i = 0; i < 64; i++) {
-    const a = (i / 64) * Math.PI * 2;
-    const x = 18_000 * Math.cos(a), z = 18_000 * Math.sin(a);
-    const d = galaxy.density(x, z);
-    if (d > best.d) best = { d, x, z };
-  }
-  const origin = starNear(worldToHex(best.x, best.z))!;
+  // Home on a spiral arm around 18,000 ly from the core (GalaxyModel.startHex).
+  const origin = starNear(galaxy.startHex())!;
   let home = origin;
   if (playerKey) {
     const a = hash01(galaxy.params.seed, hashSeed(playerKey), 1) * Math.PI * 2;

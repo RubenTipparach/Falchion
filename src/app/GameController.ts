@@ -1,4 +1,5 @@
 import { RESOURCES } from '../content/resources';
+import { isMegastructure } from '../content/megastructures';
 import { BIOMES } from '../content/biomes';
 import * as THREE from 'three';
 import { specOf } from '../content/logistics';
@@ -89,6 +90,8 @@ interface Sighting {
 const SYSTEM_ALTITUDE = 0.45;
 /** Camera altitude (ly) of planet view: following a planet in its orbit. */
 const PLANET_ALTITUDE = 0.07;
+/** Far enough back to take in a whole megastructure. */
+const MEGA_ALTITUDE = 0.45;
 /** Camera altitude (ly) when following a ship: close enough to see the hull. */
 const FLEET_ALTITUDE = 0.03;
 /** Locate buttons pan to their target and come no closer than this (a regional view); double-click dives in. */
@@ -417,8 +420,8 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     if (cam.zoom.targetAltitude > 2) {
       // From afar: fly to the system first; follow once it has been built.
       cam.flyTo(star.position.x, star.position.z, SYSTEM_ALTITUDE);
-      setTimeout(() => this.followPlanet(planet), 900);
-    } else this.followPlanet(planet);
+      setTimeout(() => this.followPlanet(planet, isMegastructure(planet.biome) ? MEGA_ALTITUDE : PLANET_ALTITUDE), 900);
+    } else this.followPlanet(planet, isMegastructure(planet.biome) ? MEGA_ALTITUDE : PLANET_ALTITUDE);
   }
 
   /** Follow a planet; `altitude` null keeps the zoom where it is. */
@@ -432,7 +435,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
 
   /** Descend to a rocky planet's surface (its capital or main city): focuses it first if need be. */
   land(star: StarSystem, planet: Planet, at?: LandingSpot): void {
-    if (planet.biome === 'gas') return;
+    if (planet.biome === 'gas' || isMegastructure(planet.biome)) return;
     if (this.state.selectedPlanet?.id !== planet.id || this.state.selectedFleet) this.focusPlanet(star, planet);
     else if (!this.view.map.controller.following) this.followPlanet(planet, null);
     this.refreshSurface();
@@ -456,7 +459,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
 
   /** The surface view's planet and what stands on it, from the game state (null: no surface to show). */
   surfaceTarget(planet: Planet | null): SurfaceTarget | null {
-    if (!planet || planet.biome === 'gas') return null;
+    if (!planet || planet.biome === 'gas' || isMegastructure(planet.biome)) return null;
     const star = this.starById(planet.starId);
     const own = this.colonyAt(planet.id);
     let colony: SettlementInput | null = null;

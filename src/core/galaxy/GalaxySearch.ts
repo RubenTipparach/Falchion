@@ -1,6 +1,7 @@
 import { hexDistance, hexRing, type Hex } from '../hex/Hex';
 import { kindOf, type GalaxyModel, type SpectralClass, type StarKind, type StarSystem } from './GalaxyModel';
 import type { Planet } from './Planets';
+import { isMegastructure } from '../../content/megastructures';
 
 /**
  * Galaxy search (change galaxy-search). Stars and planets are pure functions of the seed and the
@@ -69,6 +70,12 @@ export class GalaxyScan {
   /** Hexes looked at and stars met, for the progress line. */
   hexes = 0;
   stars = 0;
+  /**
+   * Megastructures only (change megastructures): too few to meet on a walk (a few hundred in the
+   * whole galaxy), so they come straight from the galaxy's list, nearest first, at any distance.
+   */
+  private readonly sites: SearchHit[] | null = null;
+  private next = 0;
 
   constructor(
     private readonly galaxy: GalaxyModel,
@@ -81,14 +88,23 @@ export class GalaxyScan {
     private maxRadius = 1_500,
   ) {
     this.current = [origin];
+    if (query.what === 'planets' && query.biomes?.length && query.biomes.every(isMegastructure)) {
+      this.sites = galaxy.megastructures()
+        .map((m) => galaxy.starAt(m.hex)!)
+        .filter((star) => starMatches(star, query))
+        .flatMap((star) => ctx.planetsOf(star).filter((p) => planetMatches(p, query, ctx.statusOf(p))).map((planet) => ({ star, planet, distance: hexDistance(origin, star.hex) })))
+        .sort((a, b) => a.distance - b.distance || (a.star.id < b.star.id ? -1 : 1));
+    }
   }
 
   /** The radius searched so far (ly): the last ring begun. */
   get radius(): number {
+    if (this.sites) return this.next ? this.sites[this.next - 1].distance : 0;
     return Math.max(0, this.index === 0 ? this.ring - 1 : this.ring);
   }
 
   get done(): boolean {
+    if (this.sites) return this.found >= this.limit || this.next >= this.sites.length;
     return this.found >= this.limit || this.ring > this.maxRadius;
   }
 
@@ -101,6 +117,14 @@ export class GalaxyScan {
   /** Look at up to `budget` hexes; the hits found, nearest first. */
   step(budget = 50_000): SearchHit[] {
     const hits: SearchHit[] = [];
+    if (this.sites) {
+      while (!this.done) {
+        hits.push(this.sites[this.next++]);
+        this.found++;
+      }
+      this.stars = this.next;
+      return hits;
+    }
     while (budget > 0 && !this.done) {
       if (this.index >= this.current.length) {
         this.ring++;

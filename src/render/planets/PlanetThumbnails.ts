@@ -3,6 +3,8 @@ import { PLANET_LOOKS } from '../../content/planetLooks';
 import type { Planet } from '../../core/galaxy/Planets';
 import { hashSeed, Rng } from '../../core/rng/Rng';
 import { createPlanetMaterial, createRingMaterial } from './PlanetMaterial';
+import { isMegastructure, type MegaType } from '../../content/megastructures';
+import { createMegaVisual } from '../megastructures/MegaVisuals';
 
 /**
  * Renders planet portraits with the same procedural shader as the system view,
@@ -25,6 +27,7 @@ export class PlanetThumbnails {
   url(planet: Planet): string {
     const hit = this.cache.get(planet.id);
     if (hit) return hit;
+    if (isMegastructure(planet.biome)) return this.megaUrl(planet, planet.biome);
     const look = PLANET_LOOKS[planet.biome] ?? PLANET_LOOKS.barren;
     const material = createPlanetMaterial(look, hashSeed(planet.id, 'surface'));
     // Light from the upper left, in view space (the shader is camera-relative).
@@ -53,6 +56,30 @@ export class PlanetThumbnails {
       ring.geometry.dispose();
       (ring.material as THREE.Material).dispose();
     }
+    this.cache.set(planet.id, url);
+    return url;
+  }
+
+  /** A megastructure round a small bright star, seen from above at an angle (change megastructures). */
+  private megaUrl(planet: Planet, type: MegaType): string {
+    const light = new THREE.Color('#fff4e0');
+    const v = createMegaVisual(type, { seed: hashSeed(planet.id, 'mega'), light, clearance: 0.02 });
+    const star = new THREE.Mesh(new THREE.SphereGeometry(0.014, 24, 16), new THREE.MeshBasicMaterial({ color: '#fff2c8' }));
+    const holder = new THREE.Group();
+    holder.add(v.object3d, star);
+    holder.scale.setScalar(1.25 / v.extent);
+    holder.rotation.x = 0.55;
+    this.scene.add(holder);
+    holder.updateMatrixWorld(true);
+    v.update(5);
+    this.camera.position.z = 4.2;
+    this.camera.updateMatrixWorld();
+    this.renderer.render(this.scene, this.camera);
+    const url = this.renderer.domElement.toDataURL('image/png');
+    this.scene.remove(holder);
+    v.dispose();
+    star.geometry.dispose();
+    (star.material as THREE.Material).dispose();
     this.cache.set(planet.id, url);
     return url;
   }

@@ -39,6 +39,8 @@ function pick<T>(rng: Rng, items: ReadonlyArray<[T, number]>): T {
 
 /** A system's asteroid fields. Deterministic for a galaxy seed. */
 export function fieldsOf(star: StarSystem, galaxySeed: number): AsteroidField[] {
+  // The builders of a megastructure used up every rock (change megastructures).
+  if (star.megastructure) return [];
   const rng = new Rng(hashSeed(galaxySeed, 'asteroids', star.id));
   const n = pick(rng, COUNT_WEIGHTS.map((w, i) => [i, w] as [number, number]));
   return Array.from({ length: n }, (_, i) => {

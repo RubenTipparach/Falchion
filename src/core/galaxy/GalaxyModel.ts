@@ -1,4 +1,6 @@
-import { Hex, hexRing, hexToWorld } from '../hex/Hex';
+import { Hex, hexRing, hexToWorld, worldToHex } from '../hex/Hex';
+import type { MegaType } from '../../content/megastructures';
+import { buildMegaSites, type MegaSite } from './Megastructures';
 import { Rng, hash01, hashSeed } from '../rng/Rng';
 
 export interface GalaxyParams {
@@ -39,6 +41,8 @@ export interface StarSystem {
   readonly planetCount: number;
   /** Missing on stars from before change worlds-and-stars (read with kindOf). */
   readonly kind?: StarKind;
+  /** A megastructure system (change megastructures): the star and the structure, nothing else. */
+  readonly megastructure?: MegaType;
   /** Companion stars of a binary or triple system, by class. */
   readonly companions?: readonly SpectralClass[];
   /** World position; y (elevation) is always 0 — the galaxy is a flat plane. */
@@ -118,8 +122,54 @@ export class GalaxyModel {
     return clamp01(bulge + disk * (ARM_GAP + (1 - ARM_GAP) * arm) * edge * noise);
   }
 
-  /** The star in a hex, or null. Same seed + hex always gives the same answer. */
+  /**
+   * The star in a hex, or null. Same seed + hex always gives the same answer. A megastructure
+   * system has the structure as its only world (planetCount 1) and nothing else.
+   */
   starAt(h: Hex): StarSystem | null {
+    const star = this.rawStarAt(h);
+    const type = star && star.planetCount === 0 ? this.megaIndex().get(star.id) : undefined;
+    return type ? { ...star!, planetCount: 1, megastructure: type } : star;
+  }
+
+  /** Every megastructure in the galaxy (a few hundred), in the order they were placed. */
+  megastructures(): readonly MegaSite[] {
+    this.megaIndex();
+    return this.megaSites!;
+  }
+
+  private megaSites: MegaSite[] | null = null;
+  private megaById: Map<string, MegaType> | null = null;
+
+  private megaIndex(): Map<string, MegaType> {
+    if (this.megaById) return this.megaById;
+    this.megaSites = buildMegaSites({
+      seed: this.params.seed,
+      rawStarAt: (h) => this.rawStarAt(h),
+      sampleDensity: (n, rng) => this.sampleDensity(n, rng),
+      start: this.startHex(),
+    });
+    this.megaById = new Map(this.megaSites.map((s) => [s.starId, s.type]));
+    return this.megaById;
+  }
+
+  /**
+   * Where empires start: the densest point of the ring 18,000 ly from the core, at its nearest
+   * star (World.ts places every home 60–260 ly from it).
+   */
+  startHex(): Hex {
+    let best = { d: -1, x: 0, z: 0 };
+    for (let i = 0; i < 64; i++) {
+      const a = (i / 64) * Math.PI * 2;
+      const x = 18_000 * Math.cos(a), z = 18_000 * Math.sin(a);
+      const d = this.density(x, z);
+      if (d > best.d) best = { d, x, z };
+    }
+    return worldToHex(best.x, best.z);
+  }
+
+  /** A star as first rolled, before any megastructure claims it. */
+  private rawStarAt(h: Hex): StarSystem | null {
     const p = hexToWorld(h);
     if (h.q === CENTRAL_BLACK_HOLE.q && h.r === CENTRAL_BLACK_HOLE.r) {
       return { id: `${h.q},${h.r}`, hex: h, name: CENTRAL_BLACK_HOLE.name, spectral: 'O', planetCount: 0, kind: 'smbh', companions: [], position: { x: p.x, y: 0, z: p.z } };

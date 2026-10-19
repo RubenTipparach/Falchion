@@ -14,6 +14,8 @@ import { createPlanetMaterial, createRingMaterial, setPlanetLights } from '../pl
 import { hasPlanetLightMap, planetLightMap } from '../planets/planetLayouts';
 import { createStarVisual, StarVisual } from '../stars/StarVisuals';
 import { AsteroidBelt, type BeltField } from './AsteroidBelts';
+import { MEGA_BY_ID, isMegastructure } from '../../content/megastructures';
+import { createMegaVisual, type MegaVisual } from '../megastructures/MegaVisuals';
 import { placeBelts, type OrbitSlot } from './beltLayout';
 import type { MapLayer, ViewState } from './MapLayer';
 import { fade } from './ZoomModel';
@@ -59,6 +61,14 @@ interface BuiltSystem {
   readonly planets: OrbitingPlanet[];
   readonly starLabel: CSS2DObject;
   readonly belts: DrawnBelt[];
+  /** A megastructure system's structure (change megastructures): its only world. */
+  readonly mega: DrawnMega | null;
+}
+
+interface DrawnMega {
+  readonly planet: Planet;
+  readonly visual: MegaVisual;
+  readonly label: CSS2DObject;
 }
 
 interface DrawnBelt {
@@ -113,9 +123,11 @@ export class SystemLayer implements MapLayer {
     return this.current?.star ?? null;
   }
 
-  /** Planet under a ray, if the system view is showing. */
+  /** Planet under a ray, if the system view is showing (a megastructure anywhere across it). */
   pick(ray: THREE.Raycaster): Planet | null {
     if (!this.current || !this.object3d.visible) return null;
+    const mega = this.current.mega;
+    if (mega && ray.ray.distanceToPoint(this.current.root.getWorldPosition(TMP)) < mega.visual.extent) return mega.planet;
     // Generous hit target: planets are small on screen.
     let best: { p: OrbitingPlanet; d: number } | null = null;
     for (const p of this.current.planets) {
@@ -188,6 +200,8 @@ export class SystemLayer implements MapLayer {
 
   /** Absolute galaxy position of a planet (for the camera to follow). */
   planetPosition(planetId: string): THREE.Vector3 | null {
+    // A megastructure is centred on its star.
+    if (this.current?.mega?.planet.id === planetId) return this.current.root.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(this.origin.x, 0, this.origin.z));
     const p = this.current?.planets.find((x) => x.planet.id === planetId);
     if (!p) return null;
     return p.mesh.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(this.origin.x, 0, this.origin.z));
@@ -232,10 +246,15 @@ export class SystemLayer implements MapLayer {
     sys.root.getWorldPosition(this.starWorld);
     this.updateLights(sys);
     sys.visual.update(t);
+    sys.mega?.visual.update(t);
     const showLabels = view.visibleWidth < LABELS_BELOW && view.visibleWidth > 0.2;
     const labelFade = String(fade(view.visibleWidth, LABELS_BELOW * 0.6, LABELS_BELOW));
     sys.starLabel.visible = showLabels;
     sys.starLabel.element.style.opacity = labelFade;
+    if (sys.mega) {
+      sys.mega.label.visible = showLabels;
+      sys.mega.label.element.style.opacity = labelFade;
+    }
     for (const p of sys.planets) {
       p.pivot.rotation.y = p.phase + t * p.speed;
       if (!p.locked) {
@@ -295,7 +314,20 @@ export class SystemLayer implements MapLayer {
     const orbitMat = new THREE.LineBasicMaterial({ color: '#7fd3e6', transparent: true, opacity: 0.2, depthWrite: false });
     const planets: OrbitingPlanet[] = [];
     const orbits: OrbitSlot[] = [];
+    let mega: DrawnMega | null = null;
     for (const planet of this.events.planets?.(star) ?? planetsOf(star, this.galaxy.params.seed)) {
+      if (isMegastructure(planet.biome)) {
+        // The structure round the star, in place of any planet (change megastructures).
+        const v = createMegaVisual(planet.biome, { seed: hashSeed(planet.id, 'mega'), light: visual.light, clearance: visual.clearance });
+        root.add(v.object3d);
+        const def = MEGA_BY_ID[planet.biome];
+        const lbl = label(`<b>${planet.name}</b><small style="color:${def.color}">Megastructure · ${def.name}</small>`, 'system-label');
+        lbl.position.set(0, 0, v.extent * 1.05);
+        lbl.element.addEventListener('click', () => this.events.onPlanetClick(star, planet));
+        root.add(lbl);
+        mega = { planet, visual: v, label: lbl };
+        continue;
+      }
       const orbit = firstOrbit + planet.index * 0.04 + rng.range(-0.005, 0.005);
       const ring = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(
         Array.from({ length: 160 }, (_, i) => new THREE.Vector3(Math.cos((i / 160) * Math.PI * 2) * orbit, 0, Math.sin((i / 160) * Math.PI * 2) * orbit))), orbitMat);
@@ -341,7 +373,7 @@ export class SystemLayer implements MapLayer {
     }
     this.lightsDirty = true;
     const belts = this.buildBelts(star, root, visual, orbits, firstOrbit);
-    return { star, root, visual, planets, starLabel, belts };
+    return { star, root, visual, planets, starLabel, belts, mega };
   }
 
   /** Each asteroid field as a belt in a gap between planet orbits (see beltLayout). */
@@ -385,6 +417,7 @@ export class SystemLayer implements MapLayer {
     if (!this.current) return;
     this.object3d.remove(this.current.root);
     this.current.visual.dispose();
+    this.current.mega?.visual.dispose();
     for (const b of this.current.belts) b.belt.dispose();
     this.current.root.traverse((o) => {
       if (o instanceof THREE.Mesh || o instanceof THREE.Line) {

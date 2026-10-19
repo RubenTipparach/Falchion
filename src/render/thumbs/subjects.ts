@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { isMegastructure, type MegaType } from '../../content/megastructures';
+import { createMegaVisual } from '../megastructures/MegaVisuals';
 import { SHIP_PALETTES } from '../../content/liveries';
 import { BRANCHES, TECH_NODES } from '../../content/techTree';
 import type { TechNode } from '../../core/research/types';
@@ -65,7 +67,8 @@ export const THUMB_SUBJECTS: Readonly<Record<ThumbKind, SubjectFn>> = {
     return shipSubject(`livery:${id}`, normalizeDesign({ ...ctx.design('lancer'), ...variant, style, blend: [], traits: [], livery, colors: { primary, secondary, accent } }), ctx);
   },
   // A planet type (biome id): a world of that type in the system view's shader.
-  planet: (id) => (PLANET_LOOKS[id] ? { key: `planet:${id}`, build: () => framedPlanet(planet(id, `planet:${id}`)) } : null),
+  planet: (id) => (PLANET_LOOKS[id] ? { key: `planet:${id}`, build: () => framedPlanet(planet(id, `planet:${id}`)) }
+    : isMegastructure(id) ? { key: `planet:${id}`, build: () => megastructure(id) } : null),
 };
 
 /** Designs the hull sheet shows for each style: small to big, few to many engines and guns. */
@@ -203,6 +206,18 @@ function buildingObject(m: BuildingModel): THREE.Group {
   const g = new THREE.Group();
   g.add(new THREE.Mesh(m.geo, material));
   if (m.ring) g.add(new THREE.Mesh(m.ring, material));
+  return g;
+}
+
+/** A megastructure round a small bright star, about a unit across (change megastructures). */
+function megastructure(type: MegaType): THREE.Object3D {
+  const v = createMegaVisual(type, { seed: hashSeed(`planet:${type}`, 'mega'), light: new THREE.Color('#fff4e0'), clearance: 0.02 });
+  v.update(5);
+  const g = new THREE.Group();
+  g.add(v.object3d, new THREE.Mesh(new THREE.SphereGeometry(0.014, 24, 16), new THREE.MeshBasicMaterial({ color: '#fff2c8' })));
+  g.scale.setScalar(0.5 / v.extent);
+  g.rotation.x = 0.35;
+  g.position.y = 0.5;
   return g;
 }
 

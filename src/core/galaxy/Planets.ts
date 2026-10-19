@@ -1,4 +1,5 @@
 import { BASE_BIOMES, REFINEMENTS, type RefineContext } from '../../content/biomes';
+import { MEGA_BY_ID } from '../../content/megastructures';
 import { Rng, hashSeed } from '../rng/Rng';
 import { kindOf, type StarSystem } from './GalaxyModel';
 
@@ -19,6 +20,8 @@ const NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'];
  * (change worlds-and-stars), so an existing world only changes if it is refined.
  */
 export function planetsOf(star: StarSystem, galaxySeed: number): Planet[] {
+  // A megastructure system (change megastructures): the structure is its one world.
+  if (star.megastructure) return [{ id: `${star.id}/0`, starId: star.id, index: 0, name: `${star.name} ${MEGA_BY_ID[star.megastructure].name}`, biome: star.megastructure, size: 5 }];
   const rng = new Rng(hashSeed(galaxySeed, 'planets', star.id));
   const weights = BASE_BIOMES.map((b) => [b.id, b.weight] as const);
   return Array.from({ length: star.planetCount }, (_, i) => {

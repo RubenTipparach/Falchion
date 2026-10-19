@@ -76,7 +76,10 @@ export class SearchPanel extends Drawer {
         seg([['view', 'From the view'], ['home', 'From home']], this.from, (from) => { this.from = from; this.renderForm(); this.restart(); })),
       q.what === 'planets' ? h('div', { class: 'search-group' }, h('h4', {}, 'Survey'), seg(STATUSES.map(([v, l]) => [v ?? 'any', l] as [string, string]), q.status ?? 'any', (status) => this.set({ status: status as SearchQuery['status'] }))) : '',
       q.what === 'planets' ? h('div', { class: 'search-group' }, h('h4', {}, 'Planet type'),
-        h('div', { class: 'chips' }, ...BIOMES.map((b) => chip(!!q.biomes?.includes(b.id), b.name, b.color, () => this.set({ biomes: this.flip(q.biomes, b.id) }), b.blurb)))) : '',
+        h('div', { class: 'chips' }, ...BIOMES.filter((b) => !b.megastructure).map((b) => chip(!!q.biomes?.includes(b.id), b.name, b.color, () => this.set({ biomes: this.flip(q.biomes, b.id) }), b.blurb)))) : '',
+      // A few hundred in the whole galaxy: on their own, they are found at any distance.
+      q.what === 'planets' ? h('div', { class: 'search-group' }, h('h4', {}, 'Megastructures'),
+        h('div', { class: 'chips' }, ...BIOMES.filter((b) => b.megastructure).map((b) => chip(!!q.biomes?.includes(b.id), b.name, b.color, () => this.set({ biomes: this.flip(q.biomes, b.id) }), b.blurb)))) : '',
       h('div', { class: 'search-group' }, h('h4', {}, q.what === 'planets' ? 'Around a star' : 'Star'),
         h('div', { class: 'chips' }, ...KINDS.map((k) => chip(!!q.kinds?.includes(k), STAR_KINDS[k].name, STAR_KINDS[k].color ?? SPECTRAL_COLORS.G, () => this.set({ kinds: this.flip(q.kinds, k) }), STAR_KINDS[k].blurb))),
         h('div', { class: 'chips' }, ...CLASSES.map((c) => chip(!!q.spectral?.includes(c), `Class ${c}`, SPECTRAL_COLORS[c], () => this.set({ spectral: this.flip(q.spectral, c) }), 'Main-sequence stars of this class')))),

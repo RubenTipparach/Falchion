@@ -44,10 +44,10 @@ describe('worlds: existing planets keep their type', () => {
     expect(refined / total).toBeLessThan(0.45);
   });
 
-  it('has 23 types, each with a look and yields; only the original nine are rolled first', () => {
-    expect(BIOMES.length).toBe(23);
+  it('has 23 planet types, each with a look and yields; only the original nine are rolled first', () => {
+    expect(BIOMES.filter((b) => !b.megastructure).length).toBe(23);
     expect(BASE_BIOMES.map((b) => b.id)).toEqual(['terran', 'ocean', 'jungle', 'desert', 'ice', 'volcanic', 'toxic', 'barren', 'gas']);
-    for (const b of BIOMES) {
+    for (const b of BIOMES.filter((x) => !x.megastructure)) {
       expect(PLANET_LOOKS[b.id], b.id).toBeDefined();
       expect(BIOME_YIELDS[b.id], b.id).toBeDefined();
     }
@@ -61,7 +61,7 @@ describe('worlds: existing planets keep their type', () => {
         if (p.biome === 'eyeball') expect(kindOf(star) === 'brown-dwarf' || (kindOf(star) === 'main' && 'MK'.includes(star.spectral)), star.id).toBe(true);
       }
     }
-    for (const b of BIOMES.filter((x) => x.id !== 'ecumenopolis')) expect(seen.has(b.id), b.id).toBe(true);
+    for (const b of BIOMES.filter((x) => x.id !== 'ecumenopolis' && !x.megastructure)) expect(seen.has(b.id), b.id).toBe(true);
     expect(seen.has('ecumenopolis')).toBe(false);
   });
 

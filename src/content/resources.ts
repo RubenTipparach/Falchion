@@ -1,3 +1,4 @@
+import { MEGASTRUCTURES } from './megastructures';
 /** Raw materials ships mine from asteroid fields, and what an empire earns and makes. */
 export type Mineral = 'metals' | 'gases' | 'crystals';
 export type Currency = 'credits' | 'influence' | 'faith' | 'food' | 'goods';
@@ -63,7 +64,9 @@ export const BIOME_YIELDS: Readonly<Record<string, Partial<Record<Resource, numb
   deadtech: { metals: 5, crystals: 2 },
   diamond: { crystals: 9, credits: 3 },
   canyon: { metals: 4, crystals: 2, goods: 1 },
+  // Change megastructures: what a survey of one turns up.
+  ...Object.fromEntries(MEGASTRUCTURES.map((m) => [m.id, m.yields])),
 };
 
 /** Science shards a year from a colony's world itself (machines that still remember something). */
-export const BIOME_SCIENCE: Readonly<Record<string, number>> = { choir: 3, deadtech: 2, ecumenopolis: 4 };
+export const BIOME_SCIENCE: Readonly<Record<string, number>> = { choir: 3, deadtech: 2, ecumenopolis: 4, ...Object.fromEntries(MEGASTRUCTURES.map((m) => [m.id, m.science])) };

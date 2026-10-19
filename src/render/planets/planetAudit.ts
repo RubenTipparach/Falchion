@@ -5,6 +5,11 @@ import { hashSeed } from '../../core/rng/Rng';
 import { surfaceLookOf } from '../../core/surface/Terrain';
 import { createPlanetMaterial } from './PlanetMaterial';
 import { FULL_QUALITY, SurfaceTerrain } from './surface/SurfaceTerrain';
+import { MEGASTRUCTURES } from '../../content/megastructures';
+import type { StarSystem } from '../../core/galaxy/GalaxyModel';
+import { createMegaVisual } from '../megastructures/MegaVisuals';
+import { createStarVisual } from '../stars/StarVisuals';
+import { PlanetThumbnails } from './PlanetThumbnails';
 
 /**
  * Planet type audit (tools/planets/audit.html, `npm run planets`): every planet type four ways side
@@ -35,7 +40,7 @@ export async function planetAudit(root: HTMLElement): Promise<void> {
   header.append(cell('Type'), cell('System view'), cell('Surface · orbit 2.6 R'), cell('Surface · mid 1.25 R'), cell('Surface · close'));
   root.append(header);
 
-  for (const biome of BIOMES.filter((b) => !ids || ids.includes(b.id))) {
+  for (const biome of BIOMES.filter((b) => !b.megastructure && (!ids || ids.includes(b.id)))) {
     const look = PLANET_LOOKS[biome.id] ?? PLANET_LOOKS.barren;
     const seed = hashSeed(`audit:${biome.id}`, 'surface');
     const row = document.createElement('div');
@@ -61,8 +66,61 @@ export async function planetAudit(root: HTMLElement): Promise<void> {
     // Let the page paint between types.
     await new Promise((r) => setTimeout(r, 0));
   }
+  await megaRows(root, ids, px, camera, shot);
   renderer.dispose();
   (window as unknown as { AUDIT_READY: boolean }).AUDIT_READY = true;
+}
+
+/**
+ * Megastructures (change megastructures): each round a star it can host, as the system view's
+ * camera sees it (from above at an angle), close up, edge on, and its card thumbnail.
+ */
+async function megaRows(root: HTMLElement, ids: string[] | undefined, px: number, camera: THREE.PerspectiveCamera, shot: (s: THREE.Scene) => string): Promise<void> {
+  const types = MEGASTRUCTURES.filter((m) => !ids || ids.includes(m.id));
+  if (!types.length) return;
+  const header = document.createElement('div');
+  header.className = 'row head';
+  header.append(cell('Megastructure'), cell('System view'), cell('Close'), cell('Edge on'), cell('Thumbnail'));
+  root.append(header);
+  const thumbs = new PlanetThumbnails(px / 2);
+  for (const m of types) {
+    const kind = m.hosts[0];
+    const star: StarSystem = { id: `audit-${m.id}`, hex: { q: 0, r: 0 }, name: 'Audit', spectral: m.classes?.[0] ?? 'G', planetCount: 1, kind, companions: [], position: { x: 0, y: 0, z: 0 }, megastructure: m.id };
+    const scene = new THREE.Scene();
+    const visual = createStarVisual(star);
+    scene.add(visual.object3d);
+    const mega = createMegaVisual(m.id, { seed: hashSeed(`${star.id}/0`, 'mega'), light: visual.light, clearance: visual.clearance });
+    scene.add(mega.object3d);
+    const row = document.createElement('div');
+    row.className = 'row';
+    const name = cell('');
+    name.innerHTML = `<b>${m.name}</b><small>${m.id} · round a ${kind}${kind === 'main' ? ` ${star.spectral}` : ''}</small>`;
+    row.append(name);
+    root.append(row);
+    const views: Array<[number, number]> = [[2.4, 0.95], [1.15, 0.45], [1.6, 0.06]];
+    for (const [dist, elev] of views) {
+      const d = mega.extent * dist;
+      camera.near = d * 0.01;
+      camera.far = d * 40;
+      camera.position.set(Math.cos(elev) * d * 0.5, Math.sin(elev) * d, Math.cos(elev) * d * 0.866);
+      camera.lookAt(0, 0, 0);
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld();
+      visual.update(5);
+      mega.update(5);
+      const img = document.createElement('img');
+      img.width = img.height = px;
+      img.src = shot(scene);
+      row.append(img);
+    }
+    const thumb = document.createElement('img');
+    thumb.width = thumb.height = px;
+    thumb.src = thumbs.url({ id: `${star.id}/0`, starId: star.id, index: 0, name: m.name, biome: m.id, size: 5 });
+    row.append(thumb);
+    mega.dispose();
+    visual.dispose();
+    await new Promise((r) => setTimeout(r, 0));
+  }
 }
 
 function cell(text: string): HTMLElement {

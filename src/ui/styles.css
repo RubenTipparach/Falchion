@@ -1078,3 +1078,11 @@ img.thumb.pixelated { image-rendering: pixelated; }
 .search-hit .hit-name small { color: var(--muted); font-size: 11px; }
 .search-hit .hit-dist { font-size: 12px; color: var(--muted); }
 .search-hit .star-dot { width: 14px; height: 14px; margin: 0 auto; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); }
+
+/* ── Megastructure beacons on the galaxy map (change megastructures) ── */
+.mega-beacon { pointer-events: auto; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px; border: 0; background: none;
+  color: var(--c); font: 600 10px/1.2 var(--font-display); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; text-shadow: 0 0 6px rgba(0, 0, 0, 0.9); }
+.mega-beacon i { width: 9px; height: 9px; transform: rotate(45deg); background: var(--c); box-shadow: 0 0 8px 2px var(--c); flex: none; }
+.mega-beacon:hover span, .mega-beacon:focus-visible span { text-decoration: underline; }
+.mega-beacon:focus-visible { outline: 1px solid var(--c); }
+.mega-beacon.far i { width: 4px; height: 4px; box-shadow: 0 0 4px 1px var(--c); opacity: 0.85; }

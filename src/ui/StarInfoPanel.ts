@@ -227,13 +227,14 @@ export class StarInfoPanel {
     const portrait = h('img', { class: 'planet-portrait', src: this.thumb(p), alt: `${p.name}, ${biome?.name}` });
     this.el.append(
       h('header', {},
-        h('div', {}, h('span', { class: 'eyebrow' }, `${star.name} · planet ${p.index + 1} of ${star.planetCount}`), h('h3', {}, p.name),
-          h('p', { class: 'muted' }, `${biome?.name ?? p.biome} world · size ${p.size}`)),
+        h('div', {}, h('span', { class: 'eyebrow' }, biome?.megastructure ? `${star.name} · the system's only work` : `${star.name} · planet ${p.index + 1} of ${star.planetCount}`), h('h3', {}, p.name),
+          h('p', { class: 'muted' }, biome?.megastructure ? `Megastructure · ${biome.name}` : `${biome?.name ?? p.biome} world · size ${p.size}`)),
         this.shareButton(star, p),
         // Closing the card keeps the view: the camera stays on the planet (or its surface).
         h('button', { class: 'icon-btn', 'aria-label': 'Close the planet card', title: 'Close (the view stays on the planet)', onclick: () => this.closePlanet(p) }, icon('close'))),
       portrait,
       biome ? h('p', { class: 'small muted planet-blurb' }, biome.blurb) : '',
+      biome?.megastructure ? h('p', { class: 'small muted' }, 'Its builders spent every planet, moon, asteroid and comet of this system on it: there is nothing else here. Survey it for what they left behind.') : '',
       p.biome === 'choir' ? h('blockquote', { class: 'choir-broadcast', title: 'The machines repeat it, over and over' },
         h('span', { class: 'eyebrow' }, 'Broadcast'), h('p', {}, `“${broadcastOf(p, CHOIR_BROADCASTS)}”`),
         h('small', { class: 'muted' }, 'It does not quite match your instructions.')) : '',
@@ -255,7 +256,7 @@ export class StarInfoPanel {
         !done && !colony ? h('button', { class: 'btn primary', disabled: !canExplore, onclick: () => this.actions.explore(p) }, icon('explore'), ` Explore · ${cost} supply`) : '',
         cache || crateWaiting ? h('button', { class: 'btn primary collect', title: 'Gather what this world holds', onclick: () => collectWithFx(portrait, () => this.actions.collectPlanet(p)) }, icon('crate'), ' Collect') : '',
         done && !colony && canSettle ? h('button', { class: 'btn', disabled: typeof ark === 'string', title: typeof ark === 'string' ? ark : 'The ark lands its colonists and spends its supply; it goes back for more', onclick: () => this.actions.settle(p) }, icon('build'), ' Settle') : '',
-        p.biome !== 'gas' ? h('button', { class: 'btn land', title: colony ? `Descend to ${colony.name.replace(/ \(capital\)$/, '')}` : 'Descend to the surface', onclick: () => this.actions.land(star, p) }, icon('land'), ' Land') : '',
+        p.biome !== 'gas' && !biome?.megastructure ? h('button', { class: 'btn land', title: colony ? `Descend to ${colony.name.replace(/ \(capital\)$/, '')}` : 'Descend to the surface', onclick: () => this.actions.land(star, p) }, icon('land'), ' Land') : '',
         h('button', { class: 'btn', onclick: () => this.actions.focusPlanet(star, null) }, 'Back to system')),
     );
   }

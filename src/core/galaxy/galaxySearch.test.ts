@@ -65,4 +65,18 @@ describe('galaxy search (change galaxy-search)', () => {
     expect(scan.radius).toBe(50);
     expect(scan.hexes).toBe(1 + 3 * 50 * 51);
   });
+
+  it('finds megastructures anywhere in the galaxy, nearest first, from the galaxy\'s list', () => {
+    const scan = new GalaxyScan(galaxy, origin, { what: 'planets', biomes: ['ringworld', 'penrose-sphere'] }, ctx, 5);
+    const hits: SearchHit[] = [];
+    while (!scan.done) hits.push(...scan.step());
+    expect(hits).toHaveLength(5);
+    expect(hits.every((h) => h.planet && ['ringworld', 'penrose-sphere'].includes(h.planet.biome))).toBe(true);
+    for (let i = 1; i < hits.length; i++) expect(hits[i].distance).toBeGreaterThanOrEqual(hits[i - 1].distance);
+    // Further away than any ring walk would reach in one go, and searching further carries on.
+    scan.extend(500);
+    while (!scan.done) hits.push(...scan.step());
+    const all = galaxy.megastructures().filter((m) => m.type === 'ringworld' || m.type === 'penrose-sphere');
+    expect(hits.length).toBe(all.length);
+  });
 });

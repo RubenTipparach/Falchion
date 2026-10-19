@@ -1,3 +1,4 @@
+import { MEGASTRUCTURES } from './megastructures';
 /** Planet biomes. Adjacency drives expansion research (see change mmo-core-systems). */
 export interface BiomeDef {
   readonly id: string;
@@ -13,6 +14,8 @@ export interface BiomeDef {
   readonly settle?: 'never' | 'conquest';
   /** One line for cards and tooltips. */
   readonly blurb: string;
+  /** A megastructure (change megastructures): the only world of its system, never rolled or settled. */
+  readonly megastructure?: true;
 }
 
 export const BIOMES: readonly BiomeDef[] = [
@@ -41,6 +44,8 @@ export const BIOMES: readonly BiomeDef[] = [
   // ── Change planet-audit ──
   { id: 'diamond', name: 'Diamond', color: '#a8c8f0', adjacent: ['barren', 'volcanic'], weight: 0, blurb: 'A carbon world: graphite plains and diamond crust that glitters in the starlight.' },
   { id: 'canyon', name: 'Canyon', color: '#c8744a', adjacent: ['desert', 'rust', 'barren'], weight: 0, blurb: 'Rift valleys miles deep cut across the whole world, like Mars’s Valles Marineris.' },
+  // ── Change megastructures: each the only world of its system ──
+  ...MEGASTRUCTURES.map((m): BiomeDef => ({ id: m.id, name: m.name, color: m.color, adjacent: [], weight: 0, settle: 'never', blurb: m.blurb, megastructure: true })),
 ];
 
 /** Biomes the first roll can give (the original nine, in their original order: the roll depends on it). */

@@ -31,6 +31,7 @@ import { StarfieldLayer } from '../render/map/StarfieldLayer';
 import { SystemLayer } from '../render/map/SystemLayer';
 import { SurfaceLayer } from '../render/planets/surface/SurfaceLayer';
 import { BattleLayer } from '../render/battle/BattleLayer';
+import { MegaBeaconLayer } from '../render/map/MegaBeaconLayer';
 import { BattleMarkerLayer } from '../render/map/BattleMarkerLayer';
 import { BattleHud } from '../ui/BattleHud';
 import { Dispatches } from '../ui/Dispatches';
@@ -182,6 +183,15 @@ async function bootstrap(): Promise<void> {
   store.subscribe((s, prev) => { if (s.turn !== prev.turn) system.refreshFields(); });
   // Surface view: the focused planet's close-up, below planet view (draws its own scene when near).
   const surface = map.layers.add(new SurfaceLayer({ zoom: map.controller.zoom, input: map.controller, frame: (id) => system.planetFrame(id), hold: (id) => system.holdPlanet(id), canvas: map.canvas, lite }));
+  // Megastructures are seen from across the galaxy (change megastructures).
+  map.layers.add(new MegaBeaconLayer(galaxy.megastructures().map((m) => {
+    const star = galaxy.starAt(m.hex)!;
+    return { starId: m.starId, starName: star.name, type: m.type, x: star.position.x, z: star.position.z };
+  }), (starId) => {
+    const star = controller.starById(starId);
+    const mega = star && controller.planets(star)[0];
+    if (star && mega) controller.focusPlanet(star, mega);
+  }));
   const selection = map.layers.add(new SelectionLayer());
   const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK), (h) => galaxy.starAt(h)?.position ?? hexToWorld(h), (id) => controller.selectFleet(id)));
   // Battles at sea: a marker on the map for each one you can see, and the view that covers the map to watch one.

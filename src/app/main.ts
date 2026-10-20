@@ -264,9 +264,9 @@ async function bootstrap(): Promise<void> {
   const pill = new LoadingPill();
   app.append(pill.el);
   const warmup = new ShaderWarmup();
-  // It covers the system view and planet close-ups. A planet's close-up opens once its own shaders
-  // are ready: landing on one (or zooming all the way in) moves them to the front, says so, and
-  // lands when they are (change surface-perf).
+  // It covers the system view and planet close-ups, quietly: nothing shows unless you wait on it.
+  // A planet's close-up opens once its own shaders are ready: landing on one (or zooming all the
+  // way in) moves them to the front, says so, and lands when they are (change surface-perf).
   let warming = true;
   let nudgeUntil = 0;
   let nudged: Planet | null = null;
@@ -277,7 +277,7 @@ async function bootstrap(): Promise<void> {
     if (planet && warmup.total) {
       const p = warmup.progressFor(planetLook(planet));
       pill.set(`Preparing ${planet.name} · ${p.ready}/${p.total} · ${controller.landingWaitsFor ? 'landing when ready' : 'zoom in when ready'}`, p.total ? p.ready / p.total : null);
-    } else pill.set(`Preparing shaders${warmup.total ? ` · ${warmup.ready}/${warmup.total}` : ''}`, warmup.total ? warmup.ready / warmup.total : null);
+    } else pill.set(null);
     pill.el.classList.toggle('nudge', !!planet);
   };
   controller.closeUpReady = (planet) => !warming || warmup.readyFor(planetLook(planet));
@@ -291,8 +291,12 @@ async function bootstrap(): Promise<void> {
     const done = () => (performance.now() < nudgeUntil ? setTimeout(done, nudgeUntil - performance.now() + 20) : showWarmup());
     setTimeout(done, ms + 20);
   };
+  let warmStart = 0;
   const warmed = () => {
+    if (!warming) return;
     warming = false;
+    // How long it took: much less once the browser has these shaders in its cache from a visit before.
+    if (warmStart) console.info(`Shaders prepared: ${warmup.total} in ${((performance.now() - warmStart) / 1000).toFixed(1)} s`);
     pill.el.classList.remove('nudge');
     pill.set(null);
     controller.shadersChanged();
@@ -314,8 +318,11 @@ async function bootstrap(): Promise<void> {
     showWarmup();
   });
   showWarmup();
-  setTimeout(() => { try { warmup.start(map.renderer, lite, map.scene); if (!warmup.total) warmed(); } catch (e) { console.warn('shader warm-up', e); warmed(); } }, 2500);
-  setInterval(() => { if (!warming) pill.set(surface.status.building ? 'Building the surface' : null); }, 200);
+  setTimeout(() => {
+    warmStart = performance.now();
+    try { warmup.start(map.renderer, lite, map.scene); if (!warmup.total) warmed(); } catch (e) { console.warn('shader warm-up', e); warmed(); }
+  }, 1000);
+  setInterval(() => { if (!warming || (!controller.landingWaitsFor && performance.now() >= nudgeUntil)) pill.set(surface.status.building ? 'Building the surface' : null); }, 200);
   // Touch screens: a joystick to orbit the view (the battle's camera while one is open), kept above
   // the bottom sheet on a phone.
   if (lite) {

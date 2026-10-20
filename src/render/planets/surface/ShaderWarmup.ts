@@ -194,13 +194,15 @@ export class ShaderWarmup {
     let built: ThreeProgram[] = [];
     let inFlight: Job[] = [];
     // With parallel compile the driver works on its own threads: two at a time keeps them busy
-    // without flooding them (75 at once froze Chrome). Without it, each compile finishes when
-    // asked, so one at a time.
-    const width = parallel ? 2 : 1;
+    // without flooding them (75 at once froze Chrome). A batch that comes back at once was in the
+    // browser's shader cache (a program compiled in an earlier visit): then more at a time, up to
+    // eight, back to two as soon as one takes real work. Without parallel compile, one at a time.
+    let width = parallel ? 2 : 1;
+    let batchStart = 0;
     // Compile only while the tab is shown and the player is not in the middle of moving the view
-    // (unless a close-up is waiting on it).
+    // (unless a close-up is waiting on it): zooming, dragging or a key, not the mouse just moving.
     let touched = 0;
-    const touch = () => { touched = performance.now(); };
+    const touch = (e: Event) => { if (e.type !== 'pointermove' || (e as PointerEvent).buttons) touched = performance.now(); };
     for (const e of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchmove']) window.addEventListener(e, touch, { passive: true });
     const later = (fn: () => void, ms: number) => setTimeout(() => {
       const now = performance.now();
@@ -211,11 +213,13 @@ export class ShaderWarmup {
       // Wait out the programs last handed over.
       if (parallel) waiting = waiting.filter((p) => !gl.getProgramParameter(p, COMPLETION_STATUS));
       else for (const p of waiting.splice(0)) gl.getProgramParameter(p, gl.LINK_STATUS);
-      if (waiting.length) return later(step, 50);
+      if (waiting.length) return later(step, 20);
+      if (parallel && batchStart) width = performance.now() - batchStart < 60 ? Math.min(width * 2, 8) : 2;
       // Read back what three.js reads on a program's first use, now rather than mid-zoom.
       primePrograms(built.splice(0));
       for (const j of inFlight.splice(0)) this.left.set(j.group, this.left.get(j.group)! - 1);
       // Hand over the next new programs; objects whose program is already built count straight in.
+      batchStart = performance.now();
       while (this.jobs.length && waiting.length < width) {
         const job = this.jobs.shift()!;
         const before = renderer.getRenderTarget();
@@ -234,7 +238,7 @@ export class ShaderWarmup {
       // A job counts once its programs are built.
       this.ready = this.total - this.jobs.length - inFlight.length;
       this.emit();
-      if (this.jobs.length || waiting.length) later(step, waiting.length ? 30 : 0);
+      if (this.jobs.length || waiting.length) later(step, waiting.length ? 10 : 0);
       else {
         target.dispose();
         for (const e of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchmove']) window.removeEventListener(e, touch);
@@ -242,7 +246,7 @@ export class ShaderWarmup {
         for (const root of [scene, system, ...variants.values()]) root.traverse((o) => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); });
       }
     };
-    later(step, 50);
+    later(step, 0);
   }
 
   private emit(): void {

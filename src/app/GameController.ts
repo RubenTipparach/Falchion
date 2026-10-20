@@ -25,7 +25,8 @@ import { ownClaim } from './ServerSync';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { StarSystem } from '../core/galaxy/GalaxyModel';
 import { Planet } from '../core/galaxy/Planets';
-import { Hex, hexDistance, hexEquals, hexToWorld, worldToHex } from '../core/hex/Hex';
+import { Hex, hexDistance, hexEquals, hexRing, hexToWorld, worldToHex } from '../core/hex/Hex';
+import { ALL_SEEING, type Sight, type StarLens } from '../core/visibility/Vision';
 import type { FleetLayer, FleetView } from '../render/map/FleetLayer';
 import type { HexGridLayer } from '../render/map/HexGridLayer';
 import type { ViewState } from '../render/map/MapLayer';
@@ -113,6 +114,45 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
 
   private view!: ViewDeps;
   private lastClick: { id: string; at: number } | null = null;
+
+  /**
+   * What the player sees (change admin-snapshots-and-fog), set by main: what they pick, hover, fly
+   * to and read goes through it. The rules (EmpireSim) never do.
+   */
+  lens: () => StarLens = () => ALL_SEEING;
+
+  /** A star as the player knows it: null when hidden from them, a megastructure not yet found as an ordinary star. */
+  seeStar = (star: StarSystem): StarSystem | null => this.lens().see(star);
+
+  /** How a star shows to the player: explored, sighted, fogged (uncharted) or hidden. */
+  sightOf = (star: StarSystem): Sight => this.lens().sight(star);
+
+  /** The nearest star to a hex the player can see, within `reach` (as the player knows it). */
+  private nearestSeen(h: Hex, reach: number): StarSystem | null {
+    const lens = this.lens();
+    if (!lens.hideSystems) {
+      const star = this.deps.galaxy.nearestStar(h, reach);
+      return star && lens.see(star);
+    }
+    for (let k = 0; k <= reach; k++) {
+      for (const c of hexRing(h, k)) {
+        const star = this.deps.galaxy.starAt(c);
+        const seen = star && lens.see(star);
+        if (seen) return seen;
+      }
+    }
+    return null;
+  }
+
+  /** What the player sees changed: a selected star now hidden is let go; a megastructure just found shows. */
+  refreshSight(): void {
+    const sel = this.state.selected;
+    if (!sel) return;
+    const raw = this.deps.galaxy.starAt(sel.hex);
+    const seen = raw && this.lens().see(raw);
+    if (!seen) return this.select(null);
+    if (seen.megastructure !== sel.megastructure || seen.planetCount !== sel.planetCount) this.deps.store.update({ selected: seen });
+  }
   /** Other players' fleets in the shared galaxy (drawn and selectable, never simulated here). */
   private others: FleetView[] = [];
 
@@ -142,7 +182,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     view.map.controller.attractor = (ground, width, touch) => {
       if (width > 25) return null;
       const reach = Math.max(1, Math.round(width * 0.15));
-      const star = this.deps.galaxy.nearestStar(worldToHex(ground.x, ground.z), reach);
+      const star = this.nearestSeen(worldToHex(ground.x, ground.z), reach);
       if (star && width < SYSTEM_VIEW_WIDTH && Math.hypot(star.position.x - ground.x, star.position.z - ground.z) < SYSTEM_EXTENT) return null;
       // Pinch zoom (touch) also snaps to ships: whichever, star or ship, is closer to the fingers.
       const ship = touch ? view.fleets.nearest(ground.x, ground.z, reach) : null;
@@ -410,6 +450,8 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
   }
 
   flyTo(star: StarSystem, closeUp = false): void {
+    // A star hidden from the player is not a place they can go to on the map.
+    if (!this.lens().see(star)) return;
     const cam = this.view.map.controller;
     cam.flyTo(star.position.x, star.position.z, closeUp ? SYSTEM_ALTITUDE : cam.zoom.targetAltitude > LOCATE_ALTITUDE ? LOCATE_ALTITUDE : undefined);
   }
@@ -448,6 +490,8 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
   }
 
   select(star: StarSystem | null): void {
+    // The star as the player knows it; one hidden from them cannot be selected.
+    star = star && this.lens().see(star);
     if (this.state.selectedPlanet && this.state.selectedPlanet.starId !== star?.id) this.clearPlanetFocus();
     this.deps.store.update({ selected: star });
     if (star) {
@@ -469,6 +513,10 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
   }
 
   focusPlanet(star: StarSystem, planet: Planet | null): void {
+    // Nothing of a star hidden from the player, nor a megastructure they have not found.
+    const seen = this.lens().see(star);
+    if (!seen || (planet && isMegastructure(planet.biome) && !this.lens().megastructureSeen(star.id))) return;
+    star = seen;
     if (this.state.selectedField) { this.deps.store.update({ selectedField: null }); this.view.system.setFieldSelected(null); }
     if (this.state.selected?.id !== star.id) this.select(star);
     if (planet) this.onFocusPlanet?.(planet);
@@ -501,6 +549,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
   /** Descend to a rocky planet's surface (its capital or main city): focuses it first if need be. */
   land(star: StarSystem, planet: Planet, at?: LandingSpot): void {
     this.pendingLanding = null;
+    if (!this.lens().see(star) || (isMegastructure(planet.biome) && !this.lens().megastructureSeen(star.id))) return;
     if (!hasMegaSurface(planet.biome) && this.landable(planet) && !this.closeUpReady(planet)) {
       // Its shaders are still in the start-up warm-up (now at the front of it): drawn now, they
       // would compile on the spot. Land as soon as they are ready.
@@ -742,7 +791,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
       return;
     }
     const reach = Math.min(6, Math.max(1, Math.round(v.visibleWidth * 0.012)));
-    const star = this.deps.galaxy.nearestStar(h, reach);
+    const star = this.nearestSeen(h, reach);
     // Double-click a star to dive into its system.
     if (star && this.isDoubleClick(star.id)) {
       this.select(star);
@@ -771,7 +820,8 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     const v = this.view.map.view;
     const clicked = worldToHex(world.x, world.z);
     const snap = v ? Math.min(30, Math.round(v.visibleWidth * 0.015)) : 0;
-    const star = this.deps.galaxy.nearestStar(clicked, snap);
+    // Only a star the player can see is a target; anywhere else is a hex of space (a hidden star there is found on arrival).
+    const star = this.nearestSeen(clicked, snap);
     const fleet = info.fleet;
     if (star) {
       if (info.at?.id === star.id) return this.dispatch(`${fleet.name} is already at ${star.name}`);
@@ -825,8 +875,11 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     this.view.hexGrid.setHover(h.q, h.r);
     const v = this.view.map.view;
     const star = v && v.visibleWidth < 1_200 ? this.deps.galaxy.starAt(h) : null;
+    const sight = star ? this.lens().sight(star) : 'hidden';
     const dist = hexDistance(h, this.deps.world.home.hex);
-    this.view.hud.setHover(`${formatAddress(addressOf(h))}${star ? `  ·  ${star.name}` : ''}  ·  ${dist.toLocaleString('en-US')} ly from home`);
+    // An uncharted star is not named; a hidden one is not there at all.
+    const name = sight === 'hidden' ? '' : sight === 'fogged' ? '  ·  uncharted star' : `  ·  ${star!.name}`;
+    this.view.hud.setHover(`${formatAddress(addressOf(h))}${name}  ·  ${dist.toLocaleString('en-US')} ly from home`);
   };
 
   /**

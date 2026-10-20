@@ -26,10 +26,14 @@ const SMALL_ABOVE = 20_000;
  */
 export class MegaBeaconLayer implements MapLayer {
   readonly object3d = new THREE.Group();
-  private readonly labels: Array<{ label: CSS2DObject; name: HTMLElement }> = [];
+  private readonly labels: Array<{ label: CSS2DObject; name: HTMLElement; starId: string; seen: boolean }> = [];
   private small: boolean | null = null;
 
-  constructor(beacons: readonly MegaBeacon[], onOpen: (starId: string) => void) {
+  /**
+   * `seen`: whether the player has found a megastructure (change admin-snapshots-and-fog): one their
+   * ships, or an ally's, have not visited gets no beacon. Call `refresh` when that changes.
+   */
+  constructor(beacons: readonly MegaBeacon[], onOpen: (starId: string) => void, private readonly seen: (starId: string) => boolean = () => true) {
     for (const b of beacons) {
       const def = MEGA_BY_ID[b.type];
       const el = document.createElement('button');
@@ -46,16 +50,21 @@ export class MegaBeaconLayer implements MapLayer {
       const label = new CSS2DObject(el);
       label.position.set(b.x, 0, b.z);
       this.object3d.add(label);
-      this.labels.push({ label, name });
+      this.labels.push({ label, name, starId: b.starId, seen: this.seen(b.starId) });
     }
+  }
+
+  /** What the player has found changed. */
+  refresh(): void {
+    for (const l of this.labels) l.seen = this.seen(l.starId);
   }
 
   update(view: ViewState): void {
     const show = view.visibleWidth > SYSTEM_VIEW_WIDTH;
     const named = view.visibleWidth < NAMES_BELOW;
     const small = view.visibleWidth > SMALL_ABOVE;
-    for (const { label, name } of this.labels) {
-      label.visible = show;
+    for (const { label, name, seen } of this.labels) {
+      label.visible = show && seen;
       name.hidden = !named;
       if (small !== this.small) label.element.classList.toggle('far', small);
     }

@@ -52,6 +52,8 @@ export function createEventLog({ db, now = Date.now, maxEvents = MAX_EVENTS }) {
     npcs: db.prepare("SELECT * FROM events WHERE actor LIKE 'npc:%' ORDER BY id DESC LIMIT ?"),
     actor: db.prepare('SELECT * FROM events WHERE actor = ? ORDER BY id DESC LIMIT ?'),
     trim: db.prepare('DELETE FROM events WHERE id <= (SELECT MAX(id) FROM events) - ?'),
+    range: db.prepare('SELECT * FROM events WHERE at >= ? AND at < ? ORDER BY at, id'),
+    rangePlayer: db.prepare('SELECT * FROM events WHERE at >= ? AND at < ? AND (actor = ? OR subject = ?) ORDER BY at, id'),
   };
   let sinceTrim = 0;
 
@@ -92,6 +94,15 @@ export function createEventLog({ db, now = Date.now, maxEvents = MAX_EVENTS }) {
       if (!validId(id)) return Promise.resolve([]);
       const n = limitOf(limit);
       return Promise.resolve(n ? q.forPlayer.all(id, id, n).reverse().map(toEvent) : []);
+    },
+    /**
+     * Every event recorded from `from` (included) to `to` (excluded), server time in ms, oldest
+     * first; with `player`, only those by or about that player. A generator: an export of millions
+     * of rows streams without holding them (change admin-snapshots-and-fog).
+     */
+    *range({ from, to, player = null }) {
+      const rows = player ? q.rangePlayer.iterate(from, to, player, player) : q.range.iterate(from, to);
+      for (const row of rows) yield toEvent(row);
     },
     /** The last `limit` NPC decisions (all NPCs, or one), oldest first. */
     npcEvents({ limit = ADMIN_EVENT_LIMIT, npc = null } = {}) {

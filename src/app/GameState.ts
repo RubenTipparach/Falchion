@@ -73,6 +73,11 @@ export interface GameState {
   readonly missions?: MissionsState;
   /** The ruler's level and the advisors (change missions-and-court); missing in older saves. */
   readonly court?: CourtState;
+  /**
+   * Star ids of the systems the empire's ships have passed through or stopped in (change
+   * admin-snapshots-and-fog): explored, for vision. Missing in older saves.
+   */
+  readonly visited?: readonly string[];
 }
 
 export interface Relations {

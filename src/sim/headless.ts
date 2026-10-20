@@ -33,6 +33,13 @@ import { attacks, isStationed, nextRound, startsFight, type Encounter, type Fore
 import { hexEquals, type Hex } from '../core/hex/Hex';
 import { hashSeed } from '../core/rng/Rng';
 import { resolveRound } from '../core/combat/Combat';
+import { newEmpireState } from './newEmpireState';
+import { summarizeSave } from './snapshot';
+import type { EmpireIdentity } from '../core/empire/Identity';
+import { alliesOf, filterPublicView, filterWorld, visibleStars, visionInputOf, visionOf, visionSets, NO_VISION, type Vision } from '../core/visibility/Vision';
+
+/** What the server filters with while systems are hidden (change admin-snapshots-and-fog). */
+export { alliesOf, filterPublicView, filterWorld, visibleStars, visionSets };
 
 /**
  * The game rules without a browser: the server runs this to keep every empire going while its
@@ -402,4 +409,55 @@ function result(state: GameState, player: Player): { save: Record<string, unknow
   const snapshot = new SaveGame(tables().galaxy.params.seed, null).snapshot(state);
   delete snapshot.tab; // written by the server, not a browser tab
   return { save: snapshot, public: publicEmpire(state, colorFor(player.id)) };
+}
+
+// ── Snapshots, vision and the server reset (change admin-snapshots-and-fog) ──
+
+/** The snapshot summary of a stored empire (src/sim/snapshot.ts, docs/snapshots.md), or null when the save is invalid. */
+export function summarize(save: unknown, player: Player, world?: SharedWorld | null): Record<string, unknown> | null {
+  if (!validSave(save)) return null;
+  return summarizeSave(upgradeSave(save), player, { galaxy: tables().galaxy, world: validWorld(world) ? world : null });
+}
+
+/** What an empire has explored and sighted (src/core/visibility/Vision.ts); nothing for an invalid save. */
+export function visionOfSave(save: unknown): Vision {
+  if (!validSave(save)) return NO_VISION;
+  const galaxy = tables().galaxy;
+  return visionOf(visionInputOf(upgradeSave(save)), (h) => galaxy.starAt(h));
+}
+
+/** The choices an empire was founded with: what a reset rebuilds it from. */
+export interface Founding {
+  readonly identity: EmpireIdentity | null;
+  /** Its home system's hex. */
+  readonly home: Hex | null;
+  /** The name its fleets are formed under. */
+  readonly playerName: string;
+}
+
+/** The founding choices in a save (its founding save, or for an empire founded before those were kept, its current one). */
+export function foundingOf(save: unknown, player: Player): Founding | null {
+  if (!validSave(save)) return null;
+  const s = upgradeSave(save);
+  return {
+    identity: s.identity ? cleanIdentity(s.identity, HERALDRY) : null,
+    home: savedHome(s),
+    playerName: s.fleets.find((f) => s.loadouts[f.id])?.owner ?? player.name,
+  };
+}
+
+/**
+ * An empire back at its start (the server reset): a new empire for its home at world year
+ * `toTurn`, founded with its founding choices exactly as the founding screen does. The player
+ * keeps their empire's name, ruler, capital, colours, flag, ship style and home system.
+ */
+export function refoundSave(founding: Founding, player: Player, toTurn: number): { save: Record<string, unknown>; public: PublicEmpire } {
+  const { galaxy, tree } = tables();
+  const world = createWorld(galaxy, player.id, founding.home);
+  const fresh = newEmpireState({ galaxy, tree, world, playerName: founding.playerName || player.name, t0: toTurn });
+  const start = new SaveGame(galaxy.params.seed, null).snapshot(fresh) as unknown as SavedGame;
+  const { deps, store } = runtime(start, player, EMPTY_WORLD, []);
+  if (founding.identity) new EmpireSim(deps).setIdentity(founding.identity, true);
+  store.update((st) => ({ dispatches: [{ turn: st.turn, text: 'The galaxy has been reset: your empire begins again from its founding.', tone: 'good' as const }, ...st.dispatches].slice(0, 40) }));
+  return result(store.state, player);
 }

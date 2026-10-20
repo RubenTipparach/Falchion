@@ -99,6 +99,8 @@ export class SearchPanel extends Drawer {
     const explored = this.store.state.explored;
     this.scan = new GalaxyScan(this.galaxy, origin, this.query, {
       planetsOf: this.planetsOf,
+      // Only what the player sees: hidden stars are skipped, megastructures not yet found are ordinary stars.
+      see: (star) => this.q.seeStar(star),
       statusOf: (p): PlanetStatus => (this.q.colonyAt(p.id) ? 'settled' : explored[p.id] ? 'surveyed' : 'unsurveyed'),
     });
     this.run();

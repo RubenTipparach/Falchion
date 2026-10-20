@@ -1,6 +1,7 @@
 // The server's database: one SQLite file on the data volume (node:sqlite, built into Node 22, so
-// the server stays dependency-free). It holds every empire, server settings, the shared world,
-// chat, the activity feed and the event log. Writes are synchronous and the process is the only
+// the server stays dependency-free). It holds every empire (and how each was founded), server
+// settings, the shared world, chat, the activity feed, the event log and the hourly empire
+// snapshots (server/snapshots.mjs). Writes are synchronous and the process is the only
 // writer (one Fly machine), so each statement is atomic and a crash never leaves half a save.
 import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -30,6 +31,26 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS events_actor ON events (actor, id);
   CREATE INDEX IF NOT EXISTS events_subject ON events (subject, id) WHERE subject IS NOT NULL;
   CREATE INDEX IF NOT EXISTS events_kind ON events (kind, id);
+  CREATE INDEX IF NOT EXISTS events_at ON events (at, id);
+  CREATE TABLE IF NOT EXISTS snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at INTEGER NOT NULL,
+    world_year INTEGER,
+    empire_id TEXT NOT NULL,
+    owner TEXT,
+    empire_name TEXT,
+    reason TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    state BLOB NOT NULL,
+    state_bytes INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS snapshots_at ON snapshots (at, id);
+  CREATE INDEX IF NOT EXISTS snapshots_empire ON snapshots (empire_id, at, id);
+  CREATE TABLE IF NOT EXISTS foundings (
+    empire_id TEXT PRIMARY KEY,
+    at INTEGER NOT NULL,
+    record TEXT NOT NULL
+  );
 `;
 
 /** Open (or create) the database at `file` (':memory:' for tests) with its schema. */

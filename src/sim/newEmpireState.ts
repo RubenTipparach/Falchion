@@ -68,7 +68,7 @@ export function newEmpireState({ galaxy, tree, world, playerName, t0 }: NewEmpir
     },
     designs: { prospector: { ...houseDesign, name: 'Prospector Skiff', style: 'utilitarian', seed: 4, length: 0.8, bulk: 0.8, engines: 2, weapons: 0 } },
     shipyardClass: 'prospector', hiddenTraits: [], home: world.home,
-    selected: null, selectedFleet: null, selectedPlanet: null, explored: {}, openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0 }, depots: [], construction: [], playerName: playerName,
+    selected: null, selectedFleet: null, selectedPlanet: null, explored: {}, visited: [world.home.id], openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0 }, depots: [], construction: [], playerName: playerName,
     lastReport: null, engaged: [], identity: null,
     // The story opens with its first tutorial mission, and two people offer to serve.
     missions: { ...NEW_MISSIONS, active: [{ id: 'know-your-home', started: t0 }] },

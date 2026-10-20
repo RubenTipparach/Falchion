@@ -79,6 +79,22 @@ export function createSharedWorld({ doc, file, loadSim, withLock, broadcast = ()
         return r.raids;
       });
     },
+    /**
+     * The server reset (server/reset.mjs): a fresh world at world year `tick`. Every NPC empire is
+     * dormant again, every asteroid field full, and no relations, contacts, stakes or payouts are
+     * left. Saved and told to everyone at once.
+     */
+    async reset(tick) {
+      return withLock(LOCK, async () => {
+        const sim = await loadSim();
+        const empty = sim?.EMPTY_WORLD ?? { tick: 0, npcs: {}, asteroids: {} };
+        world = { ...empty, tick: Number.isFinite(tick) ? Math.floor(tick) : empty.tick };
+        await persist();
+        lastSent = 0;
+        announce();
+        return world;
+      });
+    },
     /** Apply effects an empire emitted, in order; save and tell everyone. */
     async apply(effects) {
       if (!Array.isArray(effects) || !effects.length) return world ?? load();

@@ -1,3 +1,4 @@
+import type { Sight } from '../core/visibility/Vision';
 import type { Hex } from '../core/hex/Hex';
 import type { AssaultResult, BattleResult, Damage, PlanetTarget, Squadron } from '../core/combat/Combat';
 import type { RepairSite } from '../content/logistics';
@@ -118,6 +119,10 @@ export interface GameQueries {
   reached(empire: string): boolean;
   isFriendly(star: StarSystem): boolean;
   starById(id: string): StarSystem | null;
+  /** A star as the player knows it (change admin-snapshots-and-fog): null when hidden from them, a megastructure not yet found as an ordinary star. */
+  seeStar(star: StarSystem): StarSystem | null;
+  /** How a star shows to the player: explored, sighted, fogged (uncharted) or hidden. */
+  sightOf(star: StarSystem): Sight;
   isOwned(star: StarSystem): boolean;
   /** One-time resource caches waiting on newly explored planets of a system. */
   pendingCaches(star: StarSystem): Array<{ planet: Planet; cache: Haul }>;

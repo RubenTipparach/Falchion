@@ -82,6 +82,8 @@ import { ServerAuthority } from './Authority';
 import { COMMANDS, encodeCommand, type CommandName } from '../sim/commands';
 import { newEmpireState } from '../sim/newEmpireState';
 import { reportActivity } from './GalaxyApi';
+import { CLEAR_FLEET, PlayerVision } from './Vision';
+import { FogOfWarLayer } from '../render/map/FogOfWarLayer';
 
 /** Composition root: build the pure services, the views, and wire them together. */
 async function bootstrap(): Promise<void> {
@@ -153,6 +155,11 @@ async function bootstrap(): Promise<void> {
     controller.beforeReset = async () => { await fetch('./api/save', { method: 'DELETE', credentials: 'same-origin' }).catch(() => {}); };
   }
 
+  // What the player sees of the galaxy (change admin-snapshots-and-fog): their own vision, their
+  // allies', and the server's hide-systems flag. The map, selection, search and links read it.
+  const vision = new PlayerVision(store, galaxy);
+  controller.lens = () => vision.lens;
+
   // ── Views ──
   const app = document.getElementById('app')!;
   const mapEl = document.createElement('div');
@@ -183,7 +190,23 @@ async function bootstrap(): Promise<void> {
   const hexGrid = map.layers.add(new HexGridLayer(galaxy.params.radius, lite));
   const nearStars = map.layers.add(new NearStarLayer(galaxy));
   nearStars.surveyed = controller.surveyedPercent;
-  const system = map.layers.add(new SystemLayer(galaxy, { colonyOf: (planet) => controller.surfaceTarget(planet)?.colony ?? null, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet), planets: (star) => controller.planets(star), fields: (star) => controller.fieldReport(star) }));
+  nearStars.lens = () => vision.lens;
+  // Fog of war: clear round what you have explored and sighted and round your fleets (see FogOfWarLayer).
+  map.layers.add(new FogOfWarLayer({
+    get version() { return vision.lens.version; },
+    get dense() { return vision.hideSystems; },
+    clearings: () => vision.clearings(),
+    moving: () => {
+      const s = store.state, out: Array<{ x: number; z: number; r: number }> = [];
+      for (const f of s.fleets) {
+        if (!s.loadouts[f.id]) continue;
+        const p = fleetLayer.positionOf(f.id);
+        if (p) out.push({ x: p.x, z: p.z, r: CLEAR_FLEET });
+      }
+      return out;
+    },
+  }));
+  const system = map.layers.add(new SystemLayer(galaxy, { colonyOf: (planet) => controller.surfaceTarget(planet)?.colony ?? null, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet), planets: (star) => controller.planets(star), fields: (star) => controller.fieldReport(star), see: (star) => vision.lens.see(star) }));
   // Asteroid belts thin as fields are mined and fill back as they refill: re-read them when the shared world or the year changes.
   shared.onChange(() => system.refreshFields());
   store.subscribe((s, prev) => { if (s.turn !== prev.turn) system.refreshFields(); });
@@ -192,14 +215,20 @@ async function bootstrap(): Promise<void> {
   // Landing on a megastructure: its own close-up (change mega-surfaces).
   const mega = map.layers.add(new MegaSurfaceLayer({ zoom: map.controller.zoom, input: map.controller, canvas: map.canvas, lite, frame: (id) => system.megaFrame(id) }));
   // Megastructures are seen from across the galaxy (change megastructures).
-  map.layers.add(new MegaBeaconLayer(galaxy.megastructures().map((m) => {
+  // Only the ones you (or an ally) have found (change admin-snapshots-and-fog).
+  const beacons = map.layers.add(new MegaBeaconLayer(galaxy.megastructures().map((m) => {
     const star = galaxy.starAt(m.hex)!;
     return { starId: m.starId, starName: star.name, type: m.type, x: star.position.x, z: star.position.z };
   }), (starId) => {
     const star = controller.starById(starId);
     const mega = star && controller.planets(star)[0];
     if (star && mega) controller.focusPlanet(star, mega);
-  }));
+  }, (starId) => vision.lens.megastructureSeen(starId)));
+  vision.onChange(() => {
+    nearStars.refreshSight();
+    beacons.refresh();
+    controller.refreshSight();
+  });
   const selection = map.layers.add(new SelectionLayer());
   const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK), (h) => galaxy.starAt(h)?.position ?? hexToWorld(h), (id) => controller.selectFleet(id)));
   // Battles at sea: a marker on the map for each one you can see, and the view that covers the map to watch one.
@@ -347,7 +376,14 @@ async function bootstrap(): Promise<void> {
   // In-game chat (global + DMs, location links, @mentions): see ChatSetup. Its stream also carries the players' live events.
   // The live stream also carries the server's state of this empire each year.
   // It also announces changes to the shared world.
-  const live = { ...players.live, taps: { ...players.live.taps, state: (data: unknown) => authority?.onServerState((data as { save?: SavedGame }).save), world: (data: unknown) => shared.adopt(data) } };
+  // And the server's hide-systems flag when an admin changes it: what the server sends changes with it.
+  const live = { ...players.live, taps: { ...players.live.taps, state: (data: unknown) => authority?.onServerState((data as { save?: SavedGame }).save), world: (data: unknown) => shared.adopt(data),
+    settings: (data: unknown) => {
+      vision.setHideSystems((data as { hideSystems?: unknown })?.hideSystems === true);
+      void vision.poll(signedIn);
+      void players.refresh();
+      void shared.reload();
+    } } };
   const chat = setupChat({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, panels: Object.values(panels), live });
   players.alongside([...Object.values(panels), chat]);
   topBar.addTab(players.panel.tab);
@@ -383,7 +419,9 @@ async function bootstrap(): Promise<void> {
   // Signed in: the server runs the empire and each year sends what it decided; guests (and an
   // empire not yet founded) run it here.
   const yearly = (tick: number) => { if (authority?.running) authority.expectTick(tick); else controller.advanceTo(tick); };
-  clock.onTick((tick) => { yearly(tick); void refreshOthers(); });
+  clock.onTick((tick) => { yearly(tick); void refreshOthers(); if (probe.server) void vision.poll(signedIn); });
+  // The hide-systems flag and what allies share, now and every year.
+  if (probe.server) void vision.poll(signedIn);
   if (!authority?.running) {
     // Saved journeys planned at other speeds continue at the empire's speed, then the missed years run.
     controller.retimeFleets();

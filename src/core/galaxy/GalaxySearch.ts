@@ -41,6 +41,11 @@ export interface ScanContext {
   /** A star's planets as the empire sees them (colonies keep the type they were settled as). */
   planetsOf(star: StarSystem): readonly Planet[];
   statusOf(planet: Planet): PlanetStatus;
+  /**
+   * The star as the player knows it (change admin-snapshots-and-fog): null when it is hidden from
+   * them (skipped), a megastructure system not yet found as an ordinary star. Default: as is.
+   */
+  see?(star: StarSystem): StarSystem | null;
 }
 
 /** Does a star pass the star filters (kind, class, and its name when searching stars)? */
@@ -91,7 +96,8 @@ export class GalaxyScan {
     if (query.what === 'planets' && query.biomes?.length && query.biomes.every(isMegastructure)) {
       this.sites = galaxy.megastructures()
         .map((m) => galaxy.starAt(m.hex)!)
-        .filter((star) => starMatches(star, query))
+        .map((star) => (ctx.see ? ctx.see(star) : star))
+        .filter((star): star is StarSystem => !!star && starMatches(star, query))
         .flatMap((star) => ctx.planetsOf(star).filter((p) => planetMatches(p, query, ctx.statusOf(p))).map((planet) => ({ star, planet, distance: hexDistance(origin, star.hex) })))
         .sort((a, b) => a.distance - b.distance || (a.star.id < b.star.id ? -1 : 1));
     }
@@ -135,7 +141,8 @@ export class GalaxyScan {
       const h = this.current[this.index++];
       budget--;
       this.hexes++;
-      const star = this.galaxy.starAt(h);
+      const raw = this.galaxy.starAt(h);
+      const star = raw && (this.ctx.see ? this.ctx.see(raw) : raw);
       if (!star) continue;
       this.stars++;
       if (!starMatches(star, this.query)) continue;

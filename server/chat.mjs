@@ -160,9 +160,16 @@ export function createChat(deps) {
   /**
    * The chat stream is every signed-in player's one live connection: other systems (galaxy
    * activity, other players' public views) send their events through it. `except` skips one player.
+   * `shape(uid, data)`, when given, is what that player receives instead (null: nothing): how the
+   * server leaves out what a player cannot see while systems are hidden (server/vision.mjs).
    */
-  function broadcast(event, data, { except } = {}) {
-    for (const [uid, { conns }] of clients) if (uid !== except) for (const res of conns) send(res, event, data);
+  function broadcast(event, data, { except, shape } = {}) {
+    for (const [uid, { conns }] of clients) {
+      if (uid === except) continue;
+      const mine = shape ? shape(uid, data) : data;
+      if (mine === null || mine === undefined) continue;
+      for (const res of conns) send(res, event, mine);
+    }
   }
 
   /** Send an event to one player's open streams (all their tabs); false when they are not connected. */

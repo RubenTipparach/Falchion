@@ -74,6 +74,20 @@ describe('event log', () => {
   });
 });
 
+describe('event log time ranges (snapshot export)', () => {
+  it('reads every event in [from, to), oldest first, or only those by or about one player', () => {
+    let t = 0;
+    const log = fresh({ now: () => t });
+    for (const [at, actor, subject] of [[5, P, null], [10, Q, null], [15, 'npc:s:0,0:1', P], [20, P, null]]) {
+      t = at;
+      log.record({ actor, subject, kind: 'raid', data: { text: String(at) } });
+    }
+    expect([...log.range({ from: 10, to: 20 })].map((e) => e.at)).toEqual([10, 15]);
+    expect([...log.range({ from: 0, to: 100, player: P })].map((e) => e.text)).toEqual(['5', '15', '20']);
+    expect([...log.range({ from: 21, to: 100 })]).toEqual([]);
+  });
+});
+
 describe('admin event view', () => {
   const auth = createAuth({ clientId: 'cid', clientSecret: 'csecret', sessionSecret: 's3cret', publicUrl: 'https://falchion.fly.dev' });
   const admin = (log) => createAdmin({ auth, store: {}, admins: adminIds({ ADMIN_DISCORD_ID: ADMIN }), info: () => ({ version: 't' }), events: log });

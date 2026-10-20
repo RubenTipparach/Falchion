@@ -39,6 +39,17 @@ export class SharedWorldClient implements SharedLink {
     return c;
   }
 
+  /** Signed in: fetch the server's world again (what it sends changes when systems are hidden or shown). */
+  async reload(): Promise<void> {
+    if (this.storage) return;
+    try {
+      const res = await fetch('./api/world', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(5_000) });
+      if (res.ok) this.adopt(await res.json());
+    } catch {
+      // Offline: the server's next announcement fills it in.
+    }
+  }
+
   world(): SharedWorld {
     return this.current;
   }

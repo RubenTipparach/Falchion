@@ -96,7 +96,7 @@ export class StarInfoPanel {
     this.el.append(
       h('header', {},
         h('span', { class: 'star-dot', style: `background:${STAR_KINDS[kindOf(star)].color ?? SPECTRAL_COLORS[star.spectral]}` }),
-        h('div', {}, h('span', { class: 'eyebrow' }, isHome ? 'Home system' : 'Star system'), h('h3', {}, star.name),
+        h('div', {}, h('span', { class: 'eyebrow' }, isHome ? 'Home system' : this.q.sightOf(star) === 'fogged' ? 'Uncharted system' : 'Star system'), h('h3', {}, star.name),
           h('p', { class: 'muted', title: STAR_KINDS[kindOf(star)].blurb }, `${describeStar(star)} · ${star.planetCount} planets${d.owner ? ` · ${d.owner}` : ''}`)),
         this.shareButton(star, null),
         h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => this.actions.select(null) }, icon('close'))),

@@ -34,6 +34,7 @@ import { planSurvey } from '../core/fleet/Survey';
 import { minedBy, nearestMine, stockFor } from '../core/fleet/AutoMine';
 import { fieldLeft, fieldsOf, homeBelt, yearsToFull, type AsteroidField } from '../core/galaxy/Asteroids';
 import { applyEffects, EMPTY_WORLD, type SharedEffect, type SharedWorld } from '../core/world/SharedWorld';
+import { addVisited, MAX_VISITED, visitedAlong } from '../core/visibility/Vision';
 import { actionsFor, allied, applyDiplomacy, atWar, haveMet, newsOf, pairKey, relationOf, type DiplomaticAction, type Relation } from '../core/diplomacy/Diplomacy';
 import { BIOMES, settleable } from '../content/biomes';
 import { cityWorldIn } from '../core/npc/CityWorlds';
@@ -460,7 +461,9 @@ export class EmpireSim {
 
   /** A system's asteroid fields; your home system also has its own belt of metals and gases. */
   asteroidsAt = (star: StarSystem): AsteroidField[] =>
-    [...(star.id === this.state.home.id ? homeBelt(star) : []), ...fieldsOf(star, this.deps.galaxy.params.seed)];
+    // The system as it really is: a view may pass a megastructure system masked as an ordinary star
+    // (change admin-snapshots-and-fog), and its builders left it no rock.
+    [...(star.id === this.state.home.id ? homeBelt(star) : []), ...fieldsOf(this.deps.galaxy.starAt(star.hex) ?? star, this.deps.galaxy.params.seed)];
 
   /** Each field of a system with what it holds now and the years until it is full again. */
   /** Units a year one mining ship of a class takes from a field of its resource. */
@@ -3063,6 +3066,7 @@ export class EmpireSim {
         arrivals.push(`${f.name} arrived at ${star?.name ?? 'deep space'}${friendly ? (hurt ? ' to resupply and repair' : ' and resupplied') : ''}`);
       }
     }
+    const visited = this.visitedThrough(s, next);
     const { stock, ...settings } = economy;
     // Live years only report news: arrivals, and report lines that changed since last year.
     const previous = new Set(s.lastReport?.lines ?? []);
@@ -3079,6 +3083,7 @@ export class EmpireSim {
       lastReport: report,
       engaged: [],
       dispatches: news.length ? [...news, ...s.dispatches].slice(0, 40) : s.dispatches,
+      ...(visited ? { visited } : {}),
     });
     const growth = this.settleCommerce(years, transfers, contracts);
     // Research that finished this year (full nodes research themselves) may speed fleets up.
@@ -3094,6 +3099,31 @@ export class EmpireSim {
     const done = [...growth, ...this.completeConstruction(), ...this.govern(), ...this.followOrders(), ...this.missionYear()];
     if (!quiet && done.length) this.deps.store.update((st) => ({ dispatches: [...done.map((text) => ({ turn: next, text, tone: 'good' as const })), ...st.dispatches].slice(0, 40) }));
     return { income: report.income, arrivals: [...arrivals, ...done] };
+  }
+
+  /** The visited systems as last read, as a set (a save keeps thousands). */
+  private visitedMemo: { list: readonly string[]; set: Set<string> } | null = null;
+
+  /**
+   * The systems the empire's ships passed through or stopped in going from year `s.turn` to
+   * `next` added to `visited` (change admin-snapshots-and-fog), or null when there is nothing new.
+   */
+  private visitedThrough(s: GameState, next: number): readonly string[] | null {
+    const list = s.visited ?? [];
+    if (this.visitedMemo?.list !== list) this.visitedMemo = { list, set: new Set(list) };
+    const known = this.visitedMemo.set;
+    const fresh: string[] = [];
+    for (const f of s.fleets) {
+      if (!s.loadouts[f.id]) continue;
+      for (const h of visitedAlong(f.movement, s.turn, next)) {
+        const id = `${h.q},${h.r}`;
+        if (known.has(id)) continue;
+        if (this.deps.galaxy.starAt(h)) fresh.push(id);
+      }
+    }
+    if (!fresh.length) return null;
+    const out = addVisited(list, fresh, MAX_VISITED, known);
+    return out === list ? null : out;
   }
 
   protected dispatch(text: string, tone?: 'good' | 'bad'): void {

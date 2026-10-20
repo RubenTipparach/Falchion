@@ -55,7 +55,8 @@ export interface GameState {
   readonly identity: EmpireIdentity | null;
   readonly lastReport: TurnReport | null;
   /** Newest first. */
-  readonly dispatches: ReadonlyArray<{ readonly turn: number; readonly text: string; readonly tone?: 'good' | 'bad' }>;
+  /** News, newest first; one about a battle names its battle log entry (`battle`), to replay it from. */
+  readonly dispatches: ReadonlyArray<{ readonly turn: number; readonly text: string; readonly tone?: 'good' | 'bad'; readonly battle?: string }>;
   /** War Room targets already engaged this turn. */
   readonly engaged: readonly string[];
   /** Reputation history for the chart: standing with each known NPC faction, sampled every few years. */

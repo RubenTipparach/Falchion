@@ -17,3 +17,10 @@ Any logged battle that kept rounds SHALL be playable in the battle view. Its rou
 #### Scenario: Watching last night's battle
 - **WHEN** the player presses Replay on a battle at sea fought over four years while they were away
 - **THEN** the battle view plays rounds 1 to 4 in turn, showing "Replay · Y<year> · round n of 4", and ends on how the battle came out
+
+### Requirement: Battle news can be replayed from the Dispatches
+A dispatch about a battle SHALL name its battle log entry. When that entry kept its rounds, the dispatch SHALL show a play button that replays the battle. News from before dispatches named their battle SHALL find its entry by year and summary.
+
+#### Scenario: Watching a raid from its news
+- **WHEN** raiders strike while the player is away and the Dispatches show "beat off … raiders"
+- **THEN** the dispatch has a play button, and pressing it replays the raid round by round

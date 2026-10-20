@@ -241,6 +241,8 @@ export class EmpireSim {
 
   protected readonly classById = new Map(SHIP_CLASSES.map((c) => [c.id, c]));
   protected readonly targetStars = new Map<string, StarSystem>();
+  /** News made since a battle began, named after it once it is logged (see logBattle). */
+  private readonly unlogged: object[] = [];
 
   // ── Queries ────────────────────────────────────────────────────────
 
@@ -1560,6 +1562,7 @@ export class EmpireSim {
   // ── Commands: war ──────────────────────────────────────────────────
 
   engage(targetId: string, ships: Squadron[], groupId: string): CombatOutcome | null {
+    this.unlogged.length = 0;
     const s = this.state;
     const target = this.warTargets().find((t) => t.id === targetId);
     const committed = ships.filter((x) => x.count > 0);
@@ -1648,6 +1651,7 @@ export class EmpireSim {
    * side in the round; `foe` is the other fleet as it went in.
    */
   applyContact(force: ContactForce, foe: ContactFoe, result: BattleResult, index: 0 | 1, round: number, tick: number, overtaken = false): void {
+    this.unlogged.length = 0;
     const other = index === 0 ? 1 : 0;
     const delta: Squadron[] = force.ships.map((x) => ({ classId: x.classId, count: -(x.count - countOf(result.survivors[index], x.classId)) }));
     for (const c of result.captured[index]) delta.push({ classId: c.classId, count: c.count });
@@ -2896,6 +2900,7 @@ export class EmpireSim {
   }
 
   protected resolveRaid(raid: NpcRaid, def: NpcDef): void {
+    this.unlogged.length = 0;
     const s = this.state;
     const star = this.deps.galaxy.starAt(raid.at);
     const place = star?.name ?? 'deep space';
@@ -2961,7 +2966,13 @@ export class EmpireSim {
 
   /** Add a battle to the empire's battle log (War Room › Battle log). */
   protected logBattle(entry: Omit<BattleLogEntry, 'id'>): void {
-    this.deps.store.update((st) => ({ battleLog: logBattle(st.battleLog, entry) }));
+    // The news this battle made since the last one was logged names it, to be replayed from there.
+    const news = new Set<object>(this.unlogged.splice(0));
+    this.deps.store.update((st) => {
+      const battleLog = logBattle(st.battleLog, entry);
+      const battle = battleLog[0].id;
+      return { battleLog, dispatches: st.dispatches.map((d) => (news.has(d) && d.turn === entry.year ? { ...d, battle } : d)) };
+    });
   }
 
 
@@ -3065,7 +3076,9 @@ export class EmpireSim {
   }
 
   protected dispatch(text: string, tone?: 'good' | 'bad'): void {
-    this.deps.store.update((s) => ({ dispatches: [{ turn: s.turn, text, tone }, ...s.dispatches].slice(0, 40) }));
+    const news = { turn: this.state.turn, text, tone };
+    this.unlogged.push(news);
+    this.deps.store.update((s) => ({ dispatches: [news, ...s.dispatches].slice(0, 40) }));
   }
 }
 

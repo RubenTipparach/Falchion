@@ -72,6 +72,11 @@ describe('NPC empires in an empire’s game', () => {
     const before = sim.state.economy.roster.interceptor;
     sim.resolveRaids([raid]);
     expect(sim.state.dispatches[0].text).toMatch(/plundered|beat off|defeated|standstill/);
+    // The news names its battle, to be replayed from there (change battle-replay); earlier news does not.
+    const logged = sim.state.battleLog![0];
+    expect(sim.state.dispatches[0].battle).toBe(logged.id);
+    expect(logged.records?.length).toBeGreaterThan(0);
+    expect(sim.state.dispatches.slice(1).every((d) => d.battle !== logged.id)).toBe(true);
     expect(sim.state.economy.roster.interceptor).toBeLessThanOrEqual(before);
     const fleetNow = link.world().npcs[npc.def.id].fleets.find((f) => f.id === raid.fleet);
     expect(fleetNow === undefined || fleetNow.ships.reduce((n, s) => n + s.count, 0) <= 1).toBe(true);

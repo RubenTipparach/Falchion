@@ -142,10 +142,13 @@ ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .dispatches { position: fixed; right: max(48px, env(safe-area-inset-right, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 6; width: 340px; max-width: calc(100vw - 32px);
   background: rgba(5, 8, 16, 0.82); border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px 10px; display: grid; gap: 5px; backdrop-filter: blur(6px); }
 .disp-head { display: flex; justify-content: space-between; align-items: center; background: none; border: 0; padding: 0 0 2px; }
-.disp { display: grid; grid-template-columns: 34px 1fr; gap: 6px; font-size: 12px; line-height: 1.35; }
+.disp { display: grid; grid-template-columns: 34px 1fr auto; gap: 6px; font-size: 12px; line-height: 1.35; }
 .disp-turn { color: var(--muted); font-size: 11px; }
-.disp.good span:last-child { color: var(--good); }
-.disp.bad span:last-child { color: var(--bad); }
+.disp.good > span:nth-child(2) { color: var(--good); }
+.disp.bad > span:nth-child(2) { color: var(--bad); }
+.disp-replay { align-self: start; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1px solid var(--line-strong); border-radius: 50%; background: rgba(20, 30, 54, 0.7); color: var(--brass); cursor: pointer; }
+.disp-replay:hover, .disp-replay:focus-visible { background: rgba(40, 56, 92, 0.9); color: #fff; }
+.disp-replay svg { width: 10px; height: 10px; margin-left: 2px; }
 
 /* ── Star card ── */
 .star-card { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); top: calc(72px + env(safe-area-inset-top, 0px)); z-index: 6; width: 320px; max-width: calc(100vw - 32px);

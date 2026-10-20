@@ -221,7 +221,7 @@ async function bootstrap(): Promise<void> {
   const thumbs = new PlanetThumbnails(80);
   const thumb = (p: Planet) => thumbs.url(p);
   const starInfo = new StarInfoPanel(store, controller, controller, controller.describe, thumb, economyTables);
-  const dispatches = new Dispatches(store);
+  const dispatches = new Dispatches(store, (id) => controller.replayBattle(id));
   const panels: Record<PanelId, Drawer> = {
     shipyard: new ShipyardPanel(store, controller, controller, factory, styles, traits, tree, {
       isUnlocked: controller.isClassUnlocked,

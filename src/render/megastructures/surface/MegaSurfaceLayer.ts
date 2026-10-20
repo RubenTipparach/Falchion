@@ -56,7 +56,7 @@ const HAND_BAND = 2.2;
 const FLY_START = 0.3;
 const FLY_FULL = 0.22;
 /** Tilt (from straight down) past which the camera stops circling the focus and just looks up. */
-const ORBIT_PITCH = 1.33;
+const ORBIT_PITCH = 1.5;
 /** The ground detail's coarsest octave (MEGA_GROUND_GLSL groundDetail), km: its origin snaps to it. */
 const DETAIL_TILE = 0.004 * 4 ** 5;
 
@@ -129,8 +129,19 @@ export class MegaSurfaceLayer implements MapLayer {
       drag: (dx, dy, turn) => {
         this.fly = null;
         if (turn) {
-          // Right-drag circles the point looked at and tilts the view, as on the map.
+          // Right-drag circles the point looked at and tilts the view, as on the map: a new drag
+          // first makes the ground under the middle of the screen the point it circles.
+          const now = performance.now();
+          if (now - this.lastTurn > 250) this.anchorOrbit();
+          this.lastTurn = now;
+          const yaw0 = this.yaw;
           this.yaw += dx * 0.005;
+          // Looking out past the ground the camera can circle: turn where it stands instead (the
+          // point it would circle is far off on the horizon).
+          if (this.built && this.pitch() > ORBIT_PITCH && !isTube(this.built.def)) {
+            const reach = this.viewDistance() * Math.sin(ORBIT_PITCH);
+            this.moveFocus(reach * (Math.cos(this.yaw) - Math.cos(yaw0)), reach * (Math.sin(this.yaw) - Math.sin(yaw0)));
+          }
           this.pitchOffset = THREE.MathUtils.clamp(this.pitchOffset - dy * 0.004, -1.2, 1.2);
           return;
         }
@@ -283,6 +294,41 @@ export class MegaSurfaceLayer implements MapLayer {
     const z = THREE.MathUtils.clamp(this.focus[1] + dz, -zMax, zMax);
     if (isTube(def)) x = wrapX(def, this.focus[0] + dx);
     this.focus = [x, z];
+  }
+
+  private lastTurn = 0;
+
+  /**
+   * Make the ground under the middle of the screen the focus, the camera staying where it is: its
+   * heading, tilt and height re-read from there. Without it a drag circled the focus, which is not
+   * under the middle of the screen once the view tilts past ORBIT_PITCH (or the camera is held off
+   * the ground), so the land swung round a point off to one side.
+   */
+  private anchorOrbit(): void {
+    const b = this.built;
+    if (!b || this.mix < 1 || this.rigShare < 1 || isTube(b.def)) return;
+    const cam = this.camera.position.clone();
+    const ray = new THREE.Ray(cam, this.camera.getWorldDirection(new THREE.Vector3()));
+    const hit = ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -this.groundAtFocus()), new THREE.Vector3());
+    if (!hit || hit.distanceTo(cam) > this.altKm * 40) return;
+    const def = b.def;
+    const to: [number, number] = [this.focus[0] + hit.x, this.focus[1] + hit.z];
+    if (Math.abs(to[0]) > def.roamKm || Math.abs(to[1]) > def.roamKm) return;
+    const focus0 = this.focus;
+    this.focus = to;
+    const hF = this.groundAtFocus();
+    const rel = cam.clone().sub(new THREE.Vector3(hit.x, hF, hit.z));
+    const drop = rel.y, across = Math.hypot(rel.x, rel.z);
+    const orbit = Math.atan2(across, drop);
+    if (drop <= 0 || orbit > ORBIT_PITCH) { this.focus = focus0; return; }
+    const alt = THREE.MathUtils.clamp(drop, TRIP[def.type].minKm, this.mapFrame ? this.rigTopKm(b) : TRIP[def.type].maxKm);
+    this.altKm = alt;
+    this.host.zoom.setAltitude(alt / this.kmPerZoom);
+    this.host.zoom.setTargetAltitude(alt / this.kmPerZoom);
+    this.yaw = Math.atan2(-rel.z, -rel.x);
+    this.pitchOffset = 0;
+    this.pitchOffset = THREE.MathUtils.clamp(orbit - this.pitch(), -1.2, 1.2);
+    this.citiesKey = '';
   }
 
   /** Double-click the ground: glide there, a little lower. */

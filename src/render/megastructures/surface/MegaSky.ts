@@ -228,13 +228,22 @@ void main() {
     gl_FragColor = vec4(col, 1.0);
     return;
   }
-  // The star (where nothing stands in front of it), and the stars where the sky is dark enough.
-  if (t < 0.0) {
-    vec3 s = normalize(uStarPos - o);
+  // The star wherever nothing stands in front of it: in an empty sky, and over land beyond it (the
+  // disc's far side through its hole, the ring's arch and the shell's far side behind the sun).
+  vec3 toStar = uStarPos - o;
+  vec3 s = normalize(toStar);
+  bool starFront = t < 0.0 || length(toStar) < t;
+  if (t < 0.0) col += vec3(0.8, 0.85, 1.0) * starField(d) * clamp(1.0 - skyLum * 4.0, 0.0, 1.0);
+  else col = hitCol;
+  if (starFront) {
     float sd = dot(d, s);
     col += uSunCol * (smoothstep(cos(uStarRad), cos(uStarRad * 0.9), sd) * 6.0 + pow(max(sd, 0.0), 2000.0) * 1.5 + pow(max(sd, 0.0), 300.0) * 0.35 + pow(max(sd, 0.0), 30.0) * 0.05) * sunVis;
-    col += vec3(0.8, 0.85, 1.0) * starField(d) * clamp(1.0 - skyLum * 4.0, 0.0, 1.0);
-  } else col = hitCol;
+    // Its corona, in units of its own size, so from across the system it is the blazing star the
+    // system view shows rather than a speck (the angle from the cross product: exact when tiny).
+    float ang = sd > 0.0 ? asin(min(length(cross(d, s)), 1.0)) : 3.0;
+    float g = uStarRad / max(ang, uStarRad * 0.6);
+    col += uSunCol * min(g * g * 0.7 + g * 0.12, 3.0) * sunVis;
+  }
   gl_FragColor = vec4(col, 1.0);
 }`;
 

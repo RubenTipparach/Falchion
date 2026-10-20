@@ -1,4 +1,4 @@
-import { BROAD_OCTAVES } from '../../../core/mega/MegaGround';
+import { BROAD_OCTAVES, DETAIL_GAIN } from '../../../core/mega/MegaGround';
 import { NOISE_GLSL } from '../../planets/noise.glsl';
 
 /** Cities the ground shader knows of at once (the nearest to the camera). */
@@ -37,7 +37,7 @@ ${BROAD_OCTAVES.map(([sc, amp], i) => `    if (uBroad > ${i}.5) v += clamp(oct +
     if (w <= 0.0) break;
     v += a * w * snoise(p);
     p = p * 2.03 + vec3(1.7, 9.2, 3.1);
-    a *= 0.5;
+    a *= ${DETAIL_GAIN.toFixed(3)};
   }
   return v;
 }
@@ -74,11 +74,25 @@ float ridges(vec2 site) {
   }
   return v;
 }
+float hills(vec2 site) {
+  site = wrapSite(site);
+  float rugged = smoothstep(-0.25, 0.45, snoise(vec3(site / (uFeature * 2.5) + uOffset.xy + vec2(19.0, 41.0), uOffset.z + 23.0)));
+  if (rugged <= 0.0) return 0.0;
+  vec3 p = vec3(site / uFeature * 30.0 + uOffset.xy + vec2(7.0, 3.0), uOffset.z + 11.0);
+  float v = 0.0, a = 0.55;
+  for (int i = 0; i < 3; i++) {
+    float r = 1.0 - abs(snoise(p));
+    v += a * r * r;
+    p *= 2.2;
+    a *= 0.6;
+  }
+  return v * rugged;
+}
 float rawHeight(vec2 site, float oct) {
   float land = 0.8 * tanh((groundNoise(site, oct) - uSea) / 0.8);
   if (land <= 0.0) return land * uRelief * 0.8;
   float m = ridges(site);
-  return (land * 0.6 + smoothstep(0.14, 0.5, land) * m * m * 1.9) * uRelief;
+  return (land * 0.6 + smoothstep(0.14, 0.5, land) * m * m * 1.9 + smoothstep(0.0, 0.12, land) * hills(site) * 0.7) * uRelief;
 }
 float groundHeight(vec2 site, float oct) {
   float h = rawHeight(site, oct);
@@ -203,7 +217,7 @@ vec3 landColour(vec2 site, float h, float slope, float fw) {
   col = mix(mix(vec3(0.6, 0.56, 0.43), vec3(0.62, 0.62, 0.6), smoothstep(0.3, 0.6, cl.y)), col, smoothstep(0.004, 0.015, e));
   vec3 rock = mix(vec3(0.33, 0.31, 0.29), vec3(0.45, 0.42, 0.38), mott * 0.5 + 0.5);
   col = mix(col, rock, max(smoothstep(0.32, 0.55, slope), smoothstep(0.65, 0.9, e + mott * 0.06)));
-  col = mix(col, vec3(0.86, 0.88, 0.92), smoothstep(1.05, 1.15, e + mott * 0.08 - slope * 0.4 + max(cl.y, 0.0) * 0.9));
+  col = mix(col, vec3(0.86, 0.88, 0.92), smoothstep(1.05, 1.15, e + mott * 0.08 - slope * 0.4 + max(cl.y, 0.0) * 0.35));
   return col * (0.9 + 0.1 * mott);
 }
 
@@ -222,7 +236,7 @@ vec3 landFrom(vec2 site, float fp) {
   float spread = 0.0;
 ${BROAD_OCTAVES.map(([sc, amp], i) => `  if (uBroad > ${i}.5) spread += pow(${amp.toFixed(3)} * (1.0 - clamp(oct + ${Math.log2(sc).toFixed(1)}, 0.0, 1.0)), 2.0);`).join('\n')}
   float a = 0.5;
-  for (int i = 0; i < 8; i++) { spread += pow(a * (1.0 - clamp(oct - float(i), 0.0, 1.0)), 2.0); a *= 0.5; }
+  for (int i = 0; i < 8; i++) { spread += pow(a * (1.0 - clamp(oct - float(i), 0.0, 1.0)), 2.0); a *= ${DETAIL_GAIN.toFixed(3)}; }
   spread = 0.35 * sqrt(spread);
   float cover = smoothstep(-0.5 * spread, 0.5 * spread, land);
   // rawHeight, its ridges (a few hundred km across) gone to their mean once a pixel is wider.

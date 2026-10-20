@@ -109,6 +109,13 @@ export function wrapX(def: MegaGroundDef, x: number): number {
  * (MegaGroundDef.broad): the Alderson disk, hundreds of millions of km across, all eight; habitats
  * (a tube a few km round) none, as they would not wrap. The GLSL landNoise is the same, line for line.
  */
+/**
+ * How much each finer octave of the land keeps of the one before: over a half, so hills a few km
+ * across still have slopes to see (at a half the land smoothed to a table top close up). The GLSL
+ * landNoise, the same.
+ */
+export const DETAIL_GAIN = 0.56;
+
 export const BROAD_OCTAVES: ReadonlyArray<readonly [scale: number, amp: number]> = [
   [4, 0.3], [16, 0.35], [64, 0.35], [256, 0.3], [1024, 0.3], [4096, 0.35], [16384, 0.35], [65536, 0.3],
 ];
@@ -135,7 +142,7 @@ export function groundNoise(def: MegaGroundDef, x: number, z: number, oct: numbe
     if (w <= 0) break;
     v += a * w * snoise(px, py, pz);
     px = px * 2.03 + 1.7; py = py * 2.03 + 9.2; pz = pz * 2.03 + 3.1;
-    a *= 0.5;
+    a *= DETAIL_GAIN;
   }
   return v;
 }
@@ -183,7 +190,26 @@ export function rawHeight(def: MegaGroundDef, x: number, z: number, oct: number)
   if (land <= 0) return land * def.reliefKm * 0.8;
   // Plains and hills, with mountain chains only where the land is high.
   const m = ridges(def, x, z);
-  return (land * 0.6 + smoothstep(0.14, 0.5, land) * m * m * 1.9) * def.reliefKm;
+  return (land * 0.6 + smoothstep(0.14, 0.5, land) * m * m * 1.9 + smoothstep(0, 0.12, land) * hills(def, x, z) * 0.7) * def.reliefKm;
+}
+
+/**
+ * Ridged hills and uplands a few tens of km across, in rugged country (where a broad noise says so;
+ * plains elsewhere), so the land close up has slopes to light rather than a table top's.
+ */
+export function hills(def: MegaGroundDef, x: number, z: number): number {
+  x = wrapX(def, x);
+  const rugged = smoothstep(-0.25, 0.45, snoise(x / (def.featureKm * 2.5) + def.offset[0] + 19, z / (def.featureKm * 2.5) + def.offset[1] + 41, def.offset[2] + 23));
+  if (rugged <= 0) return 0;
+  let px = (x / def.featureKm) * 30 + def.offset[0] + 7, py = (z / def.featureKm) * 30 + def.offset[1] + 3, pz = def.offset[2] + 11;
+  let v = 0, a = 0.55;
+  for (let i = 0; i < 3; i++) {
+    const r = 1 - Math.abs(snoise(px, py, pz));
+    v += a * r * r;
+    px *= 2.2; py *= 2.2; pz *= 2.2;
+    a *= 0.6;
+  }
+  return v * rugged;
 }
 
 /** The cities whose centres are within `reach` km of (x, z); the capital stands on the landing site. */

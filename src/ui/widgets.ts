@@ -126,6 +126,22 @@ export function crateLine(crate: LootCrate, opened: boolean): string {
 }
 
 /**
+ * A mining fleet's hold: ore mined away from home, not the empire's to sell or spend until the
+ * fleet brings it to a colony or depot (change holds-and-market-history).
+ */
+export function holdView(g: FleetGroup): HTMLElement | null {
+  if (!g.holdSize || g.id === 'dock') return null;
+  const aboard = Object.entries(g.hold ?? {}).filter(([, n]) => (n ?? 0) > 0) as Array<[Resource, number]>;
+  const total = aboard.reduce((n, [, v]) => n + v, 0);
+  const pct = Math.min(100, Math.round((100 * total) / g.holdSize));
+  return h('div', { class: 'hold', title: 'Ore mined away from home rides here. It is not yours to sell or spend until the fleet unloads at a colony or depot.' },
+    h('div', { class: 'row' }, h('span', { class: 'small' }, `Hold: ${fmt(total)} of ${fmt(g.holdSize)}`),
+      ...aboard.map(([r, n]) => h('span', { class: 'small hold-res' }, resourceIcon(r, 12), fmt(n))),
+      pct >= 95 ? h('span', { class: 'tag warn' }, 'FULL') : null),
+    h('div', { class: 'meter' }, h('i', { style: `width:${pct}%` })));
+}
+
+/**
  * Colony arks: colonists aboard (one colony's worth per ark), and Embark where a colony of yours can
  * spare people. Arks are not used up by settling; they come back for more (change commerce).
  */

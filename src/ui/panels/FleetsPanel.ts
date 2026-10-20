@@ -12,7 +12,7 @@ import { Drawer } from '../Drawer';
 import type { FleetGroup, GameActions, GameQueries } from '../GameActions';
 import { clear, h } from '../dom';
 import { icon } from '../icons';
-import { colonistsView, locateButton, shipsText, storesView } from '../widgets';
+import { colonistsView, holdView, locateButton, shipsText, storesView } from '../widgets';
 
 const classOf = (id: string) => SHIP_CLASSES.find((c) => c.id === id)!;
 
@@ -59,6 +59,7 @@ export class FleetsPanel extends Drawer {
       h('div', { class: 'small' }, shipsText(g.ships)),
       storesView(g),
       colonistsView(g, () => this.actions.embark(g.id)),
+      holdView(g),
       g.company ? h('div', { class: 'notice company' }, `Run by ${g.company.name}: it works on its own and takes no orders from the state. Open Empire › Companies to see its books.`) : null,
       g.company ? null : g.capacity.supply && g.stores.supply === 0 ? h('div', { class: 'notice warn' }, 'Out of supply: cannot explore. Return home or reach a friendly system to resupply.') : null,
       g.company ? null : h('div', { class: 'row orders' }, h('span', { class: 'small muted' }, 'Standing orders:'),

@@ -22,6 +22,21 @@ const SPECS = new Map(SHIP_CLASSES.map((c) => [c.id, logisticsOf(c)]));
 export const specOf = (classId: string): LogisticsSpec | undefined => SPECS.get(classId);
 
 /** Ships that explore well enough to form a survey group. */
+/**
+ * Units of ore one mining ship holds (times its class's rate, so a faster miner carries more):
+ * about sixteen years of mining. Ore mined away from a friendly system rides in the hold until
+ * the fleet brings it home (change holds-and-market-history).
+ */
+export const MINER_HOLD = 150;
+
+/** How much ore a fleet's mining ships can hold together. */
+export function holdOf(ships: readonly Squadron[]): number {
+  return ships.reduce((n, x) => {
+    const c = SHIP_CLASSES.find((k) => k.id === x.classId);
+    return c?.mines ? n + x.count * Math.round(MINER_HOLD * (c.rate ?? 1)) : n;
+  }, 0);
+}
+
 export const isSurveyClass = (c: ShipClassDef): boolean => (SUPPLY_OVERRIDES[c.id] ?? 0) >= 8;
 export const isWarship = (c: ShipClassDef): boolean => (c.role === 'combat' || c.role === 'capital') && c.attack > 0;
 const WARSHIP_IDS = new Set(SHIP_CLASSES.filter(isWarship).map((c) => c.id));

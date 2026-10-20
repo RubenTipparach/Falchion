@@ -17,7 +17,7 @@ import { exploreCost } from '../core/fleet/Logistics';
 import { countOf } from '../core/fleet/Presence';
 import { minedBy } from '../core/fleet/AutoMine';
 import { SHIP_CLASSES } from '../content/shipClasses';
-import { colonistsView, colonyView, crateLine, haulView, shipsText, storesView } from './widgets';
+import { colonistsView, holdView, colonyView, crateLine, haulView, shipsText, storesView } from './widgets';
 import { collectWithFx } from './collectFx';
 import { clear, fmt, h, touchFirst } from './dom';
 import { icon, resourceIcon } from './icons';
@@ -307,6 +307,7 @@ export class StarInfoPanel {
         h('p', { class: 'small' }, shipsText(group.ships)),
         storesView(group),
         colonistsView(group, () => this.actions.embark(group.id)),
+        holdView(group),
         group.company ? h('p', { class: 'notice company' }, `Run by ${group.company.name}: it works on its own and takes no orders.`) : h('div', { class: 'row orders' },
           this.orderChip(group, 'autoExplore', 'Auto-explore'),
           this.orderChip(group, 'autoReturn', 'Return to resupply'),

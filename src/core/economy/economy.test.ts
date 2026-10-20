@@ -71,6 +71,23 @@ describe('economy', () => {
     expect(two.metals! - one.metals!).toBe(STORAGE.perColony + 1000);
   });
 
+  it('puts ore mined away from a friendly system into the fleet\'s hold, as far as it holds', () => {
+    const e = econ({ colonies: [{ name: 'A', biome: 'barren' }] });
+    const presence = (room: number) => ({ miners: [{ classId: 'prospector', count: 3, pool: 'p', fleet: 'f1' }], pools: { p: 10_000 }, holds: { f1: room }, reached: [] });
+    const away = resolveTurn(e, EMPTY_RESEARCH, 1, tables, presence(10_000));
+    const ore = away.held.f1?.metals ?? 0;
+    expect(ore).toBeGreaterThan(0);
+    expect(away.report.income.metals ?? 0).toBe(resolveTurn(e, EMPTY_RESEARCH, 1, tables, { miners: [], pools: {}, reached: [] }).report.income.metals ?? 0);
+    expect(away.mined.p).toBe(ore);
+    // A hold with room for 5 takes 5, and leaves the rest of the field.
+    const tight = resolveTurn(e, EMPTY_RESEARCH, 1, tables, presence(5));
+    expect(tight.held.f1?.metals).toBe(5);
+    expect(tight.mined.p).toBe(5);
+    const full = resolveTurn(e, EMPTY_RESEARCH, 1, tables, presence(0));
+    expect(full.held.f1).toBeUndefined();
+    expect(full.report.lines.some((l) => l.includes('hold is full'))).toBe(true);
+  });
+
   it('caps nothing that is not stored: credits, influence and faith', () => {
     const capped = { ...tables, storage: STORAGE };
     const caps = capsOf({ colonies: [{ name: 'A', biome: 'barren', buildings: ['warehouse'] }] }, capped);

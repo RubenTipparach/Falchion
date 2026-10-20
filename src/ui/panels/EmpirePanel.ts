@@ -1,7 +1,8 @@
 import type { GameState } from '../../app/GameState';
 import { flagEl } from '../../render/flag';
 import type { Store } from '../../app/Store';
-import { RESOURCES } from '../../content/resources';
+import { RESOURCES, type Resource } from '../../content/resources';
+import { agoLabel, marketChart, MAX_LINES, sparkline as trendLine } from '../MarketChart';
 import { FACTIONS, GOVERNMENTS, POLICIES, TENETS } from '../../content/society';
 import {
   bonusOf, Colony, colonyYield, EconomyTables, factionApproval, upkeepOf, hasGrant, maxPolicies, maxSpies, sciencePerTurn, stabilityOf, tradePctOf,
@@ -38,6 +39,9 @@ export class EmpirePanel extends Drawer {
   private tab: Tab = 'overview';
   /** The exchange the Market tab shows, and the amounts trades are made in. */
   private exchange: string | null = null;
+  /** The commodity the price chart follows, and how far back it looks (years: a year is a minute). */
+  private chartRes: Resource = 'metals';
+  private chartSpan = 60;
   private amount = 100;
   private shareAmount = 10;
   private readonly tabsEl = h('div', { class: 'seg' });
@@ -227,20 +231,24 @@ export class EmpirePanel extends Drawer {
       h('div', { class: 'row amount-pick' }, h('span', { class: 'small muted' }, 'Amount:'),
         ...[10, 100, 500, 1000].map((n) => h('button', { class: `chip ${n === amount ? 'active' : ''}`, onclick: () => { this.amount = n; this.render(); } }, fmt(n)))),
       h('div', { class: 'exchange' },
-        h('div', { class: 'ex-row ex-head' }, h('span', {}, 'Resource'), h('span', { class: 'num' }, 'Buy / sell each'), h('span', {}, '')),
+        h('div', { class: 'ex-row ex-head' }, h('span', {}, 'Resource'), h('span', { class: 'ex-trend' }, 'Trend'), h('span', { class: 'num' }, 'Buy / sell each'), h('span', {}, '')),
         ...EXCHANGE_RESOURCES.map((r) => {
           const def = RESOURCES.find((x) => x.id === r)!;
           const stock = s.empire.materials[r];
           const room = caps[r] !== undefined ? Math.max(0, caps[r]! - stock) : Infinity;
           const buyN = Math.min(amount, Math.floor(room)), sellN = Math.min(amount, Math.floor(stock));
           const buy = buyN ? this.q.exchangeQuote(ex.id, r, 'buy', buyN) : 0, sell = sellN ? this.q.exchangeQuote(ex.id, r, 'sell', sellN) : 0;
-          return h('div', { class: 'ex-row' },
-            h('span', { class: 'ex-res' }, resourceIcon(r, 16), h('span', {}, h('b', {}, def.name), h('small', { class: 'muted' }, `${fmt(stock)}${caps[r] !== undefined ? ` of ${fmt(caps[r]!)}` : ''} in store`))),
+          const trend = trendLine(this.q.exchangeHistory(ex.id, r, this.chartSpan, 40));
+          const pct = Math.round(trend.change * 1000) / 10;
+          return h('div', { class: `ex-row ${r === this.chartRes ? 'charted' : ''}` },
+            h('button', { class: 'ex-res', title: `Chart ${def.name.toLowerCase()} prices`, onclick: () => { this.chartRes = r; this.render(); } }, resourceIcon(r, 16), h('span', {}, h('b', {}, def.name), h('small', { class: 'muted' }, `${fmt(stock)}${caps[r] !== undefined ? ` of ${fmt(caps[r]!)}` : ''} in store`))),
+            h('span', { class: 'ex-trend', title: `${pct >= 0 ? 'Up' : 'Down'} ${Math.abs(pct)}% over the last ${agoLabel(this.chartSpan).replace(' ago', '')}` }, trend.el, h('small', { class: 'muted mono' }, `${pct > 0 ? '▲' : pct < 0 ? '▼' : '·'} ${Math.abs(pct).toFixed(1)}%`)),
             h('span', { class: 'num mono ex-price' }, h('span', { class: 'red', title: 'Buy price, each' }, this.q.exchangePrice(ex.id, r, 'buy').toFixed(2)), h('span', { class: 'green', title: 'Sell price, each' }, this.q.exchangePrice(ex.id, r, 'sell').toFixed(2))),
             h('span', { class: 'trade-btns' },
               h('button', { class: 'chip', disabled: !buyN || buy > s.empire.materials.credits, title: buyN ? `${fmt(buyN)} ${def.name.toLowerCase()} for ${fmt(buy)} credits` : 'No room in store', onclick: () => this.actions.buyResource(ex.id, r, buyN) }, buyN ? `Buy ${fmt(buyN)} · ${fmt(buy)} cr` : 'Store full'),
               h('button', { class: 'chip', disabled: !sellN, title: sellN ? `${fmt(sellN)} ${def.name.toLowerCase()} for ${fmt(sell)} credits` : 'None to sell', onclick: () => this.actions.sellResource(ex.id, r, sellN) }, sellN ? `Sell ${fmt(sellN)} · ${fmt(sell)} cr` : 'None to sell')));
         })),
+      this.priceChart(exchanges, ex.id),
       ship ? h('section', { class: 'card ship-vs' }, h('h4', {}, 'Shipping against the exchange: trade goods'),
         h('div', { class: 'vs-row' }, h('span', {}, `${ex.name} exchange`), h('span', { class: 'vs-bar' }, h('i', { style: `width:${Math.min(100, (100 * ship.exchange) / Math.max(ship.freighter, ship.exchange))}%` })), h('b', { class: 'mono' }, `${ship.exchange.toFixed(2)} cr each, now`)),
         h('div', { class: 'vs-row' }, h('span', {}, 'By freighter'), h('span', { class: 'vs-bar freighter' }, h('i', { style: `width:${Math.min(100, (100 * ship.freighter) / Math.max(ship.freighter, ship.exchange))}%` })), h('b', { class: 'mono' }, `${ship.freighter.toFixed(2)} cr each`)),
@@ -271,6 +279,20 @@ export class EmpirePanel extends Drawer {
         h('button', { class: `chip ${g.build ? 'active' : ''}`, 'aria-pressed': String(g.build), title: 'Every year, start the best building for the focus on each colony with a free slot', onclick: () => set({ build: !g.build }) }, g.build ? '✓ Build in free slots' : 'Build in free slots'),
         h('button', { class: `chip ${g.research ? 'active' : ''}`, 'aria-pressed': String(g.research), title: 'Pick the next research for the focus whenever none is set', onclick: () => set({ research: !g.research }) }, g.research ? '✓ Pick research' : 'Pick research')),
       h('label', { class: 'slider reserve' }, h('span', {}, 'Keep in reserve'), reserve, out));
+  }
+
+  /** A commodity's price over time on the exchanges you have met, the one you are trading on first. */
+  private priceChart(exchanges: readonly { id: string; name: string }[], current: string): HTMLElement {
+    const def = RESOURCES.find((x) => x.id === this.chartRes)!;
+    const ordered = [...exchanges.filter((x) => x.id === current), ...exchanges.filter((x) => x.id !== current)].slice(0, MAX_LINES);
+    const lines = ordered.map((x) => ({ id: x.id, name: x.name, points: this.q.exchangeHistory(x.id, this.chartRes, this.chartSpan, 121) }));
+    const ranges: Array<[string, number]> = [['1 hour', 60], ['6 hours', 360], ['1 day', 1440]];
+    return h('section', { class: 'card price-chart' },
+      h('div', { class: 'row pc-head' }, h('h4', {}, `${def.name} price`),
+        h('span', { class: 'pc-chips' }, ...EXCHANGE_RESOURCES.map((r) => h('button', { class: `chip ${r === this.chartRes ? 'active' : ''}`, onclick: () => { this.chartRes = r; this.render(); } }, RESOURCES.find((x) => x.id === r)!.name))),
+        h('span', { class: 'pc-chips' }, ...ranges.map(([label, span]) => h('button', { class: `chip ${span === this.chartSpan ? 'active' : ''}`, onclick: () => { this.chartSpan = span; this.render(); } }, label)))),
+      marketChart(lines, this.store.state.turn, def.name),
+      h('p', { class: 'small muted' }, `Each exchange's own price, before the buy and sell spread, its tariff, and the effect of your own recent trading there. ${exchanges.length > MAX_LINES ? `The first ${MAX_LINES} exchanges are drawn; pick an exchange above to put it first.` : ''}`));
   }
 
   /** Your tariffs: what other players pay to trade on your exchange or sell goods at your worlds. */

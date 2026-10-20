@@ -104,7 +104,13 @@ export interface Presence {
    * Mining crews. With `pools`, each mines the asteroid pool it is at (`pool`: a system's fields
    * of its resource); without, `deposits` lists what it can mine there (no limit).
    */
-  readonly miners: ReadonlyArray<{ readonly classId: string; readonly count: number; readonly deposits?: readonly Resource[]; readonly pool?: string; readonly contract?: Contract }>;
+  readonly miners: ReadonlyArray<{ readonly classId: string; readonly count: number; readonly deposits?: readonly Resource[]; readonly pool?: string; readonly contract?: Contract; readonly fleet?: string }>;
+  /**
+   * Room left in the holds of fleets mining away from a friendly system, by fleet: a crew with a
+   * `fleet` puts what it mines there (resolveTurn's `held`), not into the stockpile, and stops
+   * when the hold is full.
+   */
+  readonly holds?: Readonly<Record<string, number>>;
   /** What each asteroid pool holds this year: mining draws it down. */
   readonly pools?: Readonly<Record<string, number>>;
   /** Empires with at least one of our ships inside their territory. */
@@ -287,7 +293,7 @@ export function miningYield(e: EconomyState, t: EconomyTables, research: Researc
   return Math.round(perShip * (c.rate ?? 1) * ASTEROID_RATE * (1 + miningPct / 100));
 }
 
-export function resolveTurn(e: EconomyState, research: ResearchState, turn: number, t: EconomyTables, presence?: Presence, transfers: readonly Transfer[] = []): { economy: EconomyState; research: ResearchState; report: TurnReport; mined: Record<string, number>; contracts: Record<string, number> } {
+export function resolveTurn(e: EconomyState, research: ResearchState, turn: number, t: EconomyTables, presence?: Presence, transfers: readonly Transfer[] = []): { economy: EconomyState; research: ResearchState; report: TurnReport; mined: Record<string, number>; contracts: Record<string, number>; held: Record<string, Partial<Record<Resource, number>>> } {
   const effs = activeEffects(e, t);
   const income: Partial<Record<Resource, number>> = {};
   const ledger: LedgerEntry[] = [];
@@ -318,6 +324,10 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   const pools = presence?.pools ? { ...presence.pools } : null;
   const mined: Record<string, number> = {};
   const contracts: Record<string, number> = {};
+  // Ore mined away from a friendly system goes into the fleet's hold, as long as there is room.
+  const room = { ...(presence?.holds ?? {}) };
+  const held: Record<string, Partial<Record<Resource, number>>> = {};
+  const fullHolds = new Set<string>();
   // A company's crew is paid for what it mines (credits from the state to the company).
   const pay = (crew: Presence['miners'][number], r: Resource, n: number) => {
     if (!crew.contract || n <= 0) return;
@@ -333,10 +343,18 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
       // Asteroids: faster than planets were, but never more than the fields hold.
       const left = crew.pool ? pools[crew.pool] ?? 0 : 0;
       if (left <= 0) { idleMiners += crew.count; continue; }
-      const take = Math.min(left, Math.round(crew.count * perShip * (c.rate ?? 1) * ASTEROID_RATE * (1 + miningPct / 100)));
+      let take = Math.min(left, Math.round(crew.count * perShip * (c.rate ?? 1) * ASTEROID_RATE * (1 + miningPct / 100)));
+      if (crew.fleet) {
+        take = Math.min(take, Math.max(0, room[crew.fleet] ?? 0));
+        if (take <= 0) { fullHolds.add(crew.fleet); continue; }
+        room[crew.fleet] -= take;
+        const h = (held[crew.fleet] ??= {});
+        h[c.mines] = (h[c.mines] ?? 0) + take;
+      } else {
+        add(c.mines, take, crew.contract ? 'Companies' : 'Mining ships', crew.contract ? `${crew.contract.name}: ${c.name} ×${crew.count}` : `${c.name} ×${crew.count}`);
+      }
       pools[crew.pool!] = left - take;
       mined[crew.pool!] = (mined[crew.pool!] ?? 0) + take;
-      add(c.mines, take, crew.contract ? 'Companies' : 'Mining ships', crew.contract ? `${crew.contract.name}: ${c.name} ×${crew.count}` : `${c.name} ×${crew.count}`);
       pay(crew, c.mines, take);
       continue;
     }
@@ -345,6 +363,7 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
     add(c.mines, take, crew.contract ? 'Companies' : 'Mining ships', crew.contract ? `${crew.contract.name}: ${c.name} ×${crew.count}` : `${c.name} ×${crew.count}`);
     pay(crew, c.mines, take);
   }
+  if (fullHolds.size) lines.push(`${fullHolds.size} mining fleet${fullHolds.size === 1 ? "'s hold is" : "s' holds are"} full: bring ${fullHolds.size === 1 ? 'it' : 'them'} to a colony or depot to unload`);
   if (idleMiners) lines.push(pools
     ? `${idleMiners} mining ship${idleMiners === 1 ? '' : 's'} idle: no asteroid field of their kind where they are, or it is mined out`
     : `${idleMiners} mining ship${idleMiners === 1 ? '' : 's'} idle: nothing they can mine where they are`);
@@ -456,7 +475,7 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
   const colonies = populationYear(e, t, income.food ?? 0, lines);
 
   res = autoResearch(res, t, lines);
-  return { economy: { ...e, stock, faith, colonies, focus }, research: res, report: { income, lines, science, ledger }, mined, contracts };
+  return { economy: { ...e, stock, faith, colonies, focus }, research: res, report: { income, lines, science, ledger }, mined, contracts, held };
 }
 
 /**

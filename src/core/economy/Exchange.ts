@@ -42,6 +42,27 @@ export function priceOf(ex: ExchangeView, r: Resource, year: number, pressure = 
   return base * taste(ex, r) * drift(ex, r, year) * (1 + clampPressure(pressure));
 }
 
+/** A commodity's market price at one year. */
+export interface PricePoint {
+  readonly year: number;
+  readonly price: number;
+}
+
+/**
+ * A commodity's market price on an exchange over the `span` years up to `year`, at `points` evenly
+ * spaced years (the last is `year`): the exchange's own price, without anyone's trading pressure,
+ * so every client and the server draw the same history (change holds-and-market-history).
+ */
+export function priceSeries(ex: ExchangeView, r: Resource, year: number, span: number, points: number): PricePoint[] {
+  const n = Math.max(2, Math.floor(points));
+  const out: PricePoint[] = [];
+  for (let i = 0; i < n; i++) {
+    const y = year - span + (span * i) / (n - 1);
+    out.push({ year: y, price: priceOf(ex, r, y) });
+  }
+  return out;
+}
+
 /** What one unit costs to buy, or pays to sell, at the current price (no pressure of the trade itself). */
 export function unitPrice(ex: ExchangeView, r: Resource, year: number, side: 'buy' | 'sell', pressure = 0): number {
   const mid = priceOf(ex, r, year, pressure);

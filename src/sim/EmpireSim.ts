@@ -6,7 +6,7 @@ import { DEFAULT_RESERVE } from '../content/governor';
 import { ADVISOR_MAX, LEADER_MAX, MAX_CANDIDATES, NEW_COURT, addXp, appoint, courtBoons, drawCandidate, openSeats, withCandidate, type CourtState } from '../core/empire/Court';
 import { MAX_OFFERS, NEW_MISSIONS, QUEST_YEARS, baseOf, progressOf, questOffer, unlocked, type MissionDef, type MissionView, type MissionsState, type QuestDef } from '../core/missions/Missions';
 import { BUILDINGS, slotsOf } from '../content/buildings';
-import { buildYears, hasWarships, isSurveyClass, isWarship, REPAIR, specOf, warshipsOf, type RepairSite } from '../content/logistics';
+import { buildYears, hasWarships, holdOf, isSurveyClass, isWarship, REPAIR, specOf, warshipsOf, type RepairSite } from '../content/logistics';
 import { SHIP_CLASSES, ShipClassDef } from '../content/shipClasses';
 import { BattleResult, CombatBonuses, Damage, menderRepair, repairDamage, resolveAssault, resolveBattle, Side, Squadron } from '../core/combat/Combat';
 import { battleRecords, recordRound } from '../core/combat/BattleRecord';
@@ -19,7 +19,7 @@ import { BIOME_YIELDS } from '../content/resources';
 import { FOCI, FOOD_FLOOR, type GovernorFocus } from '../content/governor';
 import { pickBuilding, pickResearch } from '../core/empire/Governor';
 import { charter, companyKindOf, companyName, companyYear, fleetValue, floatOf, sharePrice, shipValue, wantsShip, type Company, type CompanyYear } from '../core/economy/Companies';
-import { cleanTariff, fadePressure, npcTariff, trade as exchangeTrade, unitPrice, type ExchangeView } from '../core/economy/Exchange';
+import { cleanTariff, fadePressure, npcTariff, priceSeries, trade as exchangeTrade, unitPrice, type ExchangeView, type PricePoint } from '../core/economy/Exchange';
 import { corpKey, MAX_SHARE_TRADE, NO_COMMERCE, playerCompanyKey, publicCommerceOf, stakeKey, tariffFor, type CommerceState, type PublicCommerce } from '../core/economy/Commerce';
 import { corporationsOf, corpNpc, corpPrice, type Corporation } from '../core/economy/Corporations';
 import { applyCost, applyCrate, EncounterResolver } from '../core/encounters/Encounters';
@@ -28,7 +28,7 @@ import type { Card } from '../core/encounters/types';
 import type { ActivityPlace, ReportKind } from '../core/social/Activity';
 import { arrivalTurn, hexAt, planMovement, positionAt, retime, travelTurns } from '../core/fleet/Fleet';
 import { catchUpTicks, formatDuration } from '../core/time/WorldTime';
-import { capacity, clampStores, exploreCost, fullStores, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
+import { addHold, capacity, clampStores, exploreCost, fullStores, heldIn, rescaleStores, resupply, Stores } from '../core/fleet/Logistics';
 import { adjustShips, countOf, dockedShips, Encounter, FleetBattle, FleetOrders, ForeignFleet, inBattle, hasShips, isAggressive, isStationed, Loadout, shipTotal } from '../core/fleet/Presence';
 import { planSurvey } from '../core/fleet/Survey';
 import { minedBy, nearestMine, stockFor } from '../core/fleet/AutoMine';
@@ -220,6 +220,17 @@ const BASE_SPEED = 1; // ly per year (one year = one minute)
 const ARK = 'colony-ark';
 /** Supply an ark spends settling a world: all of its own (change commerce). */
 const ARK_SUPPLY = specOf(ARK)?.supply ?? 6;
+/** A hold this full sends an auto-mining fleet home to unload. */
+const HOLD_FULL = 0.95;
+
+/** A year's report with the ore fleets unloaded at base in its income and ledger. */
+function unloadedInto(report: TurnReport, unloaded: Partial<Record<Resource, number>>): TurnReport {
+  const entries = Object.entries(unloaded).filter(([, n]) => (n ?? 0) > 0) as Array<[Resource, number]>;
+  if (!entries.length) return report;
+  const income = { ...report.income };
+  for (const [r, n] of entries) income[r] = (income[r] ?? 0) + n;
+  return { ...report, income, ledger: [...(report.ledger ?? []), ...entries.map(([r, n]) => ({ r, n, group: 'Mining ships', label: 'Unloaded from holds' }))] };
+}
 /** The ship a company of each kind buys when it has none to copy. */
 const COMPANY_SHIP: Readonly<Record<CompanyKind, string>> = { trade: FREIGHTER, mining: 'prospector', colony: ARK };
 /** Supply an auto-exploring fleet needs to set off for another system. */
@@ -405,6 +416,7 @@ export class EmpireSim {
         cargo: l.cargo, cargoFrom: l.cargoFrom, battle: inBattle(l.battle, s.turn) ? l.battle : undefined,
         ...(l.company ? { company: { id: l.company, name: this.companyById(l.company)?.name ?? 'A company' } } : {}),
         ...(countOf(l.ships, ARK) ? { colonists: l.colonists ?? 0 } : {}),
+        ...(holdOf(l.ships) ? { hold: l.hold ?? {}, holdSize: holdOf(l.ships) } : {}),
       });
     }
     return out;
@@ -483,8 +495,9 @@ export class EmpireSim {
   /** Mining ships and where they are: each mines its system's fields of its resource. */
   protected presence(): Presence {
     const s = this.state;
-    const miners: Array<{ classId: string; count: number; pool?: string; contract?: { company: string; name: string } }> = [];
+    const miners: Array<{ classId: string; count: number; pool?: string; contract?: { company: string; name: string }; fleet?: string }> = [];
     const pools: Record<string, number> = {};
+    const holds: Record<string, number> = {};
     // Fields that miners on station were sent to work, while they have rock left: those miners
     // draw on them alone, and the rest of the system's miners on the other fields.
     const pinned = new Map<string, FieldReport>();
@@ -514,12 +527,15 @@ export class EmpireSim {
       // A mining company's crews are paid for what they mine.
       const contract = g.company ? { company: g.company.id, name: g.company.name } : undefined;
       const field = s.loadouts[g.id]?.orders?.mineField;
-      for (const x of g.ships) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, pool: g.stationed ? at(g.star, x.classId, field) : undefined, ...(contract ? { contract } : {}) });
+      // Away from a friendly system, what it mines goes into its hold (as much as there is room for).
+      const away = !g.friendly;
+      if (away) holds[g.id] = Math.max(0, holdOf(g.ships) - heldIn(s.loadouts[g.id]?.hold));
+      for (const x of g.ships) if (this.classById.get(x.classId)?.mines) miners.push({ ...x, pool: g.stationed ? at(g.star, x.classId, field) : undefined, ...(contract ? { contract } : {}), ...(away ? { fleet: g.id } : {}) });
     }
     const known = this.knownNpcs();
     const reached = known.map((n) => n.def.name).filter((n) => this.reached(n));
     const techOf = Object.fromEntries(known.map((n) => [n.def.name, n.def.archetype.tech]));
-    return { miners, pools, reached, techOf };
+    return { miners, pools, holds, reached, techOf };
   }
 
   /** Fields worked by miners sent to them this year (presence): the system's other miners leave them be. */
@@ -707,8 +723,9 @@ export class EmpireSim {
     if (!f || !s.loadouts[fleetId]) return;
     if (!isStationed(f.movement, s.turn) || !hexEquals(hexAt(f.movement, s.turn), s.home.hex)) return;
     const { [fleetId]: gone, ...loadouts } = s.loadouts;
-    // Goods still aboard go back into the stockpile.
-    const materials = gone.cargo ? { ...s.empire.materials, goods: s.empire.materials.goods + gone.cargo } : s.empire.materials;
+    // Goods and ore still aboard go back into the stockpile.
+    const materials = { ...s.empire.materials, goods: s.empire.materials.goods + (gone.cargo ?? 0) };
+    for (const [r, n] of Object.entries(gone.hold ?? {})) materials[r as Resource] += n ?? 0;
     // Colonists aboard go home to the capital.
     const capital = s.economy.colonies.find((c) => c.capital);
     if (gone.colonists && capital?.planetId) this.movePeople(capital.planetId, gone.colonists);
@@ -1344,6 +1361,13 @@ export class EmpireSim {
     if (!resources.length) return null;
     const here = hexAt(f.movement, s.turn);
     const star = this.deps.galaxy.starAt(here);
+    // A full hold goes home to unload first (the year's turn unloads it there); then back out.
+    const size = holdOf(l.ships);
+    if (size > 0 && heldIn(l.hold) >= size * HOLD_FULL && !this.isFriendlyHex(here)) {
+      const base = this.nearestFriendly(here);
+      this.steer(f.id, base);
+      return `${f.name}'s hold is full: taking ${fmtInt(heldIn(l.hold))} ore home to ${base.name}`;
+    }
     const stockAt = (st: StarSystem) => stockFor(this.fieldReport(st), resources);
     if (star && stockAt(star) > 0) return null;
     const next = nearestMine(this.deps.galaxy, here, stockAt);
@@ -2635,6 +2659,12 @@ export class EmpireSim {
     return ex ? unitPrice(ex, r, this.state.turn, side, this.commerce.pressure?.[exchangeId]?.[r] ?? 0) : 0;
   };
 
+  /** A commodity's market price on an exchange over the last `span` years (its own price, no pressure). */
+  exchangeHistory = (exchangeId: string, r: Resource, span: number, points: number): PricePoint[] => {
+    const ex = this.exchanges().find((x) => x.id === exchangeId);
+    return ex ? priceSeries(ex, r, this.state.turn, span, points) : [];
+  };
+
   /** What a trade would come to, without making it. */
   exchangeQuote = (exchangeId: string, r: Resource, side: 'buy' | 'sell', amount: number): number => {
     const ex = this.exchanges().find((x) => x.id === exchangeId);
@@ -3044,8 +3074,24 @@ export class EmpireSim {
     // Companies close last year's books; their tax and dividends, and what other empires owe, are income.
     const years = this.companyYears();
     const transfers = this.transfers(years);
-    const { economy, research, report, mined, contracts } = resolveTurn({ ...s.economy, stock: s.empire.materials }, s.empire.research, s.turn, this.deps.economy, this.presence(), transfers);
+    const { economy, research, report, mined, contracts, held } = resolveTurn({ ...s.economy, stock: s.empire.materials }, s.empire.research, s.turn, this.deps.economy, this.presence(), transfers);
     this.drawFields(mined);
+    // Ore unloaded this year by fleets in friendly systems (as much as storage has room for).
+    const unloaded: Partial<Record<Resource, number>> = {};
+    const caps = capsOf(s.economy, this.deps.economy);
+    const unload = (hold: Readonly<Partial<Record<Resource, number>>> | undefined): Partial<Record<Resource, number>> | undefined => {
+      if (!hold) return hold;
+      const left: Partial<Record<Resource, number>> = {};
+      for (const [k, n] of Object.entries(hold)) {
+        const r = k as Resource;
+        const have = economy.stock[r] + (unloaded[r] ?? 0);
+        const fit = caps[r] !== undefined ? Math.max(0, Math.min(n ?? 0, caps[r]! - have)) : n ?? 0;
+        if (fit > 0) unloaded[r] = (unloaded[r] ?? 0) + fit;
+        if ((n ?? 0) - fit > 0) left[r] = (n ?? 0) - fit;
+      }
+      return Object.keys(left).length ? left : undefined;
+    };
+    const unloadNews: string[] = [];
     const next = s.turn + 1;
     // Logistics: fleets in friendly systems refill their supply and repair (fully at a shipyard world,
     // slowly at an outpost); Menders patch their fleet wherever it is, between battle rounds too.
@@ -3058,20 +3104,31 @@ export class EmpireSim {
       const friendly = isStationed(f.movement, next) && this.isFriendlyHex(here);
       const site = isStationed(f.movement, next) ? this.repairSite(here) : null;
       const heal = (site ? REPAIR[site] : 0) + (inBattle(l.battle, next) ? 0 : menderRepair(l.ships, this.combatBonuses()));
-      const { damage: hurt, ...rest } = l;
+      const { damage: hurt, hold: before, ...rest } = l;
       const damage = heal > 0 ? repairDamage(hurt, heal) : hurt;
-      loadouts[f.id] = { ...rest, ...resupply(l, l.ships, specOf, friendly), ...(damage ? { damage } : {}) };
+      // The hold: this year's ore in, then out again in a friendly system.
+      let hold = addHold(before, held[f.id]);
+      if (friendly && hold) {
+        const aboard = heldIn(hold);
+        hold = unload(hold);
+        const off = aboard - heldIn(hold);
+        if (off > 0) unloadNews.push(`${f.name} unloaded ${fmtInt(off)} ore at ${this.deps.galaxy.starAt(here)?.name ?? 'base'}`);
+      }
+      loadouts[f.id] = { ...rest, ...resupply(l, l.ships, specOf, friendly), ...(damage ? { damage } : {}), ...(hold ? { hold } : {}) };
       if (arrivalTurn(f.movement) === next && f.movement.route.length > 1) {
         const star = this.deps.galaxy.starAt(here);
         arrivals.push(`${f.name} arrived at ${star?.name ?? 'deep space'}${friendly ? (hurt ? ' to resupply and repair' : ' and resupplied') : ''}`);
       }
     }
     const visited = this.visitedThrough(s, next);
-    const { stock, ...settings } = economy;
+    const { stock: mined0, ...settings } = economy;
+    const stock = { ...mined0 };
+    for (const [r, n] of Object.entries(unloaded)) stock[r as Resource] += n!;
     // Live years only report news: arrivals, and report lines that changed since last year.
     const previous = new Set(s.lastReport?.lines ?? []);
     const news = [...met.map((text) => ({ turn: next, text, tone: 'bad' as const })), ...(quiet ? [] : [
       ...arrivals.map((text) => ({ turn: next, text, tone: 'good' as const })),
+      ...unloadNews.map((text) => ({ turn: next, text, tone: 'good' as const })),
       ...report.lines.filter((l) => !previous.has(l) && !ROUTINE.test(l)).map((text) => ({ turn: next, text })),
     ])];
     this.deps.store.update({
@@ -3080,7 +3137,7 @@ export class EmpireSim {
       dockSpent: { supply: 0 },
       empire: { ...s.empire, materials: stock, research },
       economy: settings,
-      lastReport: report,
+      lastReport: unloadedInto(report, unloaded),
       engaged: [],
       dispatches: news.length ? [...news, ...s.dispatches].slice(0, 40) : s.dispatches,
       ...(visited ? { visited } : {}),

@@ -96,6 +96,7 @@ export function summarizeSave(save: SavedGame, player: { readonly id: string; re
       id: f.id, name: f.name, ships: sorted(ships), at: `${at.q},${at.r}`, star: galaxy.starAt(at)?.id ?? null,
       moving: s.turn < arrivalTurn(f.movement), stance: l.orders?.stance ?? 'passive', supply: l.supply,
       hull: total ? round(Math.max(0, 1 - damage / total)) : 1, inBattle: inBattle(l.battle, s.turn), company: l.company ?? null,
+      hold: l.hold && Object.keys(l.hold).length ? { ...l.hold } : null,
     };
   });
 

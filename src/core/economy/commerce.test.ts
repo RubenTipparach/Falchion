@@ -3,7 +3,7 @@ import { COMMERCE } from '../../content/commerce';
 import { charter, cleanCompanies, companyName, companyYear, sharePrice, shipValue, wantsShip, type Company } from './Companies';
 import { cleanCommerce, tariffFor } from './Commerce';
 import { corporationsOf, corpPrice } from './Corporations';
-import { cleanTariff, fadePressure, npcTariff, priceOf, trade, unitPrice } from './Exchange';
+import { cleanTariff, fadePressure, npcTariff, priceOf, priceSeries, trade, unitPrice } from './Exchange';
 import { applyEffects, EMPTY_WORLD } from '../world/SharedWorld';
 
 const ex = { id: 'npc:c:1,2', tariff: 10 };
@@ -154,5 +154,18 @@ describe('the shared world: stakes and payouts', () => {
 
   it('ignores payouts that are not positive', () => {
     expect(applyEffects(EMPTY_WORLD, [{ kind: 'payout', to: 'a', label: 'x', credits: -3 }])).toBe(EMPTY_WORLD);
+  });
+
+  it('draws a commodity\'s price history from the exchange itself', () => {
+    const ex = { id: 'npc:vossk', tariff: 5, makes: ['metals' as const] };
+    const series = priceSeries(ex, 'metals', 1000, 240, 61);
+    expect(series).toHaveLength(61);
+    expect(series[0].year).toBe(760);
+    expect(series.at(-1)!.year).toBe(1000);
+    expect(series.at(-1)!.price).toBeCloseTo(priceOf(ex, 'metals', 1000));
+    // The same history every time, and it moves.
+    expect(priceSeries(ex, 'metals', 1000, 240, 61)).toEqual(series);
+    const prices = series.map((p) => p.price);
+    expect(Math.max(...prices) - Math.min(...prices)).toBeGreaterThan(0);
   });
 });

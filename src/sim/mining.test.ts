@@ -1,3 +1,4 @@
+import { holdOf } from '../content/logistics';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_LOOT_TABLES } from '../content/lootTables';
 import { BUILDINGS, STORAGE } from '../content/buildings';
@@ -85,8 +86,52 @@ describe('mining ships mine asteroid fields', () => {
     const afterB = total();
     expect(afterA).toBeLessThan(full);
     expect(afterB).toBeLessThan(afterA);
-    expect(a.state.lastReport!.income.crystals).toBeGreaterThan(0);
-    expect(b.state.lastReport!.income.crystals).toBeGreaterThan(0);
+    // Mined away from home: it is in their holds, not their stockpiles, until they bring it back.
+    const aboard = (sim: ReturnType<typeof empire>) => sim.state.loadouts[sim.state.fleets.at(-1)!.id].hold?.crystals ?? 0;
+    expect(aboard(a)).toBeGreaterThan(0);
+    expect(aboard(b)).toBeGreaterThan(0);
+    expect(a.state.lastReport!.income.crystals ?? 0).toBe(0);
+  });
+
+  it('ore mined away from a friendly system rides in the hold until the fleet is home', () => {
+    const sim = empire('555555555555555555', snapshotLink(EMPTY_WORLD));
+    const field = starWith(sim.state.home, 'crystals');
+    sim.store.update((s) => ({ economy: { ...s.economy, roster: { ...s.economy.roster, 'crystal-driller': 4 } } }));
+    sim.formFleet([{ classId: 'crystal-driller', count: 4 }], field);
+    const id = sim.state.fleets.at(-1)!.id;
+    const put = (hex: typeof field.hex) => sim.store.update((s) => ({ fleets: s.fleets.map((f) => (f.id === id ? { ...f, movement: { ...f.movement, route: [hex], departTurn: s.turn, from: undefined } } : f)) }));
+    put(field.hex);
+    const before = sim.state.empire.materials.crystals;
+    sim.skipYear();
+    const held = sim.state.loadouts[id].hold?.crystals ?? 0;
+    expect(held).toBeGreaterThan(0);
+    // Not the empire's yet: not in store, so the exchange cannot sell it.
+    expect(sim.state.empire.materials.crystals - before).toBe(sim.state.lastReport!.income.crystals ?? 0);
+    expect(sim.state.empire.materials.crystals - before).toBeLessThan(held);
+    // Home: unloaded into the stockpile.
+    put(sim.state.home.hex);
+    const atHome = sim.state.empire.materials.crystals;
+    sim.skipYear();
+    expect(sim.state.loadouts[id].hold?.crystals ?? 0).toBe(0);
+    expect(sim.state.empire.materials.crystals).toBeGreaterThanOrEqual(atHome + held);
+    expect(sim.state.lastReport!.ledger!.some((x) => x.label === 'Unloaded from holds')).toBe(true);
+  });
+
+  it('a full hold stops mining, and an auto-miner takes it home', () => {
+    const sim = empire('666666666666666666', snapshotLink(EMPTY_WORLD));
+    const field = starWith(sim.state.home, 'crystals');
+    sim.store.update((s) => ({ economy: { ...s.economy, roster: { ...s.economy.roster, 'crystal-driller': 2 } } }));
+    sim.formFleet([{ classId: 'crystal-driller', count: 2 }], field);
+    const id = sim.state.fleets.at(-1)!.id;
+    const size = holdOf([{ classId: 'crystal-driller', count: 2 }]);
+    sim.store.update((s) => ({
+      fleets: s.fleets.map((f) => (f.id === id ? { ...f, movement: { ...f.movement, route: [field.hex], departTurn: s.turn, from: undefined } } : f)),
+      loadouts: { ...s.loadouts, [id]: { ...s.loadouts[id], hold: { crystals: size }, orders: { ...(s.loadouts[id].orders ?? {}), autoMine: true } } },
+    }));
+    sim.skipYear();
+    expect(sim.state.loadouts[id].hold?.crystals).toBe(size);
+    const route = sim.state.fleets.find((f) => f.id === id)!.movement.route;
+    expect(route.at(-1)).toEqual(sim.nearestFriendly(field.hex).hex);
   });
 
   it('the server plays an empire on the shared world and hands back what it mined', () => {

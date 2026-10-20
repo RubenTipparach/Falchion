@@ -19,6 +19,8 @@ export function createStarPointsMaterial(opts: { worldSize: number; minPx: numbe
       uniform float uScale; uniform float uWorldSize; uniform float uMinPx; uniform float uMaxPx;
       varying vec3 vColor; varying float vBoost;
       void main() {
+        // Size 0: not drawn (a star hidden from the player, change admin-snapshots-and-fog).
+        if (size <= 0.0) { gl_PointSize = 0.0; gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vColor = vec3(0.0); vBoost = 0.0; return; }
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         float px = uWorldSize * size * uScale / -mv.z;
         vBoost = clamp(px / uMinPx, 0.25, 1.0);

@@ -26,7 +26,9 @@ export function setupRouting({ controller, store, galaxy, map, showPlayer }: Rou
     if (route.kind === 'player') return showPlayer(route.id);
     if (route.kind === 'home') return;
     const at = hexToWorld(route.hex);
-    const star = galaxy.starAt(route.hex);
+    // A link to a star hidden from the player leads to that hex of space, nothing more.
+    const raw = galaxy.starAt(route.hex);
+    const star = raw && controller.seeStar(raw);
     // Arrive at the place rather than flying across the galaxy from home.
     map.controller.focus.set(star?.position.x ?? at.x, star?.position.z ?? at.z);
     if (route.kind === 'hex' || !star) {

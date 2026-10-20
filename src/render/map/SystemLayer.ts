@@ -105,6 +105,11 @@ export interface SystemEvents {
   planets?(star: StarSystem): Planet[];
   /** A system's asteroid fields with what each holds now (drawn as belts); default: none. */
   fields?(star: StarSystem): BeltField[];
+  /**
+   * The star as the player knows it (change admin-snapshots-and-fog): null when it is hidden from
+   * them (nothing is drawn), a megastructure system not yet found as an ordinary star; default: as is.
+   */
+  see?(star: StarSystem): StarSystem | null;
 }
 
 /**
@@ -261,12 +266,14 @@ export class SystemLayer implements MapLayer {
     const visible = view.visibleWidth < SYSTEM_VIEW_WIDTH;
     this.object3d.visible = visible;
     if (!visible) return;
-    const star = this.galaxy.nearestStar(worldToHex(view.focus.x, view.focus.z), 1);
+    const raw = this.galaxy.nearestStar(worldToHex(view.focus.x, view.focus.z), 1);
+    const star = raw && (this.events.see ? this.events.see(raw) : raw);
     if (!star) {
       this.clear();
       return;
     }
-    if (this.current?.star.id !== star.id) {
+    // A new system, or the player has just found the megastructure of this one.
+    if (this.current?.star.id !== star.id || this.current.star.megastructure !== star.megastructure) {
       this.clear();
       this.current = this.build(star);
       this.object3d.add(this.current.root);

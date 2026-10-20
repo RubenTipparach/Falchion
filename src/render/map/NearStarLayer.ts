@@ -8,6 +8,7 @@ import type { MapLayer, ViewState } from './MapLayer';
 import { createStarPointsMaterial, pointScale } from './StarPointsMaterial';
 import { centralBlackHoleTexture } from '../stars/StarVisuals';
 import { fade, fadeIn } from './ZoomModel';
+import type { Sight, StarLens } from '../../core/visibility/Vision';
 
 const CHUNK = 64;
 const BUDGET_PER_FRAME = 6;
@@ -30,7 +31,14 @@ export function starDot(s: StarSystem): { color: string; size: number } {
 interface StarChunk {
   readonly points: THREE.Points;
   readonly stars: readonly StarSystem[];
+  /** The lens version its colours were last worked out for. */
+  sight: number;
 }
+
+/** An uncharted star (fog of war): grey and dim, a little smaller. */
+const UNCHARTED = new THREE.Color('#5d6a85');
+const UNCHARTED_DIM = 0.75;
+const UNCHARTED_SIZE = 0.75;
 
 /** Exact per-hex stars, generated lazily in chunks around the focus. */
 export class NearStarLayer implements MapLayer {
@@ -43,6 +51,11 @@ export class NearStarLayer implements MapLayer {
   private readonly maw: THREE.Sprite;
   /** Percent of a star's planets surveyed, or null before any are (shown after its name). */
   surveyed: ((star: StarSystem) => number | null) | null = null;
+  /**
+   * What the player sees (change admin-snapshots-and-fog): uncharted stars are grey, dim and
+   * unnamed, hidden ones are not drawn. Null: every star as charted. Call `refreshSight` when it changes.
+   */
+  lens: (() => StarLens) | null = null;
 
   constructor(private readonly galaxy: GalaxyModel) {
     this.cache = new ChunkCache<StarChunk>(900, (c) => c.points.geometry.dispose());
@@ -98,6 +111,7 @@ export class NearStarLayer implements MapLayer {
         this.cache.set(w.key, chunk);
       }
       keep.add(w.key);
+      this.colourFor(chunk);
       if (!this.active.has(w.key)) {
         this.active.set(w.key, chunk);
         this.object3d.add(chunk.points);
@@ -123,6 +137,41 @@ export class NearStarLayer implements MapLayer {
     this.maw.scale.setScalar(Math.min(Math.max(MAW_SIZE, MAW_MIN_PX * perPx), MAW_MAX_PX * perPx));
   }
 
+  /** What the player sees changed: recolour the stars (drawn chunks now, the rest when next drawn). */
+  refreshSight(): void {
+    for (const chunk of this.active.values()) this.colourFor(chunk);
+  }
+
+  private sightOf(s: StarSystem): Sight {
+    return this.lens?.().sight(s) ?? 'explored';
+  }
+
+  /** Colour and size each star of a chunk for how the player sees it (unchanged when already done). */
+  private colourFor(chunk: StarChunk): void {
+    const version = this.lens?.().version ?? 0;
+    if (chunk.sight === version) return;
+    chunk.sight = version;
+    const geo = chunk.points.geometry;
+    const col = geo.getAttribute('color') as THREE.BufferAttribute, size = geo.getAttribute('size') as THREE.BufferAttribute;
+    const c = new THREE.Color();
+    chunk.stars.forEach((s, i) => {
+      const dot = starDot(s);
+      const sight = this.sightOf(s);
+      // The central black hole has its own marker (see updateMaw): no dot.
+      c.set(kindOf(s) === 'smbh' ? '#000000' : dot.color);
+      let n = dot.size;
+      if (sight === 'fogged') {
+        c.lerp(UNCHARTED, 0.7).multiplyScalar(UNCHARTED_DIM);
+        n *= UNCHARTED_SIZE;
+      }
+      if (sight === 'hidden') n = 0;
+      col.setXYZ(i, c.r, c.g, c.b);
+      size.setX(i, n);
+    });
+    col.needsUpdate = true;
+    size.needsUpdate = true;
+  }
+
   /** Stars currently generated near the focus (for labels / UI lists). */
   activeStars(): StarSystem[] {
     return [...this.active.values()].flatMap((c) => c.stars);
@@ -134,7 +183,8 @@ export class NearStarLayer implements MapLayer {
     const near = show
       ? this.activeStars()
           .map((s) => ({ s, d: Math.hypot(s.position.x - view.focus.x, s.position.z - view.focus.z) }))
-          .filter((e) => e.d < maxD)
+          // Only charted stars are named (explored or sighted); the black hole always is.
+          .filter((e) => e.d < maxD && (kindOf(e.s) === 'smbh' || this.named(e.s)))
           .sort((a, b) => a.d - b.d)
           .slice(0, LABEL_COUNT)
       : [];
@@ -148,6 +198,11 @@ export class NearStarLayer implements MapLayer {
       const text = pct === null ? e.s.name : `${e.s.name} · ${pct}%`;
       if (label.element.textContent !== text) label.element.textContent = text;
     });
+  }
+
+  private named(s: StarSystem): boolean {
+    const sight = this.sightOf(s);
+    return sight === 'explored' || sight === 'sighted';
   }
 
   private buildChunk(cq: number, cr: number): StarChunk {
@@ -177,7 +232,7 @@ export class NearStarLayer implements MapLayer {
     geo.computeBoundingSphere();
     const points = new THREE.Points(geo, this.material);
     points.renderOrder = -5;
-    return { points, stars };
+    return { points, stars, sight: -1 };
   }
 
   dispose(): void {

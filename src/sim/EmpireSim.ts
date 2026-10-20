@@ -461,7 +461,9 @@ export class EmpireSim {
 
   /** A system's asteroid fields; your home system also has its own belt of metals and gases. */
   asteroidsAt = (star: StarSystem): AsteroidField[] =>
-    [...(star.id === this.state.home.id ? homeBelt(star) : []), ...fieldsOf(star, this.deps.galaxy.params.seed)];
+    // The system as it really is: a view may pass a megastructure system masked as an ordinary star
+    // (change admin-snapshots-and-fog), and its builders left it no rock.
+    [...(star.id === this.state.home.id ? homeBelt(star) : []), ...fieldsOf(this.deps.galaxy.starAt(star.hex) ?? star, this.deps.galaxy.params.seed)];
 
   /** Each field of a system with what it holds now and the years until it is full again. */
   /** Units a year one mining ship of a class takes from a field of its resource. */

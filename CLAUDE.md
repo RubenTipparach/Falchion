@@ -30,7 +30,12 @@ with a notice until `FLY_API_TOKEN` is set and the `falchion` app exists (see
 `DISCORD_WEBHOOK_URL` or `DISCORD_BOT_TOKEN` + `DISCORD_CHANNEL_ID` (channel notifications) (CI stages them onto Fly; see `docs/discord.md`). Everything the
 server keeps (empires, settings, shared world, chat, activity, the event log of player actions and NPC
 decisions) is in one SQLite database, `falchion.db` (`node:sqlite`, `server/db.mjs`), on the
-`falchion_data` Fly volume (one machine).
+`falchion_data` Fly volume (one machine). Once an hour every empire is snapshotted into its
+`snapshots` table (`server/snapshots.mjs`; the summary's fields are documented in `docs/snapshots.md`,
+keep it in step with `src/sim/snapshot.ts`); the admin portal exports them by time range, resets the
+server to each empire's founding (`server/reset.mjs`) and toggles hide-systems. What a player can see
+(explored, sighted, allies' vision, megastructures found) is `src/core/visibility/Vision.ts`: views
+read the galaxy through the player's `StarLens`, never the rules.
 Pattern mirrors RubenTipparach/high-frontier-fan-game.
 
 ## Workflow

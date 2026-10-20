@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GalaxyModel, kindOf } from './GalaxyModel';
 import { GalaxyScan, type ScanContext, type SearchHit, type SearchQuery } from './GalaxySearch';
 import { planetsOf, type Planet } from './Planets';
+import { lensOf, visionSets } from '../visibility/Vision';
 
 const galaxy = new GalaxyModel();
 const origin = galaxy.nearestStar({ q: 8000, r: 3000 }, 200)!.hex;
@@ -78,5 +79,23 @@ describe('galaxy search (change galaxy-search)', () => {
     while (!scan.done) hits.push(...scan.step());
     const all = galaxy.megastructures().filter((m) => m.type === 'ringworld' || m.type === 'penrose-sphere');
     expect(hits.length).toBe(all.length);
+  });
+
+  it('lists only the megastructures the player has found, and skips stars hidden from them (change admin-snapshots-and-fog)', () => {
+    const query: SearchQuery = { what: 'planets', biomes: ['ringworld', 'penrose-sphere'] };
+    const sites = galaxy.megastructures().filter((m) => m.type === 'ringworld' || m.type === 'penrose-sphere');
+    const found = galaxy.starAt(sites[3].hex)!;
+    const lens = lensOf(visionSets([{ explored: [found.id], sighted: [] }]), false);
+    const scan = new GalaxyScan(galaxy, origin, query, { ...ctx, see: lens.see }, 50);
+    const hits: SearchHit[] = [];
+    while (!scan.done) hits.push(...scan.step());
+    expect(hits.map((h) => h.star.id)).toEqual([found.id]);
+    // With systems hidden, a star search meets only what the player sees.
+    const near = run({ what: 'stars' }, 3);
+    const hidden = lensOf(visionSets([{ explored: [near[1].star.id], sighted: [] }]), true);
+    const only = new GalaxyScan(galaxy, origin, { what: 'stars' }, { ...ctx, see: hidden.see }, 10, 100);
+    const out: SearchHit[] = [];
+    while (!only.done) out.push(...only.step());
+    expect(out.map((h) => h.star.id)).toEqual([near[1].star.id]);
   });
 });

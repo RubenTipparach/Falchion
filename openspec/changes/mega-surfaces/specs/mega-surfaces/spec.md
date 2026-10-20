@@ -1,7 +1,14 @@
 ## ADDED Requirements
 
 ### Requirement: Megastructures can be landed on
-The ringworld, the Dyson sphere, the Alderson disk, the Dyson swarm and the topopolis SHALL each be zoomed into from the system view without a break. For the ring, the sphere and the disc the zoom SHALL be one camera in one world: the system view's camera, carried into the structure's own frame at true scale, SHALL become the close-up's camera and come down over the very land the system view drew, with no crossfade between two views. The two habitats (swarm and topopolis), a few km across, SHALL dissolve from the system view into their insides. No black screen SHALL come between. Land and Escape SHALL glide the zoom down or up the same way.
+The ringworld, the Dyson sphere, the Alderson disk, the Dyson swarm and the topopolis SHALL each be zoomed into from the system view without a break, and no black screen SHALL come between. The two habitats (swarm and topopolis), a few km across, SHALL dissolve from the system view into their insides. Land and Escape SHALL glide the zoom down or up the same way.
+
+#### Scenario: Landing on a habitat
+- **WHEN** the player zooms in on a Dyson swarm habitat from its system
+- **THEN** the system view dissolves into the habitat's inside, with no black screen
+
+### Requirement: One camera from the system view to the ground
+For the ring, the sphere and the disc the zoom SHALL be one camera in one world: the system view's camera, carried into the structure's own frame at true scale, SHALL become the close-up's camera and come down over the very land the system view drew, with no crossfade between two views.
 
 #### Scenario: Landing on a ringworld
 - **WHEN** the player zooms in on a ringworld from its system
@@ -45,7 +52,14 @@ The land SHALL have seas, plains, forests and mountains, from the structure's se
 - **THEN** streets show in the ground and towers rise from them, windows lit at night under a shadow square
 
 ### Requirement: The close-up looks right over its whole height
-The ring, sphere and disc close-ups SHALL reach 3,000 km up, where they hand over to the system view. Coasts SHALL be worked per pixel near the shore, so they are curves that stay put as the view moves, not the mesh's polygons. The land SHALL be one land at every distance: the ground, its far view and the system view's drawing of the ringworld's inner face, the Dyson sphere's inside and the Alderson disk SHALL all draw it from the same noise (broad scales of oceans and super-continents, then continents and coasts), each scale fading in as it grows to a few pixels, and a pixel wider than a coast drawn as the share of land and sea under it. Night SHALL be a dusk in which the land can be made out, never black.
+The ring, sphere and disc close-ups SHALL reach 3,000 km up, where they hand over to the system view. Coasts SHALL be worked per pixel near the shore, so they are curves that stay put as the view moves, not the mesh's polygons. Night SHALL be a dusk in which the land can be made out, never black.
+
+#### Scenario: Night on a ring
+- **WHEN** a shadow square passes over the camera on a ringworld
+- **THEN** the land can still be made out in a blue dusk, with city lights
+
+### Requirement: One land at every distance
+The ground, its far view and the system view's drawing of the ringworld's inner face, the Dyson sphere's inside and the Alderson disk SHALL all draw the land from the same noise: broad scales of oceans and super-continents, then continents and coasts. Each scale SHALL fade in as it grows to a few pixels, and a pixel wider than a coast SHALL be drawn as the share of land and sea under it.
 
 #### Scenario: Zooming out from a ringworld city
 - **WHEN** the player zooms out from a city on a ringworld

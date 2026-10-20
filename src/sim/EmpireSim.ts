@@ -41,7 +41,7 @@ import { DISCOVERY_RANGE, gridNpcsNear, HOME_TERRITORY, initialNpcState, nearNpc
 import { stepNpcs, type RaidTargets } from '../core/npc/NpcSim';
 import type { NpcRaid, NpcState } from '../core/npc/types';
 import { marketFactor, STANDING, standingOf, tierOf } from '../core/npc/Reputation';
-import { due, enqueue, Job } from '../core/construction/Construction';
+import { cancelJob, due, enqueue, Job, moveJob } from '../core/construction/Construction';
 import { addressOf, formatAddress } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel, StarSystem } from '../core/galaxy/GalaxyModel';
 import { planetsOf, Planet, withBiome } from '../core/galaxy/Planets';
@@ -971,6 +971,27 @@ export class EmpireSim {
     this.deps.store.update({ empire: { ...s.empire, materials: pay(s.empire.materials, c.cost, discount) }, construction });
     this.noteFlow(s.empire.materials, `Built a ${c.name}`);
     this.dispatch(`${c.name} laid down at ${yard.name}${chartered ? ' for a new company' : ''}: ready in ${formatDuration(job.doneTurn - s.turn, CLOCK)}`);
+  }
+
+  /** Take a ship off a yard's queue: those after it move up, and the part not yet built is refunded. */
+  cancelJob(jobId: string): void {
+    const s = this.state;
+    const job = s.construction.find((j) => j.id === jobId && j.kind === 'ship');
+    const c = job && this.classById.get(job.item);
+    const r = job && cancelJob(s.construction, jobId, s.turn);
+    if (!job || !c || !r) return;
+    const discount = Math.min(40, this.bonus('build'));
+    const materials = { ...s.empire.materials };
+    for (const [res, n] of Object.entries(c.cost)) materials[res as Resource] += Math.floor(Math.ceil(n! * (1 - discount / 100)) * (1 - r.built));
+    this.deps.store.update({ construction: r.queue, empire: { ...s.empire, materials } });
+    this.noteFlow(s.empire.materials, `Cancelled a ${c.name}`);
+  }
+
+  /** Move a waiting ship one place earlier (up) or later in its yard's queue. */
+  moveJob(jobId: string, up: boolean): void {
+    const s = this.state;
+    const queue = s.construction.some((j) => j.id === jobId && j.kind === 'ship') ? moveJob(s.construction, jobId, up, s.turn) : null;
+    if (queue) this.deps.store.update({ construction: queue });
   }
 
   /** A finished hull joins the home dock, or a group in the yard's system. */

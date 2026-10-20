@@ -229,10 +229,16 @@ export class ShipyardPanel extends Drawer {
     const jobs = this.game.jobs(this.yard).filter((j) => j.kind === 'ship');
     if (!jobs.length) return '';
     const name = (id: string) => SHIP_CLASSES.find((x) => x.id === id)?.name ?? id;
+    const order = [...jobs].sort((a, b) => a.startTurn - b.startTurn || a.id.localeCompare(b.id));
+    const waiting = (j: { startTurn: number }) => j.startTurn > s.turn;
     return h('div', { class: 'queue' }, h('span', { class: 'eyebrow' }, 'Yard queue'),
-      ...jobs.map((j) => h('div', { class: 'queue-row' }, h('span', {}, name(j.item)),
+      ...order.map((j, i) => h('div', { class: 'queue-row' }, h('span', {}, name(j.item)),
         h('span', { class: 'track' }, h('i', { style: `width:${jobProgress(j, s.turn) * 100}%` })),
-        h('span', { class: 'mono small' }, j.startTurn > s.turn ? `queued · ${formatDuration(j.doneTurn - s.turn, CLOCK)}` : formatDuration(j.doneTurn - s.turn, CLOCK)))));
+        h('span', { class: 'mono small' }, waiting(j) ? `queued · ${formatDuration(j.doneTurn - s.turn, CLOCK)}` : formatDuration(j.doneTurn - s.turn, CLOCK)),
+        h('span', { class: 'queue-tools' },
+          h('button', { class: 'icon-btn', title: 'Build sooner', 'aria-label': `Move ${name(j.item)} up`, disabled: !waiting(j) || i === 0 || !waiting(order[i - 1]), onclick: () => this.actions.moveJob(j.id, true) }, '↑'),
+          h('button', { class: 'icon-btn', title: 'Build later', 'aria-label': `Move ${name(j.item)} down`, disabled: !waiting(j) || i === order.length - 1, onclick: () => this.actions.moveJob(j.id, false) }, '↓'),
+          h('button', { class: 'icon-btn', title: waiting(j) ? 'Cancel: refunded in full' : 'Cancel: what is not yet built is refunded', 'aria-label': `Cancel ${name(j.item)}`, onclick: () => this.actions.cancelJob(j.id) }, icon('close'))))));
   }
 
   /** Ships are built at a colony with an Orbital Shipyard and start in that system. */

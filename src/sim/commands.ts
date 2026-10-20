@@ -146,6 +146,8 @@ export const COMMANDS = {
   selectClass: [id],
   setDesign: [design],
   buildShip: [id, optional(id), optional(bool)],
+  cancelJob: [string(160)],
+  moveJob: [string(160), bool],
   settle: [planet],
   embark: [id],
   buyResource: [exchange, resource, count],

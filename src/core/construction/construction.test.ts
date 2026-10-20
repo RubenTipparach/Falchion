@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { due, enqueue, jobProgress } from './Construction';
+import { cancelJob, due, enqueue, jobProgress, moveJob } from './Construction';
 
 describe('construction queues', () => {
   it('builds one item at a time per site', () => {
@@ -28,5 +28,33 @@ describe('construction queues', () => {
     const [j] = enqueue([], { kind: 'ship', item: 'a', site: 'x' }, 4, 0);
     expect(jobProgress(j, 2)).toBe(0.5);
     expect(jobProgress(j, 9)).toBe(1);
+  });
+
+  const three = () => {
+    let q = enqueue([], { kind: 'ship', item: 'a', site: 'y' }, 3, 10);
+    q = enqueue(q, { kind: 'ship', item: 'b', site: 'y' }, 2, 10);
+    q = enqueue(q, { kind: 'ship', item: 'c', site: 'y' }, 4, 10);
+    return enqueue(q, { kind: 'ship', item: 'z', site: 'other' }, 5, 10);
+  };
+  const at = (q: ReturnType<typeof three>) => q.filter((j) => j.site === 'y').sort((a, b) => a.startTurn - b.startTurn).map((j) => [j.item, j.startTurn, j.doneTurn]);
+
+  it('cancelling a job moves the ones after it up; another site is untouched', () => {
+    const q = three();
+    const r = cancelJob(q, q[1].id, 11)!;
+    expect(at(r.queue)).toEqual([['a', 10, 13], ['c', 13, 17]]);
+    expect(r.queue.find((j) => j.site === 'other')).toEqual(q[3]);
+    expect(r.built).toBe(0);
+    // The one under way: what it had built, for the refund.
+    expect(cancelJob(q, q[0].id, 11)!.built).toBeCloseTo(1 / 3);
+    expect(at(cancelJob(q, q[0].id, 11)!.queue)).toEqual([['b', 11, 13], ['c', 13, 17]]);
+  });
+
+  it('a waiting job moves earlier or later; the one under way stays first', () => {
+    const q = three();
+    expect(at(moveJob(q, q[2].id, true, 11)!)).toEqual([['a', 10, 13], ['c', 13, 17], ['b', 17, 19]]);
+    expect(at(moveJob(q, q[1].id, false, 11)!)).toEqual([['a', 10, 13], ['c', 13, 17], ['b', 17, 19]]);
+    expect(moveJob(q, q[1].id, true, 11)).toBeNull();
+    expect(moveJob(q, q[0].id, false, 11)).toBeNull();
+    expect(moveJob(q, q[2].id, false, 11)).toBeNull();
   });
 });

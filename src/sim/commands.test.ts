@@ -72,6 +72,22 @@ describe('player commands run on the server exactly as in the browser', () => {
     expect(target).toBeTruthy();
   });
 
+  it('a yard queue can be cancelled (refunded) and reordered, the same on the server', () => {
+    const c = client(fresh());
+    c.store.update((s) => ({ empire: { ...s.empire, materials: { ...s.empire.materials, credits: 5000, metals: 5000, crystals: 5000, gases: 5000 } } }));
+    for (let i = 0; i < 3; i++) c.sim.buildShip('prospector');
+    const state = c.store.state;
+    const queued = state.construction.filter((j) => j.kind === 'ship');
+    expect(queued.length).toBe(3);
+    const moved = both('moveJob', [queued[2].id, true], state);
+    const order = (moved.save.construction as typeof queued).filter((j) => j.kind === 'ship').sort((a, b) => a.startTurn - b.startTurn).map((j) => j.id);
+    expect(order).toEqual([queued[0].id, queued[2].id, queued[1].id]);
+    const credits = state.empire.materials.credits;
+    const cancelled = both('cancelJob', [queued[1].id], state);
+    expect((cancelled.save.construction as typeof queued).length).toBe(state.construction.length - 1);
+    expect((cancelled.save.empire as typeof state.empire).materials.credits).toBeGreaterThan(credits);
+  });
+
   it('refuses unknown commands, unknown places and malformed arguments', () => {
     const save = snap(fresh());
     for (const bad of [

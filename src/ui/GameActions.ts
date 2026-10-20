@@ -268,6 +268,10 @@ export interface GameActions {
   /** Build a ship at a shipyard colony (default: the capital). */
   /** `charter`: a freighter, mining ship or ark founds a company when launched (change commerce). */
   buildShip(classId: string, yardPlanetId?: string, charter?: boolean): void;
+  /** Take a ship off its yard's queue; the part not yet built is refunded. */
+  cancelJob(jobId: string): void;
+  /** Move a waiting ship one place earlier (up) or later in its yard's queue. */
+  moveJob(jobId: string, up: boolean): void;
   /** Load colonists onto a fleet's empty arks from your colony there; returns how many boarded. */
   embark(fleetId: string): number;
   buyResource(exchangeId: string, r: Resource, amount: number): void;

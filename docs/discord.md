@@ -84,7 +84,16 @@ starting system, so friends start within an hour or two of each other at base sp
 
 **https://falchion.fly.dev/admin**: server overview, every player (year, colonies,
 fleets, last save) with a **Reset empire** button, and an **announcement** banner shown
-to all players.
+to all players. Also:
+
+- **Galaxy visibility**: hide unexplored systems (players then see only what they, or
+  their allies, have explored or sighted) or show every system again.
+- **Snapshots**: every empire is recorded once an hour; export a time range (optionally
+  one empire) as JSON Lines, with the event log of the same range merged in. Every field
+  is described in [`docs/snapshots.md`](snapshots.md).
+- **Server reset**: every empire back to its founding (players keep their empire's name,
+  flag and home and do not found it again), the shared world fresh. Type `RESET` to
+  confirm; snapshots and the event log are kept.
 
 Access uses the same secret as High Frontier: add a GitHub secret **`ADMIN_DISCORD_ID`**
 holding your Discord user id. For several admins, separate ids with commas

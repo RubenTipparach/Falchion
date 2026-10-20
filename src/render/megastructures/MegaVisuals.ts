@@ -12,6 +12,8 @@ export interface MegaVisual {
   readonly object3d: THREE.Group;
   /** How far out the structure reaches (ly): for picking, the label and framing. */
   readonly extent: number;
+  /** A point on the land people live on (it turns with the structure): where a zoom into it heads. */
+  readonly anchor: THREE.Object3D | null;
   /** Animate: `time` in seconds. (Lighting follows the group: its origin is the star.) */
   update(time: number): void;
   dispose(): void;
@@ -99,6 +101,25 @@ function hullMaterial(o: HullOptions & { light: THREE.Color; seed: number }): TH
         vec2 u = f * f * (3.0 - 2.0 * f);
         return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0)), u.x), u.y);
       }
+      float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7)) + uSeed) * 43758.5453); }
+      float vnoise3(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        vec3 u = f * f * (3.0 - 2.0 * f);
+        float a = mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), u.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), u.x), u.y);
+        float b = mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), u.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), u.x), u.y);
+        return mix(a, b, u.z);
+      }
+      /** Land seen from afar at p (a few units across a continent): seas, coasts, plains, forest, hills and ice, in 3D so nothing streaks. */
+      vec3 landTint(vec3 p) {
+        float n = vnoise3(p) * 0.5 + vnoise3(p * 2.03 + 7.0) * 0.25 + vnoise3(p * 4.1 + 13.0) * 0.15 + vnoise3(p * 8.3 + 21.0) * 0.1;
+        float wet = vnoise3(p * 1.3 + 40.0);
+        vec3 sea = mix(vec3(0.03, 0.12, 0.3), vec3(0.08, 0.3, 0.42), smoothstep(0.3, 0.47, n));
+        vec3 grass = mix(vec3(0.42, 0.42, 0.24), vec3(0.24, 0.42, 0.16), smoothstep(0.35, 0.6, wet));
+        vec3 land = mix(grass, vec3(0.1, 0.24, 0.1), smoothstep(0.55, 0.75, wet) * 0.8);
+        land = mix(land, vec3(0.48, 0.44, 0.38), smoothstep(0.66, 0.8, n));
+        land = mix(land, vec3(0.86, 0.88, 0.92), smoothstep(0.8, 0.88, n));
+        return n < 0.48 ? sea : mix(vec3(0.62, 0.58, 0.44), land, smoothstep(0.48, 0.5, n));
+      }
       void main() {
         vec3 N = normalize(vN);
         if (!gl_FrontFacing) N = -N;
@@ -168,6 +189,13 @@ class Kit {
   spin(o: THREE.Object3D, rate: number, axis = new THREE.Vector3(0, 1, 0)): void {
     this.spinners.push({ o, axis, rate });
   }
+  private anchor: THREE.Object3D | null = null;
+  /** Mark the land at `at` in `parent`'s frame (see MegaVisual.anchor). */
+  anchorAt(parent: THREE.Object3D, at: THREE.Vector3): void {
+    this.anchor = new THREE.Object3D();
+    this.anchor.position.copy(at);
+    parent.add(this.anchor);
+  }
   finish(extent: number): MegaVisual {
     const q = new THREE.Quaternion();
     for (const s of this.spinners) s.base = s.o.quaternion.clone();
@@ -181,6 +209,7 @@ class Kit {
     return {
       object3d: this.group,
       extent,
+      anchor: this.anchor,
       update: (time) => {
         for (const m of this.hulls) m.uniforms.uTime.value = time;
         for (const m of this.glows) m.uniforms.uTime.value = time;
@@ -213,11 +242,8 @@ const ringworld: Builder = (k) => {
       if (!gl_FrontFacing) {
         // The inner face: seas, plains and mountains, banded across the width, lit from inside.
         float a = atan(vObj.z, vObj.x);
-        vec2 q = vec2(a * 60.0, vUv.y * 6.0);
-        float n = vnoise(q) * 0.6 + vnoise(q * 3.1) * 0.3 + vnoise(q * 9.0) * 0.1;
-        vec3 sea = vec3(0.08, 0.22, 0.42), plain = vec3(0.3, 0.5, 0.24), hill = vec3(0.55, 0.5, 0.38);
-        base = n < 0.45 ? sea : mix(plain, hill, smoothstep(0.55, 0.85, n));
-        base = mix(base, vec3(0.9), smoothstep(0.82, 0.95, vnoise(q * 0.7 + 30.0)) * 0.5);
+        base = landTint(vec3(cos(a) * 9.5, (vUv.y - 0.5) * 2.0, sin(a) * 9.5));
+        base = mix(base, vec3(0.9), smoothstep(0.82, 0.95, vnoise(vec2(a * 40.0, vUv.y * 4.0) + 30.0)) * 0.35);
         float edge = smoothstep(0.0, 0.06, vUv.y) * smoothstep(1.0, 0.94, vUv.y);
         base = mix(vec3(0.35, 0.33, 0.3), base, edge);
       } else {
@@ -227,6 +253,7 @@ const ringworld: Builder = (k) => {
     `,
   });
   k.add(new THREE.Mesh(new THREE.CylinderGeometry(R, R, w, 512, 1, true), land), tilt);
+  k.anchorAt(tilt, new THREE.Vector3(R * 0.995, 0, 0));
   // Rim walls, reaching in from each edge.
   const wall = k.hull({ front: '#5a5d66', side: THREE.DoubleSide });
   for (const y of [-w / 2, w / 2]) {
@@ -311,12 +338,15 @@ const dysonSphere: Builder = (k) => {
   geo.computeVertexNormals();
   const mat = k.hull({ front: '#3a3c44', back: '#7a5430', side: THREE.DoubleSide, radial: true, shape: [600 / R, 0],
     pattern: /* glsl */ `
-      // Waste heat: a dull red glow over the shell, brighter in bands; its inner face blazes.
+      // Waste heat outside: a dull red glow over the shell, brighter in bands. Inside, the land
+      // its people live on, in the star's light.
       float band = 0.5 + 0.5 * sin(vObj.y * uShape.x + uTime * 0.3);
-      emit = outer ? vec3(0.16, 0.03, 0.01) * (0.6 + 0.4 * band) : uBack * 0.3;
+      if (outer) emit = vec3(0.16, 0.03, 0.01) * (0.6 + 0.4 * band);
+      else { base = landTint(normalize(vObj) * 6.0); emit = base * 0.35; }
     ` });
   const shell = k.add(new THREE.Mesh(geo, mat));
   k.spin(shell, 0.01);
+  k.anchorAt(shell, new THREE.Vector3(R * 0.98, 0, 0));
   return k.finish(R * 1.02);
 };
 
@@ -368,14 +398,10 @@ const aldersonDisk: Builder = (k) => {
   const mat = k.hull({ front: '#3a6a3a', back: '#3a3a40', side: THREE.DoubleSide, shape: [inner, outer],
     pattern: /* glsl */ `
       float r = length(vObj.xy);
-      float a = atan(vObj.y, vObj.x);
-      vec2 q = vec2(a * 40.0, r * 160.0);
-      float n = vnoise(q) * 0.6 + vnoise(q * 3.0) * 0.3 + vnoise(q * 8.0) * 0.1;
       // Scorched and molten near the star, temperate further out, frozen at the rim.
       float t = smoothstep(uShape.x, uShape.y, r);
-      vec3 hot = vec3(0.45, 0.2, 0.1), mild = n < 0.45 ? vec3(0.1, 0.25, 0.45) : vec3(0.32, 0.48, 0.24), cold = vec3(0.8, 0.85, 0.9);
+      vec3 hot = vec3(0.45, 0.2, 0.1), mild = landTint(vec3(vObj.xy / uShape.y * 14.0, 0.5)), cold = vec3(0.8, 0.85, 0.9);
       base = t < 0.12 ? mix(hot, mild, smoothstep(0.04, 0.12, t)) : mix(mild, cold, smoothstep(0.6, 0.95, t));
-      base *= 0.85 + 0.15 * step(0.5, fract(r * 120.0));
       // The star's light grazes it: day all over, brightest near the star.
       emit = base * (1.1 - 0.8 * t);
       base *= 0.0;
@@ -383,6 +409,7 @@ const aldersonDisk: Builder = (k) => {
   const disc = k.add(new THREE.Mesh(new THREE.RingGeometry(inner, outer, 256, 12), mat));
   disc.rotation.x = -Math.PI / 2 + 0.3;
   disc.rotation.y = 0.2;
+  k.anchorAt(disc, new THREE.Vector3(inner + (outer - inner) * 0.3, 0, 0));
   // Its rim, a wall thousands of km high.
   const rim = k.add(new THREE.Mesh(new THREE.CylinderGeometry(outer, outer, outer * 0.012, 256, 1, true), k.hull({ front: '#4a4a52', side: THREE.DoubleSide })), disc);
   rim.rotation.x = Math.PI / 2;

@@ -111,7 +111,8 @@ varying float vH;
 varying vec3 vN;
 varying vec3 vPos;
 varying float vSlope;
-varying float vSpacing;
+varying float vLand;
+varying float vOct;
 void main() {
   vec2 g = position.xz;
   vec2 site = uLevelCentre + g * uSpacing;
@@ -129,7 +130,8 @@ void main() {
   float edge = uOuter > 0.5 ? 1.0 - smoothstep(0.8, 1.0, max(abs(g.x), abs(g.y)) / ${HALF}.0) : 1.0;
   vec3 n0 = normalize(vec3((h - hx) * edge, e, (h - hz) * edge));
   vSlope = 1.0 - n0.y;
-  vSpacing = e;
+  vLand = groundNoise(site, oct) - uSea;
+  vOct = oct;
   vH = h;
   vSite = site;
   vN = bendDir(rel, n0);
@@ -149,7 +151,8 @@ varying float vH;
 varying vec3 vN;
 varying vec3 vPos;
 varying float vSlope;
-varying float vSpacing;
+varying float vLand;
+varying float vOct;
 float hash12(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 float lineW(float g, float halfW, float fw) { float d = abs(g - floor(g + 0.5)); return 1.0 - smoothstep(halfW - fw, halfW + fw, d); }
 void main() {
@@ -166,11 +169,13 @@ void main() {
   }
   // A pixel's size on the land (taken here, before any loop).
   float fw = length(fwidth(vSite));
-  // Below the mesh: the shore wanders between the vertices instead of running straight, and the
-  // ground takes a texture at every height.
-  vec2 dl = vSite - uDetailOrigin;
-  float wander = (snoise(vec3(dl / (vSpacing * 2.6), 1.0)) * 0.65 + snoise(vec3(dl / (vSpacing * 1.1), 2.0)) * 0.35) * min(vSpacing * 0.18, uRelief * 0.03);
-  float h = vH + wander;
+  // Near the shore, the octaves of the land finer than the mesh carries are worked per pixel, so
+  // the coast is the land's own curve (not the mesh's polygons) and stays put as the view moves.
+  float h = vH;
+  if (abs(vLand) < 0.1 && uHabitat < 0.5) {
+    float lp = groundNoise(vSite, max(clamp(log2(uFeature / max(fw * 3.0, 1e-6)), 1.0, 12.0), vOct)) - uSea;
+    h += (lp - vLand) * uRelief * (lp < 0.0 ? 0.8 : 0.6);
+  }
   vec2 gd = groundDetail(vSite, fw);
   vec3 col = landColour(vSite, h, vSlope, fw);
 #ifdef HABITAT

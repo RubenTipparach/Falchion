@@ -36,22 +36,24 @@ export interface MegaSurfaceStatus {
   readonly altitudeKm: number;
 }
 
-/** Zoom altitude (ly) past which the close-up gives way to the system view. */
-const LEAVE_ZOOM = 0.1;
+/**
+ * The map's zoom altitude (ly) at the close-up's top: below it the close-up fills the screen; over
+ * HAND_BAND times it the system view does; between, one dissolves into the other as you scroll.
+ */
+const HAND_ALT = 0.05;
+const HAND_BAND = 2.2;
 /** Tilt (from straight down) past which the camera stops circling the focus and just looks up. */
 const ORBIT_PITCH = 1.33;
 /** The ground detail's coarsest octave (MEGA_GROUND_GLSL groundDetail), km: its origin snaps to it. */
 const DETAIL_TILE = 0.004 * 4 ** 5;
-/** Fades, seconds. */
-const FADE_OUT = 0.35, FADE_IN = 0.7;
 
-/** Per structure: how high the close-up reaches, where a landing starts and ends, and which way it looks. */
-const TRIP: Readonly<Record<MegaSurfaceType, { maxKm: number; minKm: number; startKm: number; landKm: number; yaw: number }>> = {
-  ringworld: { maxKm: 4e5, minKm: 0.004, startKm: 9000, landKm: 2.4, yaw: 0 },
-  'dyson-sphere': { maxKm: 6e5, minKm: 0.004, startKm: 9000, landKm: 2.8, yaw: 0.6 },
-  'alderson-disk': { maxKm: 3e5, minKm: 0.004, startKm: 8000, landKm: 1.6, yaw: Math.PI },
-  'dyson-swarm': { maxKm: 3.4, minKm: 0.004, startKm: 3, landKm: 0.3, yaw: Math.PI / 2 },
-  topopolis: { maxKm: 36, minKm: 0.004, startKm: 30, landKm: 1.4, yaw: Math.PI / 2 },
+/** Per structure: how high the close-up reaches (at HAND_ALT), how low, where Land takes you, which way it looks. */
+const TRIP: Readonly<Record<MegaSurfaceType, { maxKm: number; minKm: number; landKm: number; yaw: number }>> = {
+  ringworld: { maxKm: 3000, minKm: 0.004, landKm: 2.4, yaw: 0 },
+  'dyson-sphere': { maxKm: 3000, minKm: 0.004, landKm: 2.8, yaw: 0.6 },
+  'alderson-disk': { maxKm: 3000, minKm: 0.004, landKm: 1.6, yaw: Math.PI },
+  'dyson-swarm': { maxKm: 3.4, minKm: 0.004, landKm: 0.3, yaw: Math.PI / 2 },
+  topopolis: { maxKm: 36, minKm: 0.004, landKm: 1.4, yaw: Math.PI / 2 },
 };
 
 interface Built {
@@ -64,27 +66,27 @@ interface Built {
   readonly towers: MegaTowers;
   readonly trees: MegaTrees;
   readonly habitat: MegaHabitat | null;
+  /** Its shaders compiled (in the background, as the structure is chosen). */
+  ready: boolean;
 }
 
 /**
- * Landing on a megastructure (change mega-surfaces): a close-up of its own, separate from the
- * planet close-up because none of these is a sphere seen from outside. Land fades the map out
- * and the structure's ground in, then glides down; zooming out past the top (or leave) fades back.
- * While it is engaged the map's zoom drives its altitude (exponentially, as everywhere), drags pan
- * and turn its camera, and the map is not drawn.
+ * A megastructure's ground (change mega-surfaces): a close-up of its own, separate from the planet
+ * close-up because none of these is a sphere seen from outside. With a structure chosen, the map's
+ * zoom runs on past the system view: from HAND_ALT × HAND_BAND down to HAND_ALT the system view
+ * dissolves into the structure's ground seen from its top altitude, and on down to the ground;
+ * scrolling out dissolves back. Land and leave just glide the zoom. While the close-up fills the
+ * screen, drags pan and turn its camera and the map is not drawn.
  */
 export class MegaSurfaceLayer implements MapLayer {
   readonly object3d = new THREE.Group();
   private target: MegaSurfaceTarget | null = null;
   private built: Built | null = null;
-  private state: 'off' | 'enter' | 'on' | 'exit' = 'off';
-  /** Black over the screen: 0 clear, 1 black. */
-  private black = 0;
+  /** How much of the screen is the close-up: 0 the system view, 1 the ground. */
+  private mix = 0;
   private time = 0;
   private lastTime = 0;
   private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.001, 1000);
-  /** The map's renderer (from overlay): compiles the close-up's shaders as a landing starts. */
-  private renderer: THREE.WebGLRenderer | null = null;
   private focus: [number, number] = [0, 0];
   private yaw = 0;
   private pitchOffset = 0;
@@ -93,21 +95,24 @@ export class MegaSurfaceLayer implements MapLayer {
   private fly: { from: [number, number]; to: [number, number]; t: number } | null = null;
   private citiesKey = '';
   private cities: MegaCity[] = [];
+  /** The close-up drawn off screen while it dissolves in, and the quad that lays it over the map. */
+  private blendTarget: THREE.WebGLRenderTarget | null = null;
   private readonly overlayScene = new THREE.Scene();
   private readonly overlayCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  private readonly blackMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, depthTest: false, depthWrite: false });
+  private readonly blendMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthTest: false, depthWrite: false, toneMapped: false });
   private readonly capture: InputCapture;
   /** Hold the clock (seconds) for screenshots and tests; null runs it. */
   timeOverride: number | null = null;
 
   constructor(private readonly host: MegaSurfaceHost) {
-    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blackMat);
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blendMat);
     quad.frustumCulled = false;
     this.overlayScene.add(quad);
     this.capture = {
       drag: (dx, dy, turn) => {
         this.fly = null;
         if (turn) {
+          // Right-drag circles the point looked at and tilts the view, as on the map.
           this.yaw += dx * 0.005;
           this.pitchOffset = THREE.MathUtils.clamp(this.pitchOffset - dy * 0.004, -1.2, 1.2);
           return;
@@ -121,61 +126,54 @@ export class MegaSurfaceLayer implements MapLayer {
   }
 
   get status(): MegaSurfaceStatus {
-    return { active: this.state !== 'off', engaged: this.state === 'on' || this.state === 'exit', altitudeKm: this.altKm };
+    return { active: this.mix > 0, engaged: this.mix >= 1, altitudeKm: this.altKm };
   }
 
-  /** The megastructure in view (null: none). Landing waits for land(). */
+  /** The megastructure chosen (null: none): its ground is built and compiled now, so a zoom can go on down to it. */
   setTarget(target: MegaSurfaceTarget | null): void {
     if (target?.id === this.target?.id) return;
-    if (this.state !== 'off') this.finishLeaving();
+    this.release();
     this.target = target;
     this.disposeBuilt();
+    if (!target) return;
+    const trip = TRIP[target.type];
+    this.kmPerZoom = trip.maxKm / HAND_ALT;
+    this.focus = [0, 0];
+    this.yaw = trip.yaw;
+    this.pitchOffset = 0;
+    this.fly = null;
+    this.ensureBuilt(target);
   }
 
-  /** Fade from the system view to the structure's ground and glide down. */
+  /** Glide down through the dissolve to the ground. */
   land(): void {
-    if (!this.target || this.state === 'enter' || this.state === 'on') return;
-    this.state = 'enter';
-    // Build now and compile in the background while the map fades out (nothing waits on it).
-    this.ensureBuilt(this.target);
-    try { this.renderer?.compileAsync(this.built!.scene, this.camera).catch(() => undefined); } catch { /* compiled on first draw instead */ }
+    if (!this.target) return;
+    this.host.input.cancelFlight();
+    this.host.zoom.setTargetAltitude(TRIP[this.target.type].landKm / this.kmPerZoom);
   }
 
-  /** Fade back to the system view. */
+  /** Glide back up to the system view. */
   leave(): void {
-    if (this.state === 'on' || this.state === 'enter') this.state = 'exit';
+    if (this.mix > 0) this.host.zoom.setTargetAltitude(HAND_ALT * HAND_BAND * 2);
   }
 
   covers(): boolean {
-    return (this.state === 'on' || this.state === 'exit') && !!this.built;
+    return this.mix >= 1 && !!this.built?.ready;
   }
 
   update(view: ViewState): void {
     const dt = Math.min(0.1, Math.max(0, view.time - this.lastTime));
     this.lastTime = view.time;
     this.time = this.timeOverride ?? view.time;
+    const b = this.built;
     const zoom = this.host.zoom;
-    switch (this.state) {
-      case 'off':
-        this.black = Math.max(0, this.black - dt / FADE_IN);
-        return;
-      case 'enter':
-        this.black = Math.min(1, this.black + dt / FADE_OUT);
-        if (this.black >= 1) this.arrive();
-        return;
-      case 'exit':
-        this.black = Math.min(1, this.black + dt / FADE_OUT);
-        if (this.black >= 1) this.finishLeaving();
-        break;
-      case 'on':
-        this.black = Math.max(0, this.black - dt / FADE_IN);
-        if (zoom.targetAltitude > LEAVE_ZOOM) { this.state = 'exit'; zoom.setTargetAltitude(LEAVE_ZOOM); }
-        break;
-    }
-    // (finishLeaving may have just turned it off.)
-    if ((this.state as string) === 'off' || !this.built) return;
-    this.host.input.capture = this.state === 'on' ? this.capture : null;
-    const trip = TRIP[this.built.def.type];
+    if (!this.target || !b) { this.mix = 0; return; }
+    const trip = TRIP[b.def.type];
+    // The zoom goes on below the system view once the ground is ready to show.
+    zoom.setFloor(b.ready ? trip.minKm / this.kmPerZoom : null);
+    this.mix = b.ready ? 1 - smoothstep(HAND_ALT, HAND_ALT * HAND_BAND, zoom.altitude) : 0;
+    this.host.input.capture = this.mix >= 1 ? this.capture : this.host.input.capture === this.capture ? null : this.host.input.capture;
+    if (this.mix <= 0) return;
     this.altKm = THREE.MathUtils.clamp(zoom.altitude * this.kmPerZoom, trip.minKm, trip.maxKm);
     if (this.fly) {
       this.fly.t = Math.min(1, this.fly.t + dt / 0.9);
@@ -186,62 +184,57 @@ export class MegaSurfaceLayer implements MapLayer {
   }
 
   overlay(renderer: THREE.WebGLRenderer, _labels: CSS2DRenderer, mapCamera: THREE.PerspectiveCamera): void {
-    this.renderer = renderer;
     const b = this.built;
-    if (b && (this.state === 'on' || this.state === 'exit')) this.draw(renderer, b, mapCamera);
-    if (this.black > 0.001) {
-      this.blackMat.opacity = this.black;
-      const autoClear = renderer.autoClear;
-      renderer.autoClear = false;
-      renderer.render(this.overlayScene, this.overlayCam);
-      renderer.autoClear = autoClear;
+    if (b && !b.ready && b.key !== this.compiling) {
+      this.compiling = b.key;
+      const done = () => { if (this.built === b) b.ready = true; };
+      try { renderer.compileAsync(b.scene, this.camera).then(done, done); } catch { done(); }
     }
+    if (!b || this.mix <= 0) return;
+    if (this.mix >= 1) return this.draw(renderer, b, mapCamera, null);
+    // Dissolving: the ground drawn off screen, laid over the system view.
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    if (!this.blendTarget || this.blendTarget.width !== size.x || this.blendTarget.height !== size.y) {
+      this.blendTarget?.dispose();
+      this.blendTarget = new THREE.WebGLRenderTarget(size.x, size.y, { depthBuffer: true });
+      this.blendTarget.texture.colorSpace = renderer.outputColorSpace;
+    }
+    this.draw(renderer, b, mapCamera, this.blendTarget);
+    this.blendMat.map = this.blendTarget.texture;
+    this.blendMat.opacity = this.mix;
+    const autoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.render(this.overlayScene, this.overlayCam);
+    renderer.autoClear = autoClear;
   }
 
   dispose(): void {
-    this.finishLeaving();
+    this.release();
     this.disposeBuilt();
-    this.blackMat.dispose();
+    this.blendTarget?.dispose();
+    this.blendMat.dispose();
   }
 
   // ── Trips ─────────────────────────────────────────────────────────
 
-  /** The screen is black: build the ground, hand the zoom over and start the glide down. */
-  private arrive(): void {
-    const t = this.target;
-    if (!t) { this.state = 'off'; return; }
-    this.ensureBuilt(t);
-    const trip = TRIP[t.type];
-    this.kmPerZoom = trip.maxKm / LEAVE_ZOOM;
-    const zoom = this.host.zoom;
-    this.host.input.cancelFlight();
-    zoom.setFloor(trip.minKm / this.kmPerZoom);
-    zoom.setAltitude(trip.startKm / this.kmPerZoom);
-    zoom.setTargetAltitude(trip.landKm / this.kmPerZoom);
-    this.altKm = trip.startKm;
-    this.focus = [0, 0];
-    this.yaw = trip.yaw;
-    this.pitchOffset = 0;
-    this.fly = null;
-    this.state = 'on';
-  }
+  private compiling = '';
 
   private ensureBuilt(t: MegaSurfaceTarget): void {
     const key = `${t.id}:${t.type}`;
     if (this.built?.key !== key) { this.disposeBuilt(); this.built = this.create(t, key); }
   }
 
-  private finishLeaving(): void {
-    const zoom = this.host.zoom;
-    if (this.state === 'on' || this.state === 'exit' || this.state === 'enter') {
-      zoom.setFloor(null);
-      if (this.state !== 'enter') {
-        zoom.setAltitude(LEAVE_ZOOM * 1.2);
-        zoom.setTargetAltitude(LEAVE_ZOOM * 3);
+  /** Hand the zoom and the input back to the map. */
+  private release(): void {
+    if (this.target) {
+      this.host.zoom.setFloor(null);
+      if (this.mix > 0) {
+        this.host.zoom.setAltitude(HAND_ALT * HAND_BAND * 1.2);
+        this.host.zoom.setTargetAltitude(HAND_ALT * HAND_BAND * 2);
       }
     }
     if (this.host.input.capture === this.capture) this.host.input.capture = null;
-    this.state = 'off';
+    this.mix = 0;
   }
 
   private moveFocus(dx: number, dz: number): void {
@@ -290,7 +283,7 @@ export class MegaSurfaceLayer implements MapLayer {
     return THREE.MathUtils.clamp(base + this.pitchOffset, 0.02, Math.PI - 0.35);
   }
 
-  private draw(renderer: THREE.WebGLRenderer, b: Built, mapCamera: THREE.PerspectiveCamera): void {
+  private draw(renderer: THREE.WebGLRenderer, b: Built, mapCamera: THREE.PerspectiveCamera, into: THREE.WebGLRenderTarget | null): void {
     const def = b.def, u = b.uniforms;
     this.refreshCities(b);
     // The camera, in the focus frame (km): back from the focus point along the view, up by the altitude.
@@ -345,10 +338,13 @@ export class MegaSurfaceLayer implements MapLayer {
     b.habitat?.update(this.focus, b.uniforms.uDay.value as number);
 
     const autoClear = renderer.autoClear;
+    const before = renderer.getRenderTarget();
+    renderer.setRenderTarget(into);
     renderer.autoClear = false;
     renderer.clear(true, true, true);
     renderer.render(b.scene, this.camera);
     renderer.autoClear = autoClear;
+    renderer.setRenderTarget(before);
   }
 
   /** Where the star is and how much daylight the focus has (and the sky's uniforms for both). */
@@ -373,7 +369,7 @@ export class MegaSurfaceLayer implements MapLayer {
       su.uStarRad.value = 0.024;
     } else if (def.type === 'alderson-disk') {
       // The star bobs through the hole: it rises and sets over the disc.
-      const bob = Math.sin((2 * Math.PI * t) / 160) * 0.13 + 0.02;
+      const bob = Math.sin((2 * Math.PI * t) / 160) * 0.13 + 0.06;
       su.uStarPos.value.set(-1, bob, 0);
       su.uStarRad.value = 0.006;
       sun.set(-1, bob, 0).normalize();
@@ -426,12 +422,13 @@ export class MegaSurfaceLayer implements MapLayer {
     scene.add(sky.mesh, terrain.group, towers.mesh, trees.group);
     if (habitat) scene.add(habitat.group);
     this.citiesKey = '';
-    return { key, def, uniforms, scene, sky, terrain, towers, trees, habitat };
+    return { key, def, uniforms, scene, sky, terrain, towers, trees, habitat, ready: false };
   }
 
   private disposeBuilt(): void {
     const b = this.built;
     if (!b) return;
+    this.compiling = '';
     b.sky.dispose();
     b.terrain.dispose();
     b.towers.dispose();

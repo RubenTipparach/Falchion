@@ -1,15 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: Megastructures can be landed on
-The ringworld, the Dyson sphere, the Alderson disk, the Dyson swarm and the topopolis SHALL each offer a Land action. Landing SHALL fade from the system view to the structure's ground and glide down. Zooming out past the top of the close-up, or Escape, SHALL fade back to the system view framed on the structure.
+The ringworld, the Dyson sphere, the Alderson disk, the Dyson swarm and the topopolis SHALL each be zoomed into from the system view without a break: zooming in on a chosen structure SHALL slide onto its land and dissolve into its ground seen from the close-up's top, and on down to the ground; zooming out SHALL dissolve back. No black screen SHALL come between. Land and Escape SHALL glide the zoom down or up the same way.
 
 #### Scenario: Landing on a ringworld
 - **WHEN** the player presses Land on a ringworld's card
-- **THEN** the view fades to the ring's inner face and comes down over its land, with the Arch rising overhead
+- **THEN** the view slides onto the ring's land and dissolves into its ground, then comes down over it, with the Arch rising overhead
 
 #### Scenario: Leaving
 - **WHEN** the player zooms out past the close-up's top, or presses Escape
-- **THEN** the view fades back to the system view, framed on the structure
+- **THEN** the ground dissolves back into the system view, framed on the structure
 
 ### Requirement: Each structure's ground is its own shape
 The ground SHALL follow the structure's shape:
@@ -43,3 +43,10 @@ The land SHALL have seas, plains, forests and mountains, from the structure's se
 #### Scenario: Coming down over a ringworld city
 - **WHEN** the camera descends over a city on the ring
 - **THEN** streets show in the ground and towers rise from them, windows lit at night under a shadow square
+
+### Requirement: The close-up looks right over its whole height
+The ring, sphere and disc close-ups SHALL reach 3,000 km up, where they hand over to the system view. Coasts SHALL be worked per pixel near the shore, so they are curves that stay put as the view moves, not the mesh's polygons. In the system view, the ringworld's inner face, the Dyson sphere's inside and the Alderson disk SHALL show land (seas, coasts, plains, forest, hills and ice) drawn without streaks. Night SHALL be a dusk in which the land can be made out, never black.
+
+#### Scenario: Zooming out from a ringworld city
+- **WHEN** the player zooms out from a city on a ringworld
+- **THEN** the coasts stay where they are and smooth all the way up, and the ground dissolves into the ring in the system view

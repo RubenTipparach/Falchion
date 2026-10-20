@@ -16,3 +16,5 @@
 - [x] 4.2 Far land blurred to its average once its features are smaller than a pixel (the shell's far side)
 - [x] 4.3 The swarm habitat after Star Crew Bridge Simulator's O'Neill cylinder: its painted land stripe with rivers and lakes, close-up detail, dome machinery on the end caps, mirrors that open by day, cloud puffs from its cloud map, the light down the axis (textures in public/textures/oneill)
 - [x] 4.4 The topopolis: an endless tube habitat, its land repeating along the tube with towns and cities, clouds, the tube's other loops through the windows, haze down its length
+- [x] 4.5 Scroll-driven dissolve between the system view and the ground (no fade); the system view slides onto the land; tops at 3,000 km
+- [x] 4.6 Coasts per pixel near the shore; system-view land in 3D noise on the ring, the sphere's inside and the disc; dusk nights

@@ -8,6 +8,7 @@ import type { AsteroidField } from '../../core/galaxy/Asteroids';
 import { GalaxyModel, StarSystem } from '../../core/galaxy/GalaxyModel';
 import { planetsOf, Planet } from '../../core/galaxy/Planets';
 import { worldToHex } from '../../core/hex/Hex';
+import { smoothstep } from '../../core/surface/Noise';
 import { Rng, hashSeed } from '../../core/rng/Rng';
 import type { SettlementInput } from '../../core/surface/SurfaceLayout';
 import { createPlanetMaterial, createRingMaterial, setPlanetLights } from '../planets/PlanetMaterial';
@@ -125,6 +126,8 @@ export class SystemLayer implements MapLayer {
   private fieldsDirty = false;
   private readonly starWorld = new THREE.Vector3();
   private lastTime = 0;
+  /** The map's zoom altitude this frame. */
+  private altitude = 1;
   private origin = { x: 0, z: 0 };
 
   constructor(private readonly galaxy: GalaxyModel, private readonly events: SystemEvents) {
@@ -211,8 +214,15 @@ export class SystemLayer implements MapLayer {
 
   /** Absolute galaxy position of a planet (for the camera to follow). */
   planetPosition(planetId: string): THREE.Vector3 | null {
-    // A megastructure is centred on its star.
-    if (this.current?.mega?.planet.id === planetId) return this.current.root.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(this.origin.x, 0, this.origin.z));
+    // A megastructure is centred on its star; zoomed in, the view slides onto its land, where a
+    // zoom on down dissolves into its ground (MegaSurfaceLayer).
+    const mega = this.current?.mega;
+    if (mega?.planet.id === planetId) {
+      const p = this.current!.root.getWorldPosition(new THREE.Vector3());
+      const toLand = 1 - smoothstep(0.12, 0.4, this.altitude);
+      if (mega.visual.anchor && toLand > 0) p.lerp(mega.visual.anchor.getWorldPosition(new THREE.Vector3()), toLand);
+      return p.add(new THREE.Vector3(this.origin.x, 0, this.origin.z));
+    }
     const p = this.current?.planets.find((x) => x.planet.id === planetId);
     if (!p) return null;
     return p.mesh.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(this.origin.x, 0, this.origin.z));
@@ -236,6 +246,7 @@ export class SystemLayer implements MapLayer {
 
   update(view: ViewState): void {
     this.origin = view.origin;
+    this.altitude = view.altitude;
     const visible = view.visibleWidth < SYSTEM_VIEW_WIDTH;
     this.object3d.visible = visible;
     if (!visible) return;

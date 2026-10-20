@@ -150,9 +150,11 @@ void main() {
   // Lit from the mirrors' side: brighter on top, a soft dark belly (Star Crew's E_PUFF).
   float k = dot(normalize(vN), vUp);
   vec3 white = mix(vec3(1.0), uSunCol, 0.25);
-  vec3 col = white * (uDay * (0.42 + 0.5 * smoothstep(-0.7, 0.9, k) + 0.08 * (1.0 - abs(k))) * vLump + 0.03);
+  // At night the axis light catches them from below, so they are pale shapes, not holes in the land.
+  vec3 night = vec3(0.34, 0.33, 0.36) * (0.7 + 0.3 * smoothstep(0.9, -0.7, k));
+  vec3 col = white * (uDay * (0.42 + 0.5 * smoothstep(-0.7, 0.9, k) + 0.08 * (1.0 - abs(k))) * vLump + 0.03) + night * vLump * (1.0 - uDay);
   float dist = length(vW - cameraPosition);
-  col = mix(col, uSunCol * 0.55 * uDay + vec3(0.01, 0.012, 0.02), smoothstep(3.0, 30.0, dist) * 0.55);
+  col = mix(col, uSunCol * 0.55 * uDay + vec3(0.08, 0.09, 0.12) * (1.0 - uDay) + vec3(0.01, 0.012, 0.02), smoothstep(3.0, 30.0, dist) * 0.55);
   gl_FragColor = vec4(col, 1.0);
 }`;
 

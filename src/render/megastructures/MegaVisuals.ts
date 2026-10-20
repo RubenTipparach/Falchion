@@ -4,6 +4,7 @@ import { Rng, hashSeed } from '../../core/rng/Rng';
 import { hasMegaSurface, isTube, megaGround, type MegaGroundDef } from '../../core/mega/MegaGround';
 import { MEGA_GROUND_GLSL } from './surface/megaGround.glsl';
 import { DISK_UNIT_KM } from './surface/MegaSky';
+import { SHELL_DETAIL, SHELL_SHRINK, shellCell, shellKept } from './sphereShell';
 
 /**
  * Megastructures in the system view (change megastructures): one builder per type, each a group
@@ -98,6 +99,8 @@ function hullMaterial(o: HullOptions & { light: THREE.Color; seed: number }): TH
         uFeature: { value: o.land.def.featureKm },
         uSea: { value: o.land.def.sea },
         uBroad: { value: o.land.def.broad },
+        uShape: { value: o.land.def.radiusKm > 0 ? (o.land.def.type === 'dyson-sphere' ? 2 : 1) : 0 },
+        uRadius: { value: o.land.def.radiusKm || 1 },
         uRelief: { value: o.land.def.reliefKm },
         uKmPer: { value: o.land.kmPer },
       } : {}),
@@ -330,16 +333,16 @@ const dysonSwarm: Builder = (k) => {
 /** A closed shell of plates, a few missing so the star shows through; it glows in the infrared. */
 const dysonSphere: Builder = (k) => {
   const R = Math.max(0.07, k.o.clearance * 3);
-  const src = new THREE.IcosahedronGeometry(R, 14);
+  const src = new THREE.IcosahedronGeometry(R, SHELL_DETAIL);
   const pos = src.getAttribute('position');
   const keep: number[] = [];
   const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), centre = new THREE.Vector3();
   for (let i = 0; i < pos.count; i += 3) {
-    // Every face rolls, kept or not, so the gaps stay where they are.
-    if (k.rng.chance(0.03)) continue;
     a.fromBufferAttribute(pos, i); b.fromBufferAttribute(pos, i + 1); c.fromBufferAttribute(pos, i + 2);
     centre.copy(a).add(b).add(c).divideScalar(3);
-    for (const v of [a, b, c]) { v.lerp(centre, 0.07); keep.push(v.x, v.y, v.z); }
+    // The few plates missing are the close-up's too (sphereShell: by the plate, not by order).
+    if (!shellKept(shellCell(centre.clone().normalize()), k.o.seed)) continue;
+    for (const v of [a, b, c]) { v.lerp(centre, SHELL_SHRINK); keep.push(v.x, v.y, v.z); }
   }
   src.dispose();
   const geo = new THREE.BufferGeometry();

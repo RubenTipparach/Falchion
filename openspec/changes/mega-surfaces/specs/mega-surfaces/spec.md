@@ -64,3 +64,38 @@ The ground, its far view and the system view's drawing of the ringworld's inner 
 #### Scenario: Zooming out from a ringworld city
 - **WHEN** the player zooms out from a city on a ringworld
 - **THEN** the coasts stay where they are and smooth all the way up, the continents they belong to come into view, and the ring in the system view shows those same continents
+
+### Requirement: The land has climates and relief
+The ring, sphere and disc SHALL have climates at scales larger than a continent: desert belts, steppe, grassland, forest, rainforest, tundra, taiga, ice sheets and sea ice, with trees only where the climate grows them. Their land SHALL have broad scales up to the structure's own size, and rugged country SHALL have ridged hills tens of km across, so the ground close up has slopes a low sun picks out.
+
+#### Scenario: Looking across an Alderson disk
+- **WHEN** the player looks over the disk from the system view, then comes down to its ground
+- **THEN** deserts, forests, ice and seas tell its regions apart from far off, and near the ground hills and valleys stand out in the low sun
+
+### Requirement: The land is seamless on its shape
+The land's noise SHALL be read at the land's 3D point on its shape, so a sphere's land has no pinch at its far pole and a ring's meets itself.
+
+#### Scenario: The far side of a Dyson sphere
+- **WHEN** the player looks across a Dyson sphere's inside at the point opposite its landing site
+- **THEN** the land there is like the land anywhere else, with no lines converging on a point
+
+### Requirement: A Dyson sphere's plates are the same up close
+The close-up SHALL draw the Dyson sphere's shell from outside with the system view's own plates: the same lattice, starlight through the seams, and the same few plates missing, through which the land on the far inside (and the star) shows. From inside, a missing plate SHALL be a hole to space.
+
+#### Scenario: Flying in to a Dyson sphere
+- **WHEN** the player zooms from the system view toward a Dyson sphere
+- **THEN** its hull fills the view as a lattice of dark plates with glowing seams and a few gaps, matching the system view's
+
+### Requirement: The star is drawn wherever it is in front
+The close-up sky SHALL draw the star, with a corona sized to the star, wherever nothing nearer stands in front of it: in an empty sky, and over land beyond it (the disc's far side through its hole, the ring's arch, the shell's far side).
+
+#### Scenario: Looking into an Alderson disk's hole
+- **WHEN** the player, flying in, looks toward the hole at the disk's centre
+- **THEN** the star blazes in the hole as it does in the system view
+
+### Requirement: A clock says when day comes
+On a megastructure's ground with days and nights, the HUD SHALL say whether it is day or night where the camera stands and how long until that turns. Right-drag SHALL circle the ground at the middle of the screen; looking out past the ground the camera can circle, it SHALL turn where it stands.
+
+#### Scenario: Waiting for day in a habitat
+- **WHEN** the player is on a swarm habitat's land at night
+- **THEN** the HUD reads "Night here · daylight in" and the minutes and seconds until the mirrors open

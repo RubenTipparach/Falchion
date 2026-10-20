@@ -55,7 +55,7 @@ void main() {
   if (h < 0.004 || e > 1.05) { gl_FragColor = none; return; }
   // What grows here, by the land's climate (as its colour has it): forest where it is wet (thick in
   // groves), shrubs and stones on dry plains, bare desert and ice, boulders up among the rocks.
-  vec3 q = vec3(wrapSite(site) / uFeature + uOffset.xy, uOffset.z);
+  vec3 q = landQ(site);
   vec2 cl = climate(site, 0.0);
   float wet = cl.x;
   if (cl.y > 0.65 || wet < -1.0) { gl_FragColor = none; return; }

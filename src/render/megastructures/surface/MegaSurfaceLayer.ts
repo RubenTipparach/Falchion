@@ -576,7 +576,7 @@ export class MegaSurfaceLayer implements MapLayer {
     const def = megaGround(t.type, t.seed);
     const uniforms = landUniforms(def);
     const scene = new THREE.Scene();
-    const sky = new MegaSky(def, uniforms);
+    const sky = new MegaSky(def, uniforms, t.seed);
     const terrain = new MegaTerrain(uniforms, this.host.lite ? 12 : 15);
     const towers = new MegaTowers(uniforms, this.host.lite);
     const trees = new MegaTrees(uniforms, this.host.lite);

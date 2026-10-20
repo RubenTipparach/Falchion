@@ -121,21 +121,40 @@ export const BROAD_OCTAVES: ReadonlyArray<readonly [scale: number, amp: number]>
 ];
 
 /**
+ * Where a site lies in 3D (km): along and across the land (about the site itself near the landing
+ * site), and how far the shape has curved away from the landing site's plane: round a ring's (or a
+ * habitat's) axis, or inside a sphere. The land's noise is read there (the GLSL landPoint, the
+ * same), so on a sphere it is one seamless field and round a ring it meets itself.
+ */
+export function landPoint(def: MegaGroundDef, x: number, z: number): [number, number, number] {
+  const R = def.radiusKm;
+  if (!(R > 0)) return [x, z, 0];
+  if (def.type !== 'dyson-sphere') {
+    const t = x / R, s = Math.sin(t / 2);
+    return [R * Math.sin(t), z, 2 * R * s * s];
+  }
+  const d = Math.hypot(x, z);
+  if (d < 1e-9) return [0, 0, 0];
+  const t = d / R, s = Math.sin(t / 2), k = (R * Math.sin(t)) / d;
+  return [x * k, z * k, 2 * R * s * s];
+}
+
+/**
  * The land's noise in about [-1, 1] at (x, z) km: the broad scales, then `oct` octaves. An octave
  * k octaves above the feature size (a broad scale 4^n across is octave -2n) has weight oct + k, in
  * [0, 1], so an oct below 0 leaves out the broad scales a far-off pixel cannot show.
  */
 export function groundNoise(def: MegaGroundDef, x: number, z: number, oct: number): number {
-  x = wrapX(def, x);
+  const [lx, lz, ly] = landPoint(def, wrapX(def, x), z);
   let v = 0;
   BROAD_OCTAVES.forEach(([scale, amp], i) => {
     if (i < def.broad) {
       const f = def.featureKm * scale;
       const w = Math.min(Math.max(oct + Math.log2(scale), 0), 1);
-      if (w > 0) v += w * amp * snoise(x / f + def.offset[0] * 0.37 + 11 + i * 7, z / f + def.offset[1] * 0.37 + 23 - i * 5, def.offset[2] + 50 + i * 4);
+      if (w > 0) v += w * amp * snoise(lx / f + def.offset[0] * 0.37 + 11 + i * 7, lz / f + def.offset[1] * 0.37 + 23 - i * 5, def.offset[2] + 50 + i * 4 + ly / f);
     }
   });
-  let px = x / def.featureKm + def.offset[0], py = z / def.featureKm + def.offset[1], pz = def.offset[2];
+  let px = lx / def.featureKm + def.offset[0], py = lz / def.featureKm + def.offset[1], pz = def.offset[2] + ly / def.featureKm;
   let a = 0.5;
   for (let i = 0; i < 14; i++) {
     const w = Math.min(Math.max(oct - i, 0), 1);
@@ -149,8 +168,8 @@ export function groundNoise(def: MegaGroundDef, x: number, z: number, oct: numbe
 
 /** Mountain chains: ridged noise, sharp crests (0..1). */
 export function ridges(def: MegaGroundDef, x: number, z: number): number {
-  x = wrapX(def, x);
-  let px = (x / def.featureKm) * 2.6 + def.offset[0] + 31, py = (z / def.featureKm) * 2.6 + def.offset[1] + 17, pz = def.offset[2] + 5;
+  const [lx, lz, ly] = landPoint(def, wrapX(def, x), z);
+  let px = (lx / def.featureKm) * 2.6 + def.offset[0] + 31, py = (lz / def.featureKm) * 2.6 + def.offset[1] + 17, pz = def.offset[2] + 5 + (ly / def.featureKm) * 2.6;
   let v = 0, a = 0.5;
   for (let i = 0; i < 4; i++) {
     const r = 1 - Math.abs(snoise(px, py, pz));
@@ -198,10 +217,10 @@ export function rawHeight(def: MegaGroundDef, x: number, z: number, oct: number)
  * plains elsewhere), so the land close up has slopes to light rather than a table top's.
  */
 export function hills(def: MegaGroundDef, x: number, z: number): number {
-  x = wrapX(def, x);
-  const rugged = smoothstep(-0.65, 0.25, snoise(x / (def.featureKm * 2.5) + def.offset[0] + 19, z / (def.featureKm * 2.5) + def.offset[1] + 41, def.offset[2] + 23));
+  const [lx, lz, ly] = landPoint(def, wrapX(def, x), z);
+  const rugged = smoothstep(-0.65, 0.25, snoise(lx / (def.featureKm * 2.5) + def.offset[0] + 19, lz / (def.featureKm * 2.5) + def.offset[1] + 41, def.offset[2] + 23 + ly / (def.featureKm * 2.5)));
   if (rugged <= 0) return 0;
-  let px = (x / def.featureKm) * 30 + def.offset[0] + 7, py = (z / def.featureKm) * 30 + def.offset[1] + 3, pz = def.offset[2] + 11;
+  let px = (lx / def.featureKm) * 30 + def.offset[0] + 7, py = (lz / def.featureKm) * 30 + def.offset[1] + 3, pz = def.offset[2] + 11 + (ly / def.featureKm) * 30;
   let v = 0, a = 0.55;
   for (let i = 0; i < 3; i++) {
     const r = 1 - Math.abs(snoise(px, py, pz));

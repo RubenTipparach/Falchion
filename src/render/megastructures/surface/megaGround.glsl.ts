@@ -25,12 +25,39 @@ uniform float uFeature;
 uniform float uSea;
 /** How many broad octaves the land has (MegaGroundDef.broad). */
 uniform float uBroad;
+/** The land's shape: 0 flat, 1 round a cylinder (the land rises along x), 2 inside a sphere; its radius, km. */
+uniform float uShape;
+uniform float uRadius;
+/** sin(t) / t, exact for the tiny angles round a structure millions of km across (a GPU's sin() is not). */
+float sinc(float t) {
+  if (abs(t) > 0.02) return sin(t) / t;
+  float t2 = t * t;
+  return 1.0 - t2 / 6.0 + t2 * t2 / 120.0;
+}
+/**
+ * Where a site lies in 3D (km): along and across the land (about the site itself near the landing
+ * site), and how far the shape has curved away from the landing site's plane. The land's noise is
+ * read there (MegaGround.landPoint, the same), so on a sphere it is one seamless field (no pinch at
+ * the far pole) and round a ring it meets itself (no seam where its ends meet).
+ */
+vec3 landPoint(vec2 site) {
+  if (uShape < 0.5) return vec3(site, 0.0);
+  if (uShape < 1.5) {
+    float t = site.x / uRadius, sh = sinc(t * 0.5);
+    return vec3(site.x * sinc(t), site.y, site.x * t * 0.5 * sh * sh);
+  }
+  float d = length(site);
+  if (d < 1e-9) return vec3(0.0);
+  float t = d / uRadius, sh = sinc(t * 0.5);
+  return vec3(site * sinc(t), d * t * 0.5 * sh * sh);
+}
 float landNoise(vec2 site, float oct) {
   float v = 0.0;
+  vec3 L = landPoint(site);
   {
-${BROAD_OCTAVES.map(([sc, amp], i) => `    if (uBroad > ${i}.5) v += clamp(oct + ${Math.log2(sc).toFixed(1)}, 0.0, 1.0) * ${amp.toFixed(3)} * snoise(vec3(site / (uFeature * ${sc.toFixed(1)}) + uOffset.xy * 0.37 + vec2(${(11 + i * 7).toFixed(1)}, ${(23 - i * 5).toFixed(1)}), uOffset.z + ${(50 + i * 4).toFixed(1)}));`).join('\n')}
+${BROAD_OCTAVES.map(([sc, amp], i) => `    if (uBroad > ${i}.5) v += clamp(oct + ${Math.log2(sc).toFixed(1)}, 0.0, 1.0) * ${amp.toFixed(3)} * snoise(vec3(L.xy / (uFeature * ${sc.toFixed(1)}) + uOffset.xy * 0.37 + vec2(${(11 + i * 7).toFixed(1)}, ${(23 - i * 5).toFixed(1)}), uOffset.z + ${(50 + i * 4).toFixed(1)} + L.z / (uFeature * ${sc.toFixed(1)})));`).join('\n')}
   }
-  vec3 p = vec3(site / uFeature + uOffset.xy, uOffset.z);
+  vec3 p = vec3(L.xy / uFeature + uOffset.xy, uOffset.z + L.z / uFeature);
   float a = 0.5;
   for (int i = 0; i < 14; i++) {
     float w = clamp(oct - float(i), 0.0, 1.0);
@@ -49,8 +76,6 @@ uniform float uRelief;
 uniform vec4 uCityA[${MAX_MEGA_CITIES}];
 uniform float uCityLevel[${MAX_MEGA_CITIES}];
 uniform int uCityN;
-uniform float uShape;
-uniform float uRadius;
 uniform float uTime;
 uniform float uHalfWidth;
 uniform float uHabitat;
@@ -63,8 +88,8 @@ vec2 wrapSite(vec2 s) {
 }
 float groundNoise(vec2 site, float oct) { return landNoise(wrapSite(site), oct); }
 float ridges(vec2 site) {
-  site = wrapSite(site);
-  vec3 p = vec3(site / uFeature * 2.6 + uOffset.xy + vec2(31.0, 17.0), uOffset.z + 5.0);
+  vec3 L = landPoint(wrapSite(site));
+  vec3 p = vec3(L.xy / uFeature * 2.6 + uOffset.xy + vec2(31.0, 17.0), uOffset.z + 5.0 + L.z / uFeature * 2.6);
   float v = 0.0, a = 0.5;
   for (int i = 0; i < 4; i++) {
     float r = 1.0 - abs(snoise(p));
@@ -75,10 +100,10 @@ float ridges(vec2 site) {
   return v;
 }
 float hills(vec2 site) {
-  site = wrapSite(site);
-  float rugged = smoothstep(-0.65, 0.25, snoise(vec3(site / (uFeature * 2.5) + uOffset.xy + vec2(19.0, 41.0), uOffset.z + 23.0)));
+  vec3 L = landPoint(wrapSite(site));
+  float rugged = smoothstep(-0.65, 0.25, snoise(vec3(L.xy / (uFeature * 2.5) + uOffset.xy + vec2(19.0, 41.0), uOffset.z + 23.0 + L.z / (uFeature * 2.5))));
   if (rugged <= 0.0) return 0.0;
-  vec3 p = vec3(site / uFeature * 30.0 + uOffset.xy + vec2(7.0, 3.0), uOffset.z + 11.0);
+  vec3 p = vec3(L.xy / uFeature * 30.0 + uOffset.xy + vec2(7.0, 3.0), uOffset.z + 11.0 + L.z / uFeature * 30.0);
   float v = 0.0, a = 0.55;
   for (int i = 0; i < 3; i++) {
     float r = 1.0 - abs(snoise(p));
@@ -115,12 +140,6 @@ uniform float uCamGround;
  */
 float camDist(vec2 rel) { return length(vec3(rel.x, uCamGround, rel.y) - uCam); }
 
-/** sin(t) / t, exact for the tiny angles round a structure millions of km across (a GPU's sin() is not). */
-float sinc(float t) {
-  if (abs(t) > 0.02) return sin(t) / t;
-  float t2 = t * t;
-  return 1.0 - t2 / 6.0 + t2 * t2 / 120.0;
-}
 /**
  * A point on the land (rel: km from the focus along the land; h: km up) in the camera's frame:
  * flat, round a cylinder's axis (a ring, a habitat: the land rises along x), or inside a sphere
@@ -164,8 +183,13 @@ float seen(float size, float fw) { return 1.0 - smoothstep(size * 0.15, size * 0
  * far off has deserts, ice sheets and jungles to tell apart. Each scale goes to its mean once a pixel
  * (fw km) is wider than it.
  */
+/** The land's own noise space at a site: its 3D point over the continent size, offset. */
+vec3 landQ(vec2 site) {
+  vec3 L = landPoint(wrapSite(site));
+  return vec3(L.xy / uFeature + uOffset.xy, uOffset.z + L.z / uFeature);
+}
 vec2 climate(vec2 site, float fw) {
-  vec3 q = vec3(wrapSite(site) / uFeature + uOffset.xy, uOffset.z);
+  vec3 q = landQ(site);
   float w0 = seen(uFeature, fw), w1 = seen(uFeature * 20.0, fw), w2 = seen(uFeature * 150.0, fw), w3 = seen(uFeature * 400.0, fw);
   float wet = w0 > 0.0 ? snoise(q * 0.8 + vec3(40.0, 11.0, 7.0)) * w0 : 0.0;
   float arid = (w1 > 0.0 ? snoise(q / 40.0 + vec3(7.0, 3.0, 1.0)) * 0.6 * w1 : 0.0) + (w2 > 0.0 ? snoise(q / 300.0 + vec3(2.0, 9.0, 4.0)) * 0.55 * w2 : 0.0);
@@ -190,7 +214,7 @@ vec3 biome(float w, float c, float lowland, float mott) {
 /** The land's colour: seas, deserts, steppe, grass, forest, rainforest, tundra, taiga, ice, rock and snow. */
 vec3 landColour(vec2 site, float h, float slope, float fw) {
   site = wrapSite(site);
-  vec3 q = vec3(site / uFeature + uOffset.xy, uOffset.z);
+  vec3 q = landQ(site);
   vec2 cl = climate(site, fw);
   // Mottling, each scale gone before it is smaller than a pixel (fw: a pixel's size, km).
   float m14 = 1.0 - smoothstep(uFeature / 14.0 * 0.1, uFeature / 14.0 * 0.4, fw);

@@ -20,3 +20,8 @@
 - [x] 4.6 Coasts per pixel near the shore; system-view land in 3D noise on the ring, the sphere's inside and the disc; dusk nights
 - [x] 4.7 One camera from the system view to the ground (ring, sphere, disc): the map camera carried into the structure's frame at true scale, the close-up's sky ray-casting the whole structure from out there, the near field only below twice its top
 - [x] 4.8 One land at every distance: broad octaves in groundNoise (core and GLSL), the far view and the system view's hulls drawing it from the same noise and site, scales fading in by pixel, land and sea blended by coverage
+- [x] 4.9 Climates (desert to ice) at large scales and trees by climate; broad octaves per structure (the disc to its own size); heights eased; ridged hills in rugged country; land noise at the land's 3D point (no sphere pinch, no ring seam)
+- [x] 4.10 Terrain levels without cracks; far terrain takes the far view's land (no horizon stripes)
+- [x] 4.11 The star drawn wherever it is in front, with a corona sized to it
+- [x] 4.12 Right-drag circles the ground at the screen's centre; the daylight clock; lighter nights
+- [x] 4.13 The Dyson sphere's plates shared by the system view and the close-up (sphereShell): lattice, seams, the same missing plates

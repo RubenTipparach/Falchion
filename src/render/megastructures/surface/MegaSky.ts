@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { isTube, type MegaGroundDef } from '../../../core/mega/MegaGround';
 import { MEGA_GROUND_GLSL } from './megaGround.glsl';
+import { SHELL_GLSL, SHELL_SHRINK, shellUniforms } from '../sphereShell';
 
 /**
  * Everything beyond the land drawn round the camera (change mega-surfaces), worked out per pixel:
@@ -33,6 +34,7 @@ void main() {
 
 const SKY_FRAG = /* glsl */ `
 ${MEGA_GROUND_GLSL}
+${SHELL_GLSL}
 uniform float uMode;
 uniform vec3 uFarCam;
 uniform float uUnit;
@@ -154,30 +156,47 @@ void main() {
       }
     }
   } else if (uMode < 1.5) {
-    // The Dyson sphere: its shell from inside (centre (0, 1, 0)); from outside, its glowing hull.
+    // The Dyson sphere (centre (0, 1, 0)): from outside its plates (sphereShell, the system view's
+    // own), dark, with starlight through the seams and the land inside through the missing few;
+    // from inside the land on its far side, space where a plate is missing.
+    vec3 C = vec3(0.0, 1.0, 0.0);
     float cS = dot(o, o) - 2.0 * o.y;
     float bS = 2.0 * (o.x * d.x + (o.y - 1.0) * d.y + o.z * d.z);
     float tl = rayRoot(1.0, bS, cS, true);
     float tn = cS > 0.0 ? rayRoot(1.0, bS, cS, false) : -1.0;
+    bool through = tn <= 0.0;
     if (tn > 0.0) {
-      t = tn;
-      vec3 pn = o + tn * d - vec3(0.0, 1.0, 0.0);
-      float band = 0.5 + 0.5 * sin(pn.y * 40.0);
-      vec3 cell = floor(pn * 60.0);
-      hitCol = vec3(0.09, 0.09, 0.11) * (0.75 + 0.25 * hash13(cell)) + vec3(0.16, 0.03, 0.01) * (0.6 + 0.4 * band);
-    } else if (tl > 0.0) {
-      t = tl;
-      float dist = tl * uUnit;
-      if (dist > uNearKm) {
-        vec3 p = o + tl * d;
-        vec3 dc = p - vec3(0.0, 1.0, 0.0);
-        float ang = 2.0 * asin(clamp(length(dc - vec3(0.0, -1.0, 0.0)) * 0.5, 0.0, 1.0));
-        vec2 u = length(dc.xz) > 1e-9 ? normalize(dc.xz) : vec2(1.0, 0.0);
-        vec2 site = uFocus + u * ang * uUnit;
-        hitCol = airOver(lightLand(farLand(site, dist, d, -normalize(dc)), site, 1.0, 1.0), d, dist);
-        // Looking up through the air, the far side is a pattern in the blue, not a ceiling.
-        if (d.y > 0.0) hitCol = mix(hitCol, col, 0.6 * exp(-max(uCamAlt, 0.0) / 30.0) * smoothstep(0.0, 0.3, d.y));
-      } else hitCol = col;
+      vec3 pn = o + tn * d - C;
+      float seam;
+      vec4 cell = shellCell(normalize(pn), seam);
+      if (shellKept(cell)) {
+        t = tn;
+        // A pixel's size in cell units (a cell is about 0.06 of the radius high), for the seams.
+        float fpc = max(tn * uPixelAngle / 0.061, 1e-5);
+        float w = ${(SHELL_SHRINK / 3).toFixed(4)};
+        float open = clamp((w - seam) / fpc + 0.5, 0.0, 1.0);
+        if (fpc > w) open = w / fpc;
+        float band = 0.5 + 0.5 * sin(pn.y * 40.0);
+        vec3 plate = vec3(0.085, 0.085, 0.1) * (0.7 + 0.3 * hash13(cell.xyz + cell.w * 7.0)) + vec3(0.16, 0.03, 0.01) * (0.6 + 0.4 * band);
+        hitCol = mix(plate, vec3(1.0, 0.62, 0.32) * 1.1, open);
+      } else through = true;
+    }
+    if (through && tl > 0.0) {
+      vec3 p = o + tl * d;
+      vec3 dc = p - C;
+      float seamF;
+      if (shellKept(shellCell(normalize(dc), seamF))) {
+        t = tl;
+        float dist = tl * uUnit;
+        if (dist > uNearKm || tn > 0.0) {
+          float ang = 2.0 * asin(clamp(length(dc - vec3(0.0, -1.0, 0.0)) * 0.5, 0.0, 1.0));
+          vec2 u = length(dc.xz) > 1e-9 ? normalize(dc.xz) : vec2(1.0, 0.0);
+          vec2 site = uFocus + u * ang * uUnit;
+          hitCol = airOver(lightLand(farLand(site, dist, d, -normalize(dc)), site, 1.0, 1.0), d, dist);
+          // Looking up through the air, the far side is a pattern in the blue, not a ceiling.
+          if (d.y > 0.0) hitCol = mix(hitCol, col, 0.6 * exp(-max(uCamAlt, 0.0) / 30.0) * smoothstep(0.0, 0.3, d.y));
+        } else hitCol = col;
+      }
     }
   } else if (uMode < 2.5) {
     // The Alderson disk: the plane y = 0 from its hole round the star out to its rim.
@@ -251,7 +270,8 @@ export class MegaSky {
   readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
   readonly unitKm: number;
 
-  constructor(readonly def: MegaGroundDef, uniforms: Record<string, THREE.IUniform>) {
+  /** `seed`: the structure's (as the system view builds it), for the Dyson sphere's missing plates. */
+  constructor(readonly def: MegaGroundDef, uniforms: Record<string, THREE.IUniform>, seed = 0) {
     this.unitKm = def.type === 'alderson-disk' ? DISK_UNIT_KM : isTube(def) ? 1 : def.radiusKm;
     const mat = new THREE.ShaderMaterial({
       vertexShader: SKY_VERT, fragmentShader: SKY_FRAG, side: THREE.BackSide, depthWrite: false, depthTest: false,
@@ -261,6 +281,7 @@ export class MegaSky {
         uRingZ: { value: 0 }, uHalfW: { value: def.widthKm / 2 / this.unitKm }, uWall: { value: 6000 / this.unitKm },
         uSquarePhase: { value: 0 }, uStarPos: { value: new THREE.Vector3(0, 1, 0) }, uStarRad: { value: 0.012 },
         uNearKm: { value: 0 }, uSpin: { value: 0 }, uPixelAngle: { value: 0.002 }, uStrands: { value: def.type === 'topopolis' ? 1 : 0 },
+        ...shellUniforms(seed),
       },
     });
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), mat);

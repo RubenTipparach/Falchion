@@ -190,7 +190,7 @@ async function bootstrap(): Promise<void> {
   // Surface view: the focused planet's close-up, below planet view (draws its own scene when near).
   const surface = map.layers.add(new SurfaceLayer({ zoom: map.controller.zoom, input: map.controller, frame: (id) => system.planetFrame(id), hold: (id) => system.holdPlanet(id), canvas: map.canvas, lite }));
   // Landing on a megastructure: its own close-up (change mega-surfaces).
-  const mega = map.layers.add(new MegaSurfaceLayer({ zoom: map.controller.zoom, input: map.controller, canvas: map.canvas, lite }));
+  const mega = map.layers.add(new MegaSurfaceLayer({ zoom: map.controller.zoom, input: map.controller, canvas: map.canvas, lite, frame: (id) => system.megaFrame(id) }));
   // Megastructures are seen from across the galaxy (change megastructures).
   map.layers.add(new MegaBeaconLayer(galaxy.megastructures().map((m) => {
     const star = galaxy.starAt(m.hex)!;

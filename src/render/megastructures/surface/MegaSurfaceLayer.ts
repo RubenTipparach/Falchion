@@ -6,7 +6,7 @@ import type { InputCapture } from '../../map/MapCameraController';
 import type { MapLayer, ViewState } from '../../map/MapLayer';
 import type { ZoomModel } from '../../map/ZoomModel';
 import { MegaHabitat } from './MegaHabitat';
-import { MegaSky, SQUARES } from './MegaSky';
+import { DISK_RANGE, MegaSky, SQUARES } from './MegaSky';
 import { TOWER_REACH_KM, MegaTowers } from './MegaTowers';
 import { MegaTrees } from './MegaTrees';
 import { MegaTerrain, landUniforms, setCities } from './MegaTerrain';
@@ -23,6 +23,11 @@ export interface MegaSurfaceTarget {
 
 export interface MegaSurfaceHost {
   readonly zoom: ZoomModel;
+  /**
+   * The structure as the system view draws it (render-relative): the close-up's frame on its land
+   * and how many ly one close-up unit is. Null while it is not drawn (and for habitats).
+   */
+  frame(id: string): { readonly world: THREE.Matrix4; readonly unitLy: number } | null;
   readonly input: { capture: InputCapture | null; cancelFlight(): void };
   readonly canvas: HTMLCanvasElement;
   readonly lite: boolean;
@@ -42,6 +47,14 @@ export interface MegaSurfaceStatus {
  */
 const HAND_ALT = 0.05;
 const HAND_BAND = 2.2;
+/**
+ * A ring, shell or disc is flown down to with one camera: from FLY_START (ly) the close-up draws
+ * the structure from the map's own camera, carried into its frame at true scale, over the system
+ * view's drawing of it; by FLY_FULL it has the screen. On down, that camera eases into the
+ * close-up's own, reaching it at the close-up's top (maxKm).
+ */
+const FLY_START = 0.3;
+const FLY_FULL = 0.22;
 /** Tilt (from straight down) past which the camera stops circling the focus and just looks up. */
 const ORBIT_PITCH = 1.33;
 /** The ground detail's coarsest octave (MEGA_GROUND_GLSL groundDetail), km: its origin snaps to it. */
@@ -92,6 +105,10 @@ export class MegaSurfaceLayer implements MapLayer {
   private pitchOffset = 0;
   private altKm = 1;
   private kmPerZoom = 1;
+  /** This frame's structure frame (ring, shell, disc): its world matrix inverted, and its rotation. */
+  private mapFrame: { inv: THREE.Matrix4; q: THREE.Quaternion; kmPerLy: number } | null = null;
+  /** How far the camera has gone over from the map's (0) to the close-up's own (1). */
+  private rigShare = 1;
   private fly: { from: [number, number]; to: [number, number]; t: number } | null = null;
   private citiesKey = '';
   private cities: MegaCity[] = [];
@@ -154,7 +171,7 @@ export class MegaSurfaceLayer implements MapLayer {
 
   /** Glide back up to the system view. */
   leave(): void {
-    if (this.mix > 0) this.host.zoom.setTargetAltitude(HAND_ALT * HAND_BAND * 2);
+    if (this.mix > 0) this.host.zoom.setTargetAltitude(this.mapFrame ? FLY_START * 1.5 : HAND_ALT * HAND_BAND * 2);
   }
 
   covers(): boolean {
@@ -169,12 +186,32 @@ export class MegaSurfaceLayer implements MapLayer {
     const zoom = this.host.zoom;
     if (!this.target || !b) { this.mix = 0; return; }
     const trip = TRIP[b.def.type];
+    const frame = isTube(b.def) ? null : this.host.frame(this.target.id);
+    if (frame) {
+      // One camera all the way down, at the structure's true scale.
+      const inv = frame.world.clone().invert();
+      const q = new THREE.Quaternion();
+      frame.world.decompose(new THREE.Vector3(), q, new THREE.Vector3());
+      this.mapFrame = { inv, q, kmPerLy: b.sky.unitKm / frame.unitLy };
+      this.kmPerZoom = this.mapFrame.kmPerLy;
+      // The close-up's own camera reaches out to most of the way across (a ring's or shell's axis,
+      // high over a disc), looking down at the land: the flight is over in good time, the land in view.
+      const full = this.rigTopKm(b) * 0.25 / this.kmPerZoom, alt = Math.max(zoom.altitude, 1e-12);
+      this.rigShare = 1 - smoothstep(Math.log(full), Math.log(FLY_FULL * 0.9), Math.log(alt));
+      if (this.rigShare < 1) { this.focus = [0, 0]; this.fly = null; }
+    } else {
+      this.mapFrame = null;
+      this.rigShare = 1;
+      if (!isTube(b.def)) { this.mix = 0; return; }
+    }
     // The zoom goes on below the system view once the ground is ready to show.
     zoom.setFloor(b.ready ? trip.minKm / this.kmPerZoom : null);
-    this.mix = b.ready ? 1 - smoothstep(HAND_ALT, HAND_ALT * HAND_BAND, zoom.altitude) : 0;
-    this.host.input.capture = this.mix >= 1 ? this.capture : this.host.input.capture === this.capture ? null : this.host.input.capture;
+    this.mix = !b.ready ? 0 : frame ? 1 - smoothstep(FLY_FULL, FLY_START, zoom.altitude) : 1 - smoothstep(HAND_ALT, HAND_ALT * HAND_BAND, zoom.altitude);
+    // Panning and turning are the close-up's once its own camera has it.
+    if (this.rigShare < 1 && this.mix >= 1) this.host.input.capture = this.host.input.capture === this.capture ? null : this.host.input.capture;
+    else this.host.input.capture = this.mix >= 1 ? this.capture : this.host.input.capture === this.capture ? null : this.host.input.capture;
     if (this.mix <= 0) return;
-    this.altKm = THREE.MathUtils.clamp(zoom.altitude * this.kmPerZoom, trip.minKm, trip.maxKm);
+    this.altKm = THREE.MathUtils.clamp(zoom.altitude * this.kmPerZoom, trip.minKm, this.mapFrame ? this.rigTopKm(b) : trip.maxKm);
     if (this.fly) {
       this.fly.t = Math.min(1, this.fly.t + dt / 0.9);
       const e = smoothstep(0, 1, this.fly.t);
@@ -306,10 +343,25 @@ export class MegaSurfaceLayer implements MapLayer {
     this.camera.position.copy(cam);
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(cam.clone().add(dir(pitch)));
-    const alt = Math.max(cam.y - Math.max(hC, 0), 0.0005);
+    let alt = Math.max(cam.y - Math.max(hC, 0), 0.0005);
+    // Flying down from the system view: the map's own camera, carried into the structure's frame
+    // at its true scale, easing into the close-up's as it nears the top.
+    let nearField = true;
+    if (this.mapFrame && this.rigShare < 1) {
+      const f = this.mapFrame, w = this.rigShare;
+      const from = mapCamera.getWorldPosition(new THREE.Vector3()).applyMatrix4(f.inv).multiplyScalar(f.kmPerLy);
+      const fromQ = f.q.clone().invert().multiply(mapCamera.getWorldQuaternion(new THREE.Quaternion()));
+      cam.copy(from.lerp(cam, w));
+      this.camera.position.copy(cam);
+      this.camera.quaternion.copy(fromQ.slerp(this.camera.quaternion, w));
+      alt = Math.max(this.heightOver(b, cam), 0.0005);
+    }
+    // High over a ring, shell or disc the land is all the sky's (cast per pixel), none of it near.
+    if (this.mapFrame) nearField = alt < TRIP[def.type].maxKm * 2;
     // Lens as the map's; clipping to the land round the camera (the sky is inside it).
-    b.uniforms.uCamGround.value = Math.max(hC, 0);
-    b.terrain.update({ focus: this.focus, cam, alt });
+    b.uniforms.uCamGround.value = nearField ? Math.max(hC, 0) : 0;
+    b.terrain.group.visible = nearField;
+    if (nearField) b.terrain.update({ focus: this.focus, cam, alt });
     const far = Math.max(b.terrain.extent * 2.2, alt * 8, def.type === 'dyson-swarm' ? 60 : def.type === 'topopolis' ? 500 : 0);
     this.camera.fov = mapCamera.fov;
     this.camera.aspect = mapCamera.aspect;
@@ -322,19 +374,19 @@ export class MegaSurfaceLayer implements MapLayer {
     this.camera.updateProjectionMatrix();
     this.camera.updateMatrixWorld();
     // Light and time of day.
-    this.light(b);
+    this.light(b, cam);
     u.uFocus.value.set(this.focus[0], this.focus[1]);
     // The detail's origin: on the coarsest detail octave's grid, near the camera.
     u.uDetailOrigin.value.set(Math.round(this.focus[0] / DETAIL_TILE) * DETAIL_TILE, Math.round(this.focus[1] / DETAIL_TILE) * DETAIL_TILE);
     u.uCam.value.copy(cam);
     u.uCamAlt.value = alt;
     u.uTime.value = this.time;
-    b.sky.place(cam, far * 0.8, b.terrain.extent * 0.92, (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / Math.max(1, renderer.domElement.height));
+    b.sky.place(cam, far * 0.8, nearField ? b.terrain.extent * 0.92 : 0, (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / Math.max(1, renderer.domElement.height));
     // Towers near cities close by; trees right round the camera.
     const nearCities = this.cities.filter((c) => Math.hypot(c.x - this.focus[0], c.z - this.focus[1]) < TOWER_REACH_KM + c.r);
-    b.towers.setCities(this.altKm < 80 ? nearCities : []);
-    b.towers.mesh.visible = this.altKm < 80;
-    b.trees.update(renderer, this.focus, alt);
+    b.towers.setCities(this.altKm < 80 && nearField ? nearCities : []);
+    b.towers.mesh.visible = this.altKm < 80 && nearField;
+    b.trees.update(renderer, this.focus, nearField ? alt : 1e9);
     b.habitat?.update(this.focus, b.uniforms.uDay.value as number);
 
     const autoClear = renderer.autoClear;
@@ -347,8 +399,26 @@ export class MegaSurfaceLayer implements MapLayer {
     renderer.setRenderTarget(before);
   }
 
+  /** The highest the close-up's own camera goes over the land, km: the land fills the view from there. */
+  private rigTopKm(b: Built): number {
+    return b.def.type === 'alderson-disk' ? b.sky.unitKm * 0.5 : b.sky.unitKm * 0.85;
+  }
+
+  /** How far (km) a point in the focus frame is from the structure's land (or, outside, its hull). */
+  private heightOver(b: Built, p: THREE.Vector3): number {
+    const unit = b.sky.unitKm, o = p.clone().divideScalar(unit);
+    if (b.def.type === 'ringworld') {
+      const off = Math.max(Math.abs(o.z) - b.def.widthKm / 2 / unit, 0);
+      return Math.hypot(Math.abs(1 - Math.hypot(o.x, o.y - 1)), off) * unit;
+    }
+    if (b.def.type === 'dyson-sphere') return Math.abs(1 - Math.hypot(o.x, o.y - 1, o.z)) * unit;
+    const rS = Math.hypot(o.x + 1, o.z);
+    const out = Math.max(DISK_RANGE[0] - rS, rS - DISK_RANGE[1], 0);
+    return Math.hypot(o.y, out) * unit;
+  }
+
   /** Where the star is and how much daylight the focus has (and the sky's uniforms for both). */
-  private light(b: Built): void {
+  private light(b: Built, cam: THREE.Vector3): void {
     const def = b.def, u = b.uniforms, su = b.sky.uniforms, t = this.time;
     const col = this.target!.light.clone();
     let day = 1, dawn = 0;
@@ -390,6 +460,11 @@ export class MegaSurfaceLayer implements MapLayer {
       // The star is down the axis (the mirrors throw its light in through the windows).
       su.uStarPos.value.set(0, 0, -1);
       su.uStarRad.value = 0.03;
+    }
+    if (!isTube(def)) {
+      // The star's size as seen from where the camera is (from the land it is about one unit off).
+      const o = cam.clone().divideScalar(b.sky.unitKm);
+      su.uStarRad.value = Math.atan((su.uStarRad.value as number) / Math.max(o.distanceTo(su.uStarPos.value as THREE.Vector3), 1e-6));
     }
     u.uSun.value.copy(sun);
     u.uSunCol.value.copy(col);

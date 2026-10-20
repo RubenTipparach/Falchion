@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { MEGA_BY_ID, type MegaType } from '../../content/megastructures';
 import { Rng, hashSeed } from '../../core/rng/Rng';
+import { hasMegaSurface, isTube, megaGround, type MegaGroundDef } from '../../core/mega/MegaGround';
+import { MEGA_GROUND_GLSL } from './surface/megaGround.glsl';
+import { DISK_UNIT_KM } from './surface/MegaSky';
 
 /**
  * Megastructures in the system view (change megastructures): one builder per type, each a group
@@ -12,8 +15,13 @@ export interface MegaVisual {
   readonly object3d: THREE.Group;
   /** How far out the structure reaches (ly): for picking, the label and framing. */
   readonly extent: number;
-  /** A point on the land people live on (it turns with the structure): where a zoom into it heads. */
-  readonly anchor: THREE.Object3D | null;
+  /**
+   * The land people live on, as the structure's close-up sees it: a frame at a point of its land
+   * (it turns with the structure) whose axes are the close-up's (y up from the land, z along a
+   * ring's axis, x across), and how many ly one close-up unit is (MegaSky's far unit: a ring's or
+   * a shell's radius, the distance from a disc's star). Null for a structure with no ground.
+   */
+  readonly anchor: { readonly frame: THREE.Object3D; readonly unitLy: number } | null;
   /** Animate: `time` in seconds. (Lighting follows the group: its origin is the star.) */
   update(time: number): void;
   dispose(): void;
@@ -54,14 +62,19 @@ interface HullOptions {
   readonly front: string;
   readonly back?: string;
   readonly emit?: string;
-  /** GLSL that may change `base` and `emit` (vObj, vUv, uTime, uShape, vnoise available). */
+  /** GLSL that may change `base` and `emit` (vObj, vUv, uTime, uDims, vnoise available). */
   readonly pattern?: string;
   /**
-   * Sizes the pattern reads (as uShape), kept out of its source: a number written into the GLSL
+   * Sizes the pattern reads (as uDims), kept out of its source: a number written into the GLSL
    * would make every system's structure a program of its own, compiled as the system is opened.
    */
   readonly shape?: readonly [number, number];
   readonly side?: THREE.Side;
+  /**
+   * The land the close-up stands on (the same def and seed), and how many km a unit of the hull's
+   * own frame is: `landAt(site, fp)` then draws it exactly as the ground and its sky do.
+   */
+  readonly land?: { def: MegaGroundDef; kmPer: number };
   /** Choose front or back by which side of the shell (round the star) the camera sees, not by winding. */
   readonly radial?: boolean;
 }
@@ -79,7 +92,14 @@ function hullMaterial(o: HullOptions & { light: THREE.Color; seed: number }): TH
       uEmit: { value: new THREE.Color(o.emit ?? '#000000') },
       uTime: { value: 0 },
       uSeed: { value: (o.seed % 1000) / 37 },
-      uShape: { value: new THREE.Vector2(...(o.shape ?? [0, 0])) },
+      uDims: { value: new THREE.Vector2(...(o.shape ?? [0, 0])) },
+      ...(o.land ? {
+        uOffset: { value: new THREE.Vector3(...o.land.def.offset) },
+        uFeature: { value: o.land.def.featureKm },
+        uSea: { value: o.land.def.sea },
+        uRelief: { value: o.land.def.reliefKm },
+        uKmPer: { value: o.land.kmPer },
+      } : {}),
     },
     vertexShader: HULL_VERT,
     fragmentShader: /* glsl */ `
@@ -88,37 +108,22 @@ function hullMaterial(o: HullOptions & { light: THREE.Color; seed: number }): TH
       uniform vec3 uFront;
       uniform vec3 uBack;
       uniform vec3 uEmit;
-      uniform float uTime;
+      ${o.land ? '' : 'uniform float uTime; // (the land GLSL declares it)'}
       uniform float uSeed;
-      uniform vec2 uShape;
+      uniform vec2 uDims;
       varying vec3 vW;
       varying vec3 vN;
       varying vec3 vObj;
       varying vec2 vUv;
+      ${o.land ? `${MEGA_GROUND_GLSL}
+      uniform float uKmPer;
+      /** The close-up's land at site (km), to the detail a pixel of this hull can show. */
+      vec3 landAt(vec2 site) { return landFrom(site, max(length(fwidth(vObj)) * uKmPer, 1e-3)); }` : ''}
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + uSeed) * 43758.5453); }
       float vnoise(vec2 p) {
         vec2 i = floor(p), f = fract(p);
         vec2 u = f * f * (3.0 - 2.0 * f);
         return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0)), u.x), u.y);
-      }
-      float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7)) + uSeed) * 43758.5453); }
-      float vnoise3(vec3 p) {
-        vec3 i = floor(p), f = fract(p);
-        vec3 u = f * f * (3.0 - 2.0 * f);
-        float a = mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), u.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), u.x), u.y);
-        float b = mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), u.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), u.x), u.y);
-        return mix(a, b, u.z);
-      }
-      /** Land seen from afar at p (a few units across a continent): seas, coasts, plains, forest, hills and ice, in 3D so nothing streaks. */
-      vec3 landTint(vec3 p) {
-        float n = vnoise3(p) * 0.5 + vnoise3(p * 2.03 + 7.0) * 0.25 + vnoise3(p * 4.1 + 13.0) * 0.15 + vnoise3(p * 8.3 + 21.0) * 0.1;
-        float wet = vnoise3(p * 1.3 + 40.0);
-        vec3 sea = mix(vec3(0.03, 0.12, 0.3), vec3(0.08, 0.3, 0.42), smoothstep(0.3, 0.47, n));
-        vec3 grass = mix(vec3(0.42, 0.42, 0.24), vec3(0.24, 0.42, 0.16), smoothstep(0.35, 0.6, wet));
-        vec3 land = mix(grass, vec3(0.1, 0.24, 0.1), smoothstep(0.55, 0.75, wet) * 0.8);
-        land = mix(land, vec3(0.48, 0.44, 0.38), smoothstep(0.66, 0.8, n));
-        land = mix(land, vec3(0.86, 0.88, 0.92), smoothstep(0.8, 0.88, n));
-        return n < 0.48 ? sea : mix(vec3(0.62, 0.58, 0.44), land, smoothstep(0.48, 0.5, n));
       }
       void main() {
         vec3 N = normalize(vN);
@@ -170,7 +175,7 @@ class Kit {
   readonly glows: THREE.ShaderMaterial[] = [];
   /** Turning parts: each turns about its own axis from the orientation it was built in. */
   readonly spinners: Array<{ o: THREE.Object3D; axis: THREE.Vector3; rate: number; base?: THREE.Quaternion }> = [];
-  constructor(readonly o: MegaOptions, readonly rng: Rng) {}
+  constructor(readonly o: MegaOptions, readonly rng: Rng, readonly ground: MegaGroundDef | null) {}
   hull(m: HullOptions): THREE.ShaderMaterial {
     const mat = hullMaterial({ ...m, light: this.o.light, seed: this.o.seed });
     this.hulls.push(mat);
@@ -189,12 +194,14 @@ class Kit {
   spin(o: THREE.Object3D, rate: number, axis = new THREE.Vector3(0, 1, 0)): void {
     this.spinners.push({ o, axis, rate });
   }
-  private anchor: THREE.Object3D | null = null;
-  /** Mark the land at `at` in `parent`'s frame (see MegaVisual.anchor). */
-  anchorAt(parent: THREE.Object3D, at: THREE.Vector3): void {
-    this.anchor = new THREE.Object3D();
-    this.anchor.position.copy(at);
-    parent.add(this.anchor);
+  private anchor: MegaVisual['anchor'] = null;
+  /** Mark the land at `at` in `parent`'s frame, with the close-up's x and y axes there (see MegaVisual.anchor). */
+  anchorAt(parent: THREE.Object3D, at: THREE.Vector3, x: THREE.Vector3, y: THREE.Vector3, unitLy: number): void {
+    const frame = new THREE.Object3D();
+    frame.position.copy(at);
+    frame.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, new THREE.Vector3().crossVectors(x, y)));
+    parent.add(frame);
+    this.anchor = { frame, unitLy };
   }
   finish(extent: number): MegaVisual {
     const q = new THREE.Quaternion();
@@ -232,18 +239,18 @@ type Builder = (k: Kit) => MegaVisual;
 /** A ring round the star: a continent on its inner face, rim walls, and shadow squares closer in. */
 const ringworld: Builder = (k) => {
   const R = Math.max(0.15, k.o.clearance * 5);
-  const w = R * 0.11;
+  // As wide as the close-up's land (MegaGround: 1.2 million km on a 15 million km ring).
+  const w = R * 0.08;
   const tilt = new THREE.Group();
   tilt.rotation.set(0.42, 0, 0.12);
   k.add(tilt);
   const land = k.hull({
-    front: '#2a2e36', back: '#4c8a4a', side: THREE.DoubleSide,
+    front: '#2a2e36', back: '#4c8a4a', side: THREE.DoubleSide, shape: [R, 0],
+    land: k.ground ? { def: k.ground, kmPer: k.ground.radiusKm / R } : undefined,
     pattern: /* glsl */ `
       if (!gl_FrontFacing) {
-        // The inner face: seas, plains and mountains, banded across the width, lit from inside.
-        float a = atan(vObj.z, vObj.x);
-        base = landTint(vec3(cos(a) * 9.5, (vUv.y - 0.5) * 2.0, sin(a) * 9.5));
-        base = mix(base, vec3(0.9), smoothstep(0.82, 0.95, vnoise(vec2(a * 40.0, vUv.y * 4.0) + 30.0)) * 0.35);
+        // The inner face: the close-up's own land, at its own place (the anchor is site 0).
+        base = landAt(vec2(-atan(vObj.z, vObj.x) * uDims.x, vObj.y) * uKmPer);
         float edge = smoothstep(0.0, 0.06, vUv.y) * smoothstep(1.0, 0.94, vUv.y);
         base = mix(vec3(0.35, 0.33, 0.3), base, edge);
       } else {
@@ -253,7 +260,8 @@ const ringworld: Builder = (k) => {
     `,
   });
   k.add(new THREE.Mesh(new THREE.CylinderGeometry(R, R, w, 512, 1, true), land), tilt);
-  k.anchorAt(tilt, new THREE.Vector3(R * 0.995, 0, 0));
+  // The close-up's frame: up toward the axis, z along the axis (the cylinder's y).
+  k.anchorAt(tilt, new THREE.Vector3(R, 0, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(-1, 0, 0), R);
   // Rim walls, reaching in from each edge.
   const wall = k.hull({ front: '#5a5d66', side: THREE.DoubleSide });
   for (const y of [-w / 2, w / 2]) {
@@ -336,17 +344,25 @@ const dysonSphere: Builder = (k) => {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(keep, 3));
   geo.computeVertexNormals();
-  const mat = k.hull({ front: '#3a3c44', back: '#7a5430', side: THREE.DoubleSide, radial: true, shape: [600 / R, 0],
+  const mat = k.hull({ front: '#3a3c44', back: '#7a5430', side: THREE.DoubleSide, radial: true, shape: [600 / R, R],
+    land: k.ground ? { def: k.ground, kmPer: k.ground.radiusKm / R } : undefined,
     pattern: /* glsl */ `
-      // Waste heat outside: a dull red glow over the shell, brighter in bands. Inside, the land
-      // its people live on, in the star's light.
-      float band = 0.5 + 0.5 * sin(vObj.y * uShape.x + uTime * 0.3);
+      // Waste heat outside: a dull red glow over the shell, brighter in bands. Inside, the close-up's
+      // own land in the star's light, laid out from the bottom (the anchor) as the ground lays it.
+      float band = 0.5 + 0.5 * sin(vObj.y * uDims.x + uTime * 0.3);
       if (outer) emit = vec3(0.16, 0.03, 0.01) * (0.6 + 0.4 * band);
-      else { base = landTint(normalize(vObj) * 6.0); emit = base * 0.35; }
+      else {
+        vec3 n = normalize(vObj);
+        float ang = 2.0 * asin(clamp(length(n - vec3(0.0, -1.0, 0.0)) * 0.5, 0.0, 1.0));
+        vec2 u = length(n.xz) > 1e-6 ? normalize(n.xz) : vec2(1.0, 0.0);
+        base = landAt(u * ang * uDims.y * uKmPer);
+        emit = base * 0.35;
+      }
     ` });
   const shell = k.add(new THREE.Mesh(geo, mat));
   k.spin(shell, 0.01);
-  k.anchorAt(shell, new THREE.Vector3(R * 0.98, 0, 0));
+  // The land at the shell's bottom, up toward its centre: a zoom from above comes in through the top.
+  k.anchorAt(shell, new THREE.Vector3(0, -R, 0), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), R);
   return k.finish(R * 1.02);
 };
 
@@ -395,21 +411,26 @@ const matrioshka: Builder = (k) => {
 /** A flat disc reaching far out from the star, which sits in a hole at its centre. */
 const aldersonDisk: Builder = (k) => {
   const inner = Math.max(0.03, k.o.clearance * 1.6), outer = Math.max(0.3, inner * 8);
-  const mat = k.hull({ front: '#3a6a3a', back: '#3a3a40', side: THREE.DoubleSide, shape: [inner, outer],
+  // A third of the way out: the close-up's unit (DISK_UNIT_KM), where it lands.
+  const r0 = inner + (outer - inner) * 0.3;
+  const mat = k.hull({ front: '#3a6a3a', back: '#3a3a40', side: THREE.DoubleSide, shape: [r0, 0],
+    land: k.ground ? { def: k.ground, kmPer: DISK_UNIT_KM / r0 } : undefined,
     pattern: /* glsl */ `
-      float r = length(vObj.xy);
-      // Scorched and molten near the star, temperate further out, frozen at the rim.
-      float t = smoothstep(uShape.x, uShape.y, r);
-      vec3 hot = vec3(0.45, 0.2, 0.1), mild = landTint(vec3(vObj.xy / uShape.y * 14.0, 0.5)), cold = vec3(0.8, 0.85, 0.9);
-      base = t < 0.12 ? mix(hot, mild, smoothstep(0.04, 0.12, t)) : mix(mild, cold, smoothstep(0.6, 0.95, t));
+      // The close-up's own land (its z is the disc's -y), scorched toward the star and frozen at
+      // the rim exactly where its sky has them.
+      float rS = length(vObj.xy) / uDims.x;
+      base = landAt(vec2(vObj.x - uDims.x, -vObj.y) * uKmPer);
+      base = mix(vec3(0.42, 0.24, 0.14), base, smoothstep(0.36, 0.7, rS));
+      base = mix(base, vec3(0.86, 0.9, 0.95), smoothstep(1.9, 2.5, rS));
       // The star's light grazes it: day all over, brightest near the star.
-      emit = base * (1.1 - 0.8 * t);
+      emit = base * (1.25 - 0.35 * smoothstep(0.32, 2.58, rS));
       base *= 0.0;
     ` });
   const disc = k.add(new THREE.Mesh(new THREE.RingGeometry(inner, outer, 256, 12), mat));
   disc.rotation.x = -Math.PI / 2 + 0.3;
   disc.rotation.y = 0.2;
-  k.anchorAt(disc, new THREE.Vector3(inner + (outer - inner) * 0.3, 0, 0));
+  // A third of the way out, x away from the star, up off the disc's face.
+  k.anchorAt(disc, new THREE.Vector3(r0, 0, 0), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1), r0);
   // Its rim, a wall thousands of km high.
   const rim = k.add(new THREE.Mesh(new THREE.CylinderGeometry(outer, outer, outer * 0.012, 256, 1, true), k.hull({ front: '#4a4a52', side: THREE.DoubleSide })), disc);
   rim.rotation.x = Math.PI / 2;
@@ -576,7 +597,10 @@ const BUILDERS: Readonly<Record<MegaType, Builder>> = {
 
 /** Build a megastructure round its star. */
 export function createMegaVisual(type: MegaType, o: MegaOptions): MegaVisual {
-  const k = new Kit(o, new Rng(hashSeed(o.seed, 'mega', type)));
+  // The land a structure that can be landed on carries: the close-up's own (same seed), so the
+  // system view shows the very continents the ground is made of.
+  const ground = hasMegaSurface(type) && !isTube({ type }) ? megaGround(type, o.seed) : null;
+  const k = new Kit(o, new Rng(hashSeed(o.seed, 'mega', type)), ground);
   k.group.name = MEGA_BY_ID[type].name;
   return BUILDERS[type](k);
 }

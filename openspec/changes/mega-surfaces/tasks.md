@@ -18,3 +18,5 @@
 - [x] 4.4 The topopolis: an endless tube habitat, its land repeating along the tube with towns and cities, clouds, the tube's other loops through the windows, haze down its length
 - [x] 4.5 Scroll-driven dissolve between the system view and the ground (no fade); the system view slides onto the land; tops at 3,000 km
 - [x] 4.6 Coasts per pixel near the shore; system-view land in 3D noise on the ring, the sphere's inside and the disc; dusk nights
+- [x] 4.7 One camera from the system view to the ground (ring, sphere, disc): the map camera carried into the structure's frame at true scale, the close-up's sky ray-casting the whole structure from out there, the near field only below twice its top
+- [x] 4.8 One land at every distance: broad octaves in groundNoise (core and GLSL), the far view and the system view's hulls drawing it from the same noise and site, scales fading in by pixel, land and sea blended by coverage

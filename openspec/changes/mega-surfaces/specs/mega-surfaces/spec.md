@@ -1,15 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: Megastructures can be landed on
-The ringworld, the Dyson sphere, the Alderson disk, the Dyson swarm and the topopolis SHALL each be zoomed into from the system view without a break: zooming in on a chosen structure SHALL slide onto its land and dissolve into its ground seen from the close-up's top, and on down to the ground; zooming out SHALL dissolve back. No black screen SHALL come between. Land and Escape SHALL glide the zoom down or up the same way.
+The ringworld, the Dyson sphere, the Alderson disk, the Dyson swarm and the topopolis SHALL each be zoomed into from the system view without a break. For the ring, the sphere and the disc the zoom SHALL be one camera in one world: the system view's camera, carried into the structure's own frame at true scale, SHALL become the close-up's camera and come down over the very land the system view drew, with no crossfade between two views. The two habitats (swarm and topopolis), a few km across, SHALL dissolve from the system view into their insides. No black screen SHALL come between. Land and Escape SHALL glide the zoom down or up the same way.
 
 #### Scenario: Landing on a ringworld
-- **WHEN** the player presses Land on a ringworld's card
-- **THEN** the view slides onto the ring's land and dissolves into its ground, then comes down over it, with the Arch rising overhead
+- **WHEN** the player zooms in on a ringworld from its system
+- **THEN** the camera flies on toward the ring, the band of land on its inner face grows to fill the view, and the same continents come down beneath it to the ground, with the Arch rising overhead
 
 #### Scenario: Leaving
-- **WHEN** the player zooms out past the close-up's top, or presses Escape
-- **THEN** the ground dissolves back into the system view, framed on the structure
+- **WHEN** the player zooms out from the ground, or presses Escape
+- **THEN** the camera climbs back out the same way, and the ring is in the system view, framed on the structure
 
 ### Requirement: Each structure's ground is its own shape
 The ground SHALL follow the structure's shape:
@@ -45,8 +45,8 @@ The land SHALL have seas, plains, forests and mountains, from the structure's se
 - **THEN** streets show in the ground and towers rise from them, windows lit at night under a shadow square
 
 ### Requirement: The close-up looks right over its whole height
-The ring, sphere and disc close-ups SHALL reach 3,000 km up, where they hand over to the system view. Coasts SHALL be worked per pixel near the shore, so they are curves that stay put as the view moves, not the mesh's polygons. In the system view, the ringworld's inner face, the Dyson sphere's inside and the Alderson disk SHALL show land (seas, coasts, plains, forest, hills and ice) drawn without streaks. Night SHALL be a dusk in which the land can be made out, never black.
+The ring, sphere and disc close-ups SHALL reach 3,000 km up, where they hand over to the system view. Coasts SHALL be worked per pixel near the shore, so they are curves that stay put as the view moves, not the mesh's polygons. The land SHALL be one land at every distance: the ground, its far view and the system view's drawing of the ringworld's inner face, the Dyson sphere's inside and the Alderson disk SHALL all draw it from the same noise (broad scales of oceans and super-continents, then continents and coasts), each scale fading in as it grows to a few pixels, and a pixel wider than a coast drawn as the share of land and sea under it. Night SHALL be a dusk in which the land can be made out, never black.
 
 #### Scenario: Zooming out from a ringworld city
 - **WHEN** the player zooms out from a city on a ringworld
-- **THEN** the coasts stay where they are and smooth all the way up, and the ground dissolves into the ring in the system view
+- **THEN** the coasts stay where they are and smooth all the way up, the continents they belong to come into view, and the ring in the system view shows those same continents

@@ -21,6 +21,8 @@ export const SKY_MODE = { ringworld: 0, 'dyson-sphere': 1, 'alderson-disk': 2, '
 export const SQUARES = { n: 10, radius: 0.35, cover: 0.4 } as const;
 /** The disc's far unit (km) and its star's distance in it. */
 export const DISK_UNIT_KM = 1e8;
+/** The disc's inner and outer edge, in that unit (as the system view draws it round the landing point). */
+export const DISK_RANGE = [0.32, 2.58] as const;
 
 const SKY_VERT = /* glsl */ `
 varying vec3 vDir;
@@ -74,21 +76,17 @@ float squaresDay(float a) {
  * The land dist km away: its colour, blurred to the land's average as a pixel there spans more
  * than its features (the far side of a shell is 60 million km off: its continents are specks).
  */
-vec3 farLand(vec2 site, float dist) {
-  float fp = dist * uPixelAngle;
-  float blur = smoothstep(uFeature * 0.03, uFeature * 0.4, fp);
-  vec3 c = vec3(0.0);
-  if (blur < 0.999) c = landColour(site, max(rawHeight(site, min(octavesAt(dist), 5.0)), -0.001), 0.0, fp);
-  // Far enough that its continents are specks: seas and lands far wider stand in.
-  vec3 q = vec3(wrapSite(site) / (uFeature * 1500.0) + uOffset.xy, uOffset.z + 50.0);
-  float macro = snoise(q) * 0.6 + snoise(q * 2.7 + vec3(4.0)) * 0.3;
-  vec3 avg = mix(vec3(0.05, 0.13, 0.24), mix(vec3(0.2, 0.32, 0.13), vec3(0.42, 0.38, 0.27), smoothstep(0.1, 0.5, snoise(q * 1.7 + vec3(9.0)))), smoothstep(-0.05, 0.05, macro));
-  return mix(c, avg, blur);
+/** The land dist km off along d, its up n: a pixel's footprint stretched as the view grazes it. */
+float farFp = 0.0;
+vec3 farLand(vec2 site, float dist, vec3 d, vec3 n) {
+  farFp = dist * uPixelAngle / max(abs(dot(d, n)), 0.15);
+  return landFrom(site, farFp);
 }
 vec3 lightLand(vec3 col, vec2 site, float day, float sunUp) {
   vec3 lit = col * (uSunCol * sunUp + vec3(0.3, 0.36, 0.46) * 0.35) * day;
-  // Cities' lights on the night side, as far off as they can be told apart.
-  float city = step(0.94, hash13(vec3(floor(site / 60.0), 3.0)));
+  // Cities' lights on the night side: one cell in sixteen lit, a glow at their share once a pixel
+  // (farLand's) is wider than a cell.
+  float city = mix(step(0.94, hash13(vec3(floor(site / 60.0), 3.0))), 0.06, smoothstep(20.0, 60.0, farFp));
   lit += vec3(1.0, 0.72, 0.4) * city * 0.35 * (1.0 - day);
   return lit + col * vec3(0.16, 0.19, 0.27) * (1.0 - day);
 }
@@ -119,6 +117,15 @@ void main() {
         sunVis = 0.0;
       }
     }
+    // From outside the ring (flying in from the system view): its hull, where the near side is.
+    bool outsideRing = o.x * o.x + o.y * o.y - 2.0 * o.y > 0.0;
+    float tn = outsideRing ? rayRoot(a2, b2, o.x * o.x + o.y * o.y - 2.0 * o.y, false) : -1.0;
+    if (t < 0.0 && tn > 0.0 && abs((o + tn * d).z - uRingZ) <= uHalfW) {
+      vec3 pn = o + tn * d;
+      t = tn;
+      float an = atan(pn.x, 1.0 - pn.y);
+      hitCol = vec3(0.07, 0.075, 0.09) * (0.8 + 0.2 * step(0.5, fract(an * 80.0)));
+    }
     if (t < 0.0 && tl > 0.0) {
       vec3 p = o + tl * d;
       float a = atan(p.x, 1.0 - p.y);
@@ -127,7 +134,7 @@ void main() {
         float dist = tl * uUnit;
         if (dist > uNearKm) {
           vec2 site = uFocus + vec2(a * uUnit, p.z * uUnit);
-          hitCol = airOver(lightLand(farLand(site, dist), site, squaresDay(a), 1.0), d, dist);
+          hitCol = airOver(lightLand(farLand(site, dist, d, normalize(vec3(-p.x, 1.0 - p.y, 0.0))), site, squaresDay(a), 1.0), d, dist);
         } else hitCol = col;
       } else {
         // Past the land's edge: the rim wall, or out to space.
@@ -143,9 +150,18 @@ void main() {
       }
     }
   } else if (uMode < 1.5) {
-    // The Dyson sphere: its shell from inside (centre (0, 1, 0)).
-    float tl = rayRoot(1.0, 2.0 * (o.x * d.x + (o.y - 1.0) * d.y + o.z * d.z), dot(o, o) - 2.0 * o.y, true);
-    if (tl > 0.0) {
+    // The Dyson sphere: its shell from inside (centre (0, 1, 0)); from outside, its glowing hull.
+    float cS = dot(o, o) - 2.0 * o.y;
+    float bS = 2.0 * (o.x * d.x + (o.y - 1.0) * d.y + o.z * d.z);
+    float tl = rayRoot(1.0, bS, cS, true);
+    float tn = cS > 0.0 ? rayRoot(1.0, bS, cS, false) : -1.0;
+    if (tn > 0.0) {
+      t = tn;
+      vec3 pn = o + tn * d - vec3(0.0, 1.0, 0.0);
+      float band = 0.5 + 0.5 * sin(pn.y * 40.0);
+      vec3 cell = floor(pn * 60.0);
+      hitCol = vec3(0.09, 0.09, 0.11) * (0.75 + 0.25 * hash13(cell)) + vec3(0.16, 0.03, 0.01) * (0.6 + 0.4 * band);
+    } else if (tl > 0.0) {
       t = tl;
       float dist = tl * uUnit;
       if (dist > uNearKm) {
@@ -154,7 +170,7 @@ void main() {
         float ang = 2.0 * asin(clamp(length(dc - vec3(0.0, -1.0, 0.0)) * 0.5, 0.0, 1.0));
         vec2 u = length(dc.xz) > 1e-9 ? normalize(dc.xz) : vec2(1.0, 0.0);
         vec2 site = uFocus + u * ang * uUnit;
-        hitCol = airOver(lightLand(farLand(site, dist), site, 1.0, 1.0), d, dist);
+        hitCol = airOver(lightLand(farLand(site, dist, d, -normalize(dc)), site, 1.0, 1.0), d, dist);
         // Looking up through the air, the far side is a pattern in the blue, not a ceiling.
         if (d.y > 0.0) hitCol = mix(hitCol, col, 0.6 * exp(-max(uCamAlt, 0.0) / 30.0) * smoothstep(0.0, 0.3, d.y));
       } else hitCol = col;
@@ -165,15 +181,15 @@ void main() {
       float tl = -o.y / d.y;
       vec3 p = o + tl * d;
       float rS = length(p.xz - uStarPos.xz);
-      if (rS > 0.12 && rS < 3.2) {
+      if (rS > ${DISK_RANGE[0].toFixed(2)} && rS < ${DISK_RANGE[1].toFixed(2)}) {
         t = tl;
         float dist = tl * uUnit;
         if (dist > uNearKm) {
           vec2 site = uFocus + p.xz * uUnit;
-          vec3 c = farLand(site, dist);
+          vec3 c = farLand(site, dist, d, vec3(0.0, 1.0, 0.0));
           // Scorched toward the star, frozen far out.
-          c = mix(vec3(0.42, 0.24, 0.14), c, smoothstep(0.3, 0.65, rS));
-          c = mix(c, vec3(0.86, 0.9, 0.95), smoothstep(1.7, 2.4, rS));
+          c = mix(vec3(0.42, 0.24, 0.14), c, smoothstep(0.36, 0.7, rS));
+          c = mix(c, vec3(0.86, 0.9, 0.95), smoothstep(1.9, 2.5, rS));
           float up = clamp((uStarPos.y - p.y) / rS, 0.0, 1.0);
           hitCol = airOver(lightLand(c, site, uDay, 0.6 + up * 4.0), d, dist);
         } else hitCol = col;

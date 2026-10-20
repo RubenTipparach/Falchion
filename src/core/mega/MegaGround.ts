@@ -98,11 +98,32 @@ export function wrapX(def: MegaGroundDef, x: number): number {
   return x - c * Math.floor((x + c / 2) / c);
 }
 
-/** The land's noise in about [-1, 1] at (x, z) km, to `oct` octaves. */
+/**
+ * The land's broad scales: octaves 4, 16, ... 1024 feature sizes across, under the continents.
+ * Without them a view from far off (thousands of km up, or across the system) sees one flat sea or
+ * one flat continent, and the land pops into shape as the camera comes down; with them every height
+ * has its own shapes, oceans and super-continents. The GLSL landNoise is the same, line for line.
+ * Habitats (a tube a few km round) have none: they would not wrap.
+ */
+export const BROAD_OCTAVES: ReadonlyArray<readonly [scale: number, amp: number]> = [[4, 0.3], [16, 0.35], [64, 0.35], [256, 0.3], [1024, 0.25]];
+
+/**
+ * The land's noise in about [-1, 1] at (x, z) km: the broad scales, then `oct` octaves. An octave
+ * k octaves above the feature size (a broad scale 4^n across is octave -2n) has weight oct + k, in
+ * [0, 1], so an oct below 0 leaves out the broad scales a far-off pixel cannot show.
+ */
 export function groundNoise(def: MegaGroundDef, x: number, z: number, oct: number): number {
   x = wrapX(def, x);
+  let v = 0;
+  if (!isTube(def)) {
+    BROAD_OCTAVES.forEach(([scale, amp], i) => {
+      const f = def.featureKm * scale;
+      const w = Math.min(Math.max(oct + Math.log2(scale), 0), 1);
+      if (w > 0) v += w * amp * snoise(x / f + def.offset[0] * 0.37 + 11 + i * 7, z / f + def.offset[1] * 0.37 + 23 - i * 5, def.offset[2] + 50 + i * 4);
+    });
+  }
   let px = x / def.featureKm + def.offset[0], py = z / def.featureKm + def.offset[1], pz = def.offset[2];
-  let v = 0, a = 0.5;
+  let a = 0.5;
   for (let i = 0; i < 14; i++) {
     const w = Math.min(Math.max(oct - i, 0), 1);
     if (w <= 0) break;

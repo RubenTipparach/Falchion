@@ -219,13 +219,24 @@ export class SystemLayer implements MapLayer {
     const mega = this.current?.mega;
     if (mega?.planet.id === planetId) {
       const p = this.current!.root.getWorldPosition(new THREE.Vector3());
-      const toLand = 1 - smoothstep(0.12, 0.4, this.altitude);
-      if (mega.visual.anchor && toLand > 0) p.lerp(mega.visual.anchor.getWorldPosition(new THREE.Vector3()), toLand);
+      const toLand = 1 - smoothstep(0.28, 0.45, this.altitude);
+      if (mega.visual.anchor && toLand > 0) p.lerp(mega.visual.anchor.frame.getWorldPosition(new THREE.Vector3()), toLand);
       return p.add(new THREE.Vector3(this.origin.x, 0, this.origin.z));
     }
     const p = this.current?.planets.find((x) => x.planet.id === planetId);
     if (!p) return null;
     return p.mesh.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(this.origin.x, 0, this.origin.z));
+  }
+
+  /**
+   * A megastructure's land as drawn this frame (render-relative, as the camera): the close-up's
+   * frame there and how many ly one close-up unit is (see MegaVisual.anchor).
+   */
+  megaFrame(planetId: string): { readonly world: THREE.Matrix4; readonly unitLy: number } | null {
+    const mega = this.current?.mega;
+    if (!mega || mega.planet.id !== planetId || !mega.visual.anchor || !this.object3d.visible) return null;
+    mega.visual.anchor.frame.updateWorldMatrix(true, false);
+    return { world: mega.visual.anchor.frame.matrixWorld, unitLy: mega.visual.anchor.unitLy };
   }
 
   /**

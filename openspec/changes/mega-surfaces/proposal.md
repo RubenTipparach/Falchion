@@ -2,7 +2,7 @@
 The owner: "I also want to be able to land on ring worlds and see surface details and cities there too", "same with alderson disc and dyson spheres or swarms", "dyson sphere on the inside should have livable land", and later "topopolis needs details for sure, anything inhabitable needs details" "and we can land on".
 
 ## What Changes
-- **Land on a megastructure.** The megastructure's card gets a Land button (as a planet's has). Zooming in on a chosen structure slides onto its land and dissolves into its ground, with no black screen; zooming out dissolves back. Land and Escape glide the zoom.
+- **Land on a megastructure.** The megastructure's card gets a Land button (as a planet's has). Zooming in on a chosen structure flies one camera from the system view down onto its land, the same continents all the way, with no black screen or crossfade; zooming out climbs back. Land and Escape glide the zoom.
 - **Each structure is its own place:**
   - **Ringworld:** a continent on the ring's inner face. The land rises into the Arch overhead and runs to rim walls. The star stays at the zenith, and shadow squares bring the night in bands that sweep along the Arch.
   - **Dyson Sphere:** livable land on the inside of the shell, curving up into a dome. The star hangs overhead in an endless noon.

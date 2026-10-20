@@ -36,7 +36,10 @@ export function portrait(id: string, o: PortraitOptions = {}): SVGSVGElement {
   const smile = r.range(-0.6, 1);
   const parts: string[] = [];
 
-  parts.push(`<defs><radialGradient id="bg" cx="50%" cy="35%" r="75%"><stop offset="0" stop-color="${mix(uniform, '#ffffff', 0.18)}"/><stop offset="1" stop-color="#0a0f1c"/></radialGradient>`
+  // The backdrop complements the uniform: its opposite hue (give or take a little, person to
+  // person), softer and darker, so the figure stands out from it.
+  const backdrop = complement(uniform, r.range(-25, 25));
+  parts.push(`<defs><radialGradient id="bg" cx="50%" cy="35%" r="75%"><stop offset="0" stop-color="${mix(backdrop, '#ffffff', 0.12)}"/><stop offset="1" stop-color="${mix(backdrop, '#05070e', 0.78)}"/></radialGradient>`
     + `<clipPath id="frame"><circle cx="50" cy="50" r="48"/></clipPath></defs>`);
   parts.push(`<circle cx="50" cy="50" r="48" fill="url(#bg)"/>`);
   const body: string[] = [];
@@ -108,4 +111,20 @@ function mix(a: string, b: string, t: number): string {
   const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
   const c = (s: number) => Math.round(((pa >> s) & 255) * (1 - t) + ((pb >> s) & 255) * t);
   return `#${((c(16) << 16) | (c(8) << 8) | c(0)).toString(16).padStart(6, '0')}`;
+}
+
+/** The colour opposite `hex` on the colour wheel (shifted by `shift` degrees), muted to a backdrop. */
+function complement(hex: string, shift: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d > 0) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  const hue = (((h * 60 + 180 + shift) % 360) + 360) % 360;
+  // HSL back to RGB at a muted saturation and a mid lightness.
+  const sat = 0.42, light = 0.42;
+  const c = (1 - Math.abs(2 * light - 1)) * sat, x = c * (1 - Math.abs(((hue / 60) % 2) - 1)), m = light - c / 2;
+  const [rr, gg, bb] = hue < 60 ? [c, x, 0] : hue < 120 ? [x, c, 0] : hue < 180 ? [0, c, x] : hue < 240 ? [0, x, c] : hue < 300 ? [x, 0, c] : [c, 0, x];
+  const to = (v: number) => Math.round((v + m) * 255);
+  return `#${((to(rr) << 16) | (to(gg) << 8) | to(bb)).toString(16).padStart(6, '0')}`;
 }

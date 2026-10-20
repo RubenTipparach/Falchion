@@ -172,10 +172,10 @@ void main() {
       if (shellKept(cell)) {
         t = tn;
         // A pixel's size in cell units (a cell is about 0.06 of the radius high), for the seams.
-        float fpc = max(tn * uPixelAngle / 0.061, 1e-5);
+        float fpc = max(tn * uPixelAngle / 0.061 / max(abs(dot(d, normalize(pn))), 0.05), 1e-5);
         float w = ${(SHELL_SHRINK / 3).toFixed(4)};
-        float open = clamp((w - seam) / fpc + 0.5, 0.0, 1.0);
-        if (fpc > w) open = w / fpc;
+        // The seam box-filtered over the pixel; once the plates are small on screen, the seams' share.
+        float open = mix(clamp((w - seam) / fpc + 0.5, 0.0, 1.0), ${(1 - (1 - SHELL_SHRINK) ** 2).toFixed(3)}, smoothstep(0.25, 1.0, fpc));
         float band = 0.5 + 0.5 * sin(pn.y * 40.0);
         vec3 plate = vec3(0.085, 0.085, 0.1) * (0.7 + 0.3 * hash13(cell.xyz + cell.w * 7.0)) + vec3(0.16, 0.03, 0.01) * (0.6 + 0.4 * band);
         hitCol = mix(plate, vec3(1.0, 0.62, 0.32) * 1.1, open);

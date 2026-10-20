@@ -190,10 +190,12 @@ vec3 landQ(vec2 site) {
 }
 vec2 climate(vec2 site, float fw) {
   vec3 q = landQ(site);
-  float w0 = seen(uFeature, fw), w1 = seen(uFeature * 20.0, fw), w2 = seen(uFeature * 150.0, fw), w3 = seen(uFeature * 400.0, fw);
+  float w0 = seen(uFeature, fw), w1 = seen(uFeature * 20.0, fw), w2 = seen(uFeature * 150.0, fw), w3 = seen(uFeature * 400.0, fw), w4 = seen(uFeature * 5000.0, fw);
   float wet = w0 > 0.0 ? snoise(q * 0.8 + vec3(40.0, 11.0, 7.0)) * w0 : 0.0;
   float arid = (w1 > 0.0 ? snoise(q / 40.0 + vec3(7.0, 3.0, 1.0)) * 0.6 * w1 : 0.0) + (w2 > 0.0 ? snoise(q / 300.0 + vec3(2.0, 9.0, 4.0)) * 0.55 * w2 : 0.0);
-  float cold = w3 > 0.0 ? snoise(q / 800.0 + vec3(13.0, 5.0, 8.0)) * w3 : 0.0;
+  // Cold regions a few hundred continents across, inside cold reaches thousands across (so the
+  // ice on a structure millions of km round is sheets and polar caps, not scattered flecks).
+  float cold = (w3 > 0.0 ? snoise(q / 800.0 + vec3(13.0, 5.0, 8.0)) * 0.5 * w3 : 0.0) + (w4 > 0.0 ? snoise(q / 10000.0 + vec3(3.0, 17.0, 2.0)) * 0.7 * w4 : 0.0);
   return vec2(wet - arid, cold);
 }
 /** The lowland's colour for a wetness w and cold c (mott: mottling in about [-1, 1]). */
@@ -228,7 +230,7 @@ vec3 landColour(vec2 site, float h, float slope, float fw) {
     vec3 sea = mix(shallow, vec3(0.015, 0.06, 0.16), sqrt(depth));
     return mix(sea, vec3(0.78, 0.84, 0.9), smoothstep(0.7, 0.85, cl.y));
   }
-  // Height over the relief: mountains reach about 1.7, the snow line is above 1 (lower in the cold).
+  // Height over the relief: mountains reach about 1.7, snow only on the highest (lower in the cold).
   float e = h / uRelief;
   float lowland = 1.0 - smoothstep(0.45, 0.7, e);
   vec3 col = biome(cl.x, cl.y, lowland, mott);
@@ -241,7 +243,7 @@ vec3 landColour(vec2 site, float h, float slope, float fw) {
   col = mix(mix(vec3(0.6, 0.56, 0.43), vec3(0.62, 0.62, 0.6), smoothstep(0.3, 0.6, cl.y)), col, smoothstep(0.004, 0.015, e));
   vec3 rock = mix(vec3(0.33, 0.31, 0.29), vec3(0.45, 0.42, 0.38), mott * 0.5 + 0.5);
   col = mix(col, rock, max(smoothstep(0.32, 0.55, slope), smoothstep(0.65, 0.9, e + mott * 0.06)));
-  col = mix(col, vec3(0.86, 0.88, 0.92), smoothstep(1.05, 1.15, e + mott * 0.08 - slope * 0.4 + max(cl.y, 0.0) * 0.35));
+  col = mix(col, vec3(0.86, 0.88, 0.92), smoothstep(1.3, 1.42, e + mott * 0.08 - slope * 0.4 + max(cl.y, 0.0) * 0.35));
   return col * (0.9 + 0.1 * mott);
 }
 

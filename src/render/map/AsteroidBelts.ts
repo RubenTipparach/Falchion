@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Mineral } from '../../content/resources';
 import type { AsteroidField } from '../../core/galaxy/Asteroids';
 import { Rng, hashSeed } from '../../core/rng/Rng';
@@ -234,33 +235,50 @@ const DUST_FRAG = /* glsl */ `
   }
 `;
 
-/** A rock template per resource: a low-poly body, irregular for metals, faceted shards for crystals. */
+/**
+ * A rock template per resource. Metal and ice rocks are lumpy bodies with smooth normals (a
+ * subdivided sphere pushed out in broad lobes and in by a dent or two, stretched on one axis, like
+ * a real asteroid): never a die. Crystals are faceted double-ended shards, as crystals are.
+ */
 export function rockGeometry(resource: Mineral, seed: number): THREE.BufferGeometry {
-  let geo: THREE.BufferGeometry;
   if (resource === 'crystals') {
     // A double-ended shard: an octahedron stretched along y (stretched further per instance).
-    geo = new THREE.OctahedronGeometry(1, 0);
-  } else {
-    geo = new THREE.IcosahedronGeometry(1, resource === 'gases' ? 1 : 0);
-    // Push each corner in or out (the same corner moves the same way on every face it is on).
-    const rng = new Rng(seed);
-    const bumps = Array.from({ length: 8 }, () => rng.range(0.7, 1.3));
-    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
-    const v = new THREE.Vector3();
-    const amount = resource === 'gases' ? 0.6 : 1;
-    for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos, i);
-      const k = Math.abs(Math.round(v.x * 7) * 3 + Math.round(v.y * 7) * 5 + Math.round(v.z * 7) * 11) % bumps.length;
-      v.multiplyScalar(1 + (bumps[k] - 1) * amount);
-      pos.setXYZ(i, v.x, v.y, v.z);
-    }
+    const shard = new THREE.OctahedronGeometry(1, 0);
+    shard.deleteAttribute('normal');
+    shard.deleteAttribute('uv');
+    shard.computeVertexNormals();
+    makeOutward(shard);
+    return shard;
   }
-  const flat = geo.index ? geo.toNonIndexed() : geo;
-  flat.deleteAttribute('normal');
-  flat.deleteAttribute('uv');
-  flat.computeVertexNormals();
-  makeOutward(flat);
-  return flat;
+  const rng = new Rng(seed);
+  const icy = resource === 'gases';
+  // Indexed, so each vertex is shared by its faces and the normals come out smooth.
+  const sphere = new THREE.IcosahedronGeometry(1, 3);
+  sphere.deleteAttribute('normal');
+  sphere.deleteAttribute('uv');
+  const geo = mergeVertices(sphere);
+  sphere.dispose();
+  const dir = (): THREE.Vector3 => new THREE.Vector3(rng.range(-1, 1), rng.range(-1, 1), rng.range(-1, 1)).normalize();
+  // Broad lobes out, dents in, then knobs: each a smooth bump round its direction (ice is rounder).
+  const soft = icy ? 0.8 : 1;
+  const lobes = [
+    ...Array.from({ length: 10 }, () => ({ d: dir(), a: rng.range(0.1, 0.38) * soft, s: rng.range(1.2, 5) })),
+    ...Array.from({ length: icy ? 2 : 4 }, () => ({ d: dir(), a: -rng.range(0.15, 0.32) * soft, s: rng.range(3, 10) })),
+    ...Array.from({ length: 24 }, () => ({ d: dir(), a: rng.range(-0.06, 0.07) * soft, s: rng.range(12, 30) })),
+  ];
+  const stretch = new THREE.Vector3(rng.range(1.1, 1.45), rng.range(0.75, 1), rng.range(0.8, 1.05));
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).normalize();
+    let r = 0.75;
+    for (const l of lobes) r += l.a * Math.exp(l.s * (v.dot(l.d) - 1));
+    v.multiplyScalar(r).multiply(stretch);
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  geo.computeVertexNormals();
+  makeOutward(geo);
+  return geo;
 }
 
 /** A field and what it holds now, as the game reports it. */

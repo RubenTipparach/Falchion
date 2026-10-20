@@ -34,6 +34,8 @@ export interface MegaGroundDef {
   readonly reliefKm: number;
   /** Sea level in noise units: higher is more sea. */
   readonly sea: number;
+  /** How many of BROAD_OCTAVES the land has: the larger the structure, the larger its shapes. */
+  readonly broad: number;
   /** Where on the noise the land is (keeps (0, 0) on dry land). */
   readonly offset: readonly [number, number, number];
   /** Spacing of possible city sites, km, and the cities' radius range. */
@@ -49,6 +51,7 @@ interface ShapeTable {
   readonly featureKm: number;
   readonly reliefKm: number;
   readonly sea: number;
+  readonly broad: number;
   readonly cityCellKm: number;
   readonly cityKm: readonly [number, number];
   readonly roamKm: number;
@@ -59,15 +62,15 @@ interface ShapeTable {
  * so the Arch is a band across the sky, not a hair.
  */
 const SHAPES: Readonly<Record<MegaSurfaceType, ShapeTable>> = {
-  ringworld: { radiusKm: 1.5e7, widthKm: 1.2e6, featureKm: 1800, reliefKm: 3.2, sea: 0.02, cityCellKm: 260, cityKm: [5, 22], roamKm: 15000 },
-  'dyson-sphere': { radiusKm: 3e7, widthKm: 0, featureKm: 2400, reliefKm: 4, sea: -0.02, cityCellKm: 300, cityKm: [6, 26], roamKm: 15000 },
-  'alderson-disk': { radiusKm: 0, widthKm: 0, featureKm: 2000, reliefKm: 3.6, sea: 0.05, cityCellKm: 280, cityKm: [5, 20], roamKm: 15000 },
+  ringworld: { radiusKm: 1.5e7, widthKm: 1.2e6, featureKm: 1800, reliefKm: 3.2, sea: 0.02, broad: 5, cityCellKm: 260, cityKm: [5, 22], roamKm: 15000 },
+  'dyson-sphere': { radiusKm: 3e7, widthKm: 0, featureKm: 2400, reliefKm: 4, sea: -0.02, broad: 7, cityCellKm: 300, cityKm: [6, 26], roamKm: 15000 },
+  'alderson-disk': { radiusKm: 0, widthKm: 0, featureKm: 2000, reliefKm: 6.5, sea: 0.05, broad: 8, cityCellKm: 280, cityKm: [5, 20], roamKm: 15000 },
   // One habitat of the swarm: a spinning cylinder, land strips between windows. Its land is the
   // painted O'Neill stripe (the render side): the height here only rolls it gently, with no seas.
-  'dyson-swarm': { radiusKm: 4, widthKm: 32, featureKm: 7, reliefKm: 0.05, sea: -0.6, cityCellKm: 5, cityKm: [0.5, 1.1], roamKm: 16 },
+  'dyson-swarm': { radiusKm: 4, widthKm: 32, featureKm: 7, reliefKm: 0.05, sea: -0.6, broad: 0, cityCellKm: 5, cityKm: [0.5, 1.1], roamKm: 16 },
   // A topopolis: the same tube, forty km round and with no end (it loops round its star again and
   // again); towns and cities along its strips.
-  topopolis: { radiusKm: 40, widthKm: 0, featureKm: 70, reliefKm: 0.3, sea: -0.6, cityCellKm: 34, cityKm: [1.5, 6], roamKm: 1500 },
+  topopolis: { radiusKm: 40, widthKm: 0, featureKm: 70, reliefKm: 0.3, sea: -0.6, broad: 0, cityCellKm: 34, cityKm: [1.5, 6], roamKm: 1500 },
 };
 
 /** The ground of a megastructure: its shape and where on the noise its land is. */
@@ -99,13 +102,16 @@ export function wrapX(def: MegaGroundDef, x: number): number {
 }
 
 /**
- * The land's broad scales: octaves 4, 16, ... 1024 feature sizes across, under the continents.
+ * The land's broad scales: octaves 4, 16, ... 65,536 feature sizes across, under the continents.
  * Without them a view from far off (thousands of km up, or across the system) sees one flat sea or
  * one flat continent, and the land pops into shape as the camera comes down; with them every height
- * has its own shapes, oceans and super-continents. The GLSL landNoise is the same, line for line.
- * Habitats (a tube a few km round) have none: they would not wrap.
+ * has its own shapes, ocean basins and super-continents. A structure has as many as fit it
+ * (MegaGroundDef.broad): the Alderson disk, hundreds of millions of km across, all eight; habitats
+ * (a tube a few km round) none, as they would not wrap. The GLSL landNoise is the same, line for line.
  */
-export const BROAD_OCTAVES: ReadonlyArray<readonly [scale: number, amp: number]> = [[4, 0.3], [16, 0.35], [64, 0.35], [256, 0.3], [1024, 0.25]];
+export const BROAD_OCTAVES: ReadonlyArray<readonly [scale: number, amp: number]> = [
+  [4, 0.3], [16, 0.35], [64, 0.35], [256, 0.3], [1024, 0.3], [4096, 0.35], [16384, 0.35], [65536, 0.3],
+];
 
 /**
  * The land's noise in about [-1, 1] at (x, z) km: the broad scales, then `oct` octaves. An octave
@@ -115,13 +121,13 @@ export const BROAD_OCTAVES: ReadonlyArray<readonly [scale: number, amp: number]>
 export function groundNoise(def: MegaGroundDef, x: number, z: number, oct: number): number {
   x = wrapX(def, x);
   let v = 0;
-  if (!isTube(def)) {
-    BROAD_OCTAVES.forEach(([scale, amp], i) => {
+  BROAD_OCTAVES.forEach(([scale, amp], i) => {
+    if (i < def.broad) {
       const f = def.featureKm * scale;
       const w = Math.min(Math.max(oct + Math.log2(scale), 0), 1);
       if (w > 0) v += w * amp * snoise(x / f + def.offset[0] * 0.37 + 11 + i * 7, z / f + def.offset[1] * 0.37 + 23 - i * 5, def.offset[2] + 50 + i * 4);
-    });
-  }
+    }
+  });
   let px = x / def.featureKm + def.offset[0], py = z / def.featureKm + def.offset[1], pz = def.offset[2];
   let a = 0.5;
   for (let i = 0; i < 14; i++) {
@@ -171,7 +177,9 @@ export function groundHeight(def: MegaGroundDef, x: number, z: number, oct: numb
 
 /** Height before cities (as the GLSL rawHeight). */
 export function rawHeight(def: MegaGroundDef, x: number, z: number, oct: number): number {
-  const land = groundNoise(def, x, z, oct) - def.sea;
+  // Eased into about +-0.8: the broad octaves make whole continents and ocean basins high or low,
+  // not mountains of the plains or trenches of the shelves (the GLSL rawHeight, the same).
+  const land = 0.8 * Math.tanh((groundNoise(def, x, z, oct) - def.sea) / 0.8);
   if (land <= 0) return land * def.reliefKm * 0.8;
   // Plains and hills, with mountain chains only where the land is high.
   const m = ridges(def, x, z);

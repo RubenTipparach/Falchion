@@ -97,6 +97,7 @@ function hullMaterial(o: HullOptions & { light: THREE.Color; seed: number }): TH
         uOffset: { value: new THREE.Vector3(...o.land.def.offset) },
         uFeature: { value: o.land.def.featureKm },
         uSea: { value: o.land.def.sea },
+        uBroad: { value: o.land.def.broad },
         uRelief: { value: o.land.def.reliefKm },
         uKmPer: { value: o.land.kmPer },
       } : {}),

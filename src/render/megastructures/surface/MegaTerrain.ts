@@ -16,8 +16,14 @@ import { MAX_MEGA_CITIES, MEGA_GROUND_GLSL } from './megaGround.glsl';
 const HALF = 32;
 /** The finest spacing the land is drawn at, km. */
 const FINEST_KM = 0.0005;
-/** A level starts sliding onto the next from this fraction of its half-width, and is fully slid by FULL. */
-const MORPH_START = 0.55, MORPH_FULL = 0.85;
+/**
+ * A level starts sliding onto the next from this fraction of its half-width, and is fully slid by
+ * FULL. START is past the finer level's farthest corner (a quarter of this level's grid off, with
+ * the camera up to a cell from centre and up its altitude: 0.79 of the half-width), so where the
+ * two meet this level has not begun to slide and its edge is the finer one's, with no cracks; FULL
+ * is short of this level's own nearest edge (30 of its 32 cells).
+ */
+const MORPH_START = 0.8, MORPH_FULL = 0.93;
 
 export interface TerrainView {
   /** Focus (site km) and the camera, km in the focus frame. */
@@ -34,6 +40,7 @@ export function landUniforms(def: MegaGroundDef): Record<string, THREE.IUniform>
     uFeature: { value: def.featureKm },
     uRelief: { value: def.reliefKm },
     uSea: { value: def.sea },
+    uBroad: { value: def.broad },
     uCityA: { value: Array.from({ length: MAX_MEGA_CITIES }, () => new THREE.Vector4()) },
     uCityLevel: { value: new Array<number>(MAX_MEGA_CITIES).fill(0) },
     uCityN: { value: 0 },
@@ -178,6 +185,10 @@ void main() {
   }
   vec2 gd = groundDetail(vSite, fw);
   vec3 col = landColour(vSite, h, vSlope, fw);
+  // Far off (toward the horizon), the mesh's vertices are too far apart to say where the coast is:
+  // the land as the far view draws it, its share of land and sea, rather than rows that flicker.
+  float farW = uHabitat < 0.5 ? smoothstep(uFeature * 0.02, uFeature * 0.1, fw) : 0.0;
+  if (farW > 0.0) col = mix(col, landFrom(vSite, fw), farW);
 #ifdef HABITAT
   {
     // The painted stripe: fields, woods and towns, its rivers and lakes; close up, the detail map
@@ -320,8 +331,10 @@ export class MegaTerrain {
       u.uSpacing.value = s;
       u.uE.value = HALF * s;
       u.uFinerCentre.value.copy(finer?.c ?? c);
-      // Strictly inside the finer level's square (a hair less, so the two always meet).
-      u.uFinerE.value = finer ? finer.e - s * 0.01 : 0;
+      // Inside the finer level's square, less one of this level's cells: the finer level's outer
+      // ring has slid fully onto this grid, so the two lie on each other there, and a grazing view
+      // finds no gap between them (cut at the edge itself, slivers of sky showed through).
+      u.uFinerE.value = finer ? finer.e - s : 0;
       finer = { c, e: HALF * s };
       this.extent = HALF * s;
     });

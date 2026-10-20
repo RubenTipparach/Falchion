@@ -14,7 +14,7 @@ export const MAX_MEGA_CITIES = 24;
  */
 /**
  * The land's noise (src/core/mega/MegaGround.ts groundNoise, line for line, before any wrap): the
- * broad scales (not in a habitat), then octaves to oct (fractional: the last fades in; 0: the broad
+ * broad scales (uBroad of them), then octaves to oct (fractional: the last fades in; 0: the broad
  * scales alone). Shared by the ground, its far view and the system view's drawing of the
  * structure, so the land is the same land at every distance.
  */
@@ -23,10 +23,12 @@ ${NOISE_GLSL}
 uniform vec3 uOffset;
 uniform float uFeature;
 uniform float uSea;
-float landNoise(vec2 site, float oct, bool broad) {
+/** How many broad octaves the land has (MegaGroundDef.broad). */
+uniform float uBroad;
+float landNoise(vec2 site, float oct) {
   float v = 0.0;
-  if (broad) {
-${BROAD_OCTAVES.map(([sc, amp], i) => `    v += clamp(oct + ${Math.log2(sc).toFixed(1)}, 0.0, 1.0) * ${amp.toFixed(3)} * snoise(vec3(site / (uFeature * ${sc.toFixed(1)}) + uOffset.xy * 0.37 + vec2(${(11 + i * 7).toFixed(1)}, ${(23 - i * 5).toFixed(1)}), uOffset.z + ${(50 + i * 4).toFixed(1)}));`).join('\n')}
+  {
+${BROAD_OCTAVES.map(([sc, amp], i) => `    if (uBroad > ${i}.5) v += clamp(oct + ${Math.log2(sc).toFixed(1)}, 0.0, 1.0) * ${amp.toFixed(3)} * snoise(vec3(site / (uFeature * ${sc.toFixed(1)}) + uOffset.xy * 0.37 + vec2(${(11 + i * 7).toFixed(1)}, ${(23 - i * 5).toFixed(1)}), uOffset.z + ${(50 + i * 4).toFixed(1)}));`).join('\n')}
   }
   vec3 p = vec3(site / uFeature + uOffset.xy, uOffset.z);
   float a = 0.5;
@@ -59,7 +61,7 @@ vec2 wrapSite(vec2 s) {
   float c = 6.28318530718 * uRadius;
   return vec2(s.x - c * floor((s.x + c * 0.5) / c), s.y);
 }
-float groundNoise(vec2 site, float oct) { return landNoise(wrapSite(site), oct, uHabitat < 0.5); }
+float groundNoise(vec2 site, float oct) { return landNoise(wrapSite(site), oct); }
 float ridges(vec2 site) {
   site = wrapSite(site);
   vec3 p = vec3(site / uFeature * 2.6 + uOffset.xy + vec2(31.0, 17.0), uOffset.z + 5.0);
@@ -73,7 +75,7 @@ float ridges(vec2 site) {
   return v;
 }
 float rawHeight(vec2 site, float oct) {
-  float land = groundNoise(site, oct) - uSea;
+  float land = 0.8 * tanh((groundNoise(site, oct) - uSea) / 0.8);
   if (land <= 0.0) return land * uRelief * 0.8;
   float m = ridges(site);
   return (land * 0.6 + smoothstep(0.14, 0.5, land) * m * m * 1.9) * uRelief;
@@ -139,36 +141,69 @@ vec3 bendDir(vec2 rel, vec3 v) {
   return v * c + cross(k, v) * s + k * dot(k, v) * (1.0 - c);
 }
 
-/** The land's colour: sea, shore, grass and forest by how wet it is, dry plains, rock and snow. */
+/** How much of a pattern of blobs size km across is left in a pixel fw km across (fading to its mean). */
+float seen(float size, float fw) { return 1.0 - smoothstep(size * 0.15, size * 0.6, fw); }
+/**
+ * The land's climate at site: x how wet (below -0.9 desert, then steppe, grass, forest, and above
+ * 0.6 rainforest), y how cold (above 0.3 tundra and taiga, above 0.65 ice). The wetness of a few
+ * continents' size; arid belts and cold regions tens to hundreds of continents across, so a view from
+ * far off has deserts, ice sheets and jungles to tell apart. Each scale goes to its mean once a pixel
+ * (fw km) is wider than it.
+ */
+vec2 climate(vec2 site, float fw) {
+  vec3 q = vec3(wrapSite(site) / uFeature + uOffset.xy, uOffset.z);
+  float w0 = seen(uFeature, fw), w1 = seen(uFeature * 20.0, fw), w2 = seen(uFeature * 150.0, fw), w3 = seen(uFeature * 400.0, fw);
+  float wet = w0 > 0.0 ? snoise(q * 0.8 + vec3(40.0, 11.0, 7.0)) * w0 : 0.0;
+  float arid = (w1 > 0.0 ? snoise(q / 40.0 + vec3(7.0, 3.0, 1.0)) * 0.6 * w1 : 0.0) + (w2 > 0.0 ? snoise(q / 300.0 + vec3(2.0, 9.0, 4.0)) * 0.55 * w2 : 0.0);
+  float cold = w3 > 0.0 ? snoise(q / 800.0 + vec3(13.0, 5.0, 8.0)) * w3 : 0.0;
+  return vec2(wet - arid, cold);
+}
+/** The lowland's colour for a wetness w and cold c (mott: mottling in about [-1, 1]). */
+vec3 biome(float w, float c, float lowland, float mott) {
+  vec3 sand = mix(vec3(0.76, 0.62, 0.4), vec3(0.66, 0.4, 0.24), smoothstep(-0.2, -0.6, c));
+  vec3 dry = mix(vec3(0.5, 0.43, 0.28), vec3(0.4, 0.36, 0.22), mott * 0.5 + 0.5);
+  vec3 grass = mix(vec3(0.3, 0.42, 0.14), vec3(0.18, 0.32, 0.1), smoothstep(-0.2, 0.4, w));
+  vec3 forest = mix(vec3(0.07, 0.17, 0.07), vec3(0.03, 0.15, 0.06), smoothstep(0.5, 0.9, w));
+  vec3 col = mix(sand, dry, smoothstep(-1.1, -0.75, w));
+  col = mix(col, grass, smoothstep(-0.45, -0.1, w));
+  col = mix(col, forest, smoothstep(0.05, 0.35, w + mott * 0.15) * lowland);
+  // Cold: tundra where it is dry, dark taiga where it is wet, then ice.
+  vec3 cool = mix(vec3(0.44, 0.43, 0.35), vec3(0.1, 0.19, 0.14), smoothstep(-0.3, 0.2, w) * lowland);
+  col = mix(col, cool, smoothstep(0.3, 0.55, c));
+  return mix(col, vec3(0.88, 0.9, 0.94), smoothstep(0.65, 0.8, c));
+}
+
+/** The land's colour: seas, deserts, steppe, grass, forest, rainforest, tundra, taiga, ice, rock and snow. */
 vec3 landColour(vec2 site, float h, float slope, float fw) {
   site = wrapSite(site);
   vec3 q = vec3(site / uFeature + uOffset.xy, uOffset.z);
-  // How wet. Once its patches are smaller than a pixel the land is the average of its dry plains,
-  // grass and forest (below), not its colour at the mean wetness.
-  float wetGone = smoothstep(uFeature * 0.15, uFeature * 0.6, fw);
-  float wet = wetGone < 1.0 ? snoise(q * 0.8 + vec3(40.0, 11.0, 7.0)) : 0.0;
+  vec2 cl = climate(site, fw);
   // Mottling, each scale gone before it is smaller than a pixel (fw: a pixel's size, km).
   float m14 = 1.0 - smoothstep(uFeature / 14.0 * 0.1, uFeature / 14.0 * 0.4, fw);
   float m61 = 1.0 - smoothstep(uFeature / 61.0 * 0.1, uFeature / 61.0 * 0.4, fw);
   float mott = (m14 > 0.0 ? snoise(q * 14.0 + vec3(3.0)) * 0.6 * m14 : 0.0) + (m61 > 0.0 ? snoise(q * 61.0 + vec3(9.0)) * 0.4 * m61 : 0.0);
   if (h < 0.0) {
     float depth = clamp(-h / (uRelief * 0.35), 0.0, 1.0);
-    return mix(vec3(0.08, 0.32, 0.38), vec3(0.015, 0.06, 0.16), sqrt(depth));
+    // Warm shallows turquoise, cold seas grey, the coldest frozen over.
+    vec3 shallow = mix(vec3(0.08, 0.32, 0.38), vec3(0.1, 0.44, 0.46), smoothstep(0.0, -0.6, cl.y));
+    shallow = mix(shallow, vec3(0.2, 0.3, 0.36), smoothstep(0.2, 0.6, cl.y));
+    vec3 sea = mix(shallow, vec3(0.015, 0.06, 0.16), sqrt(depth));
+    return mix(sea, vec3(0.78, 0.84, 0.9), smoothstep(0.7, 0.85, cl.y));
   }
-  // Height over the relief: mountains reach about 1.7, the snow line is above 1.
+  // Height over the relief: mountains reach about 1.7, the snow line is above 1 (lower in the cold).
   float e = h / uRelief;
-  vec3 grass = mix(vec3(0.3, 0.42, 0.14), vec3(0.18, 0.32, 0.1), smoothstep(-0.2, 0.4, wet));
-  vec3 forest = vec3(0.07, 0.17, 0.07);
-  vec3 dry = mix(vec3(0.5, 0.43, 0.28), vec3(0.4, 0.36, 0.22), mott * 0.5 + 0.5);
   float lowland = 1.0 - smoothstep(0.45, 0.7, e);
-  vec3 col = mix(dry, grass, smoothstep(-0.45, -0.1, wet));
-  col = mix(col, forest, smoothstep(0.05, 0.35, wet + mott * 0.15) * lowland);
-  vec3 mean = dry * 0.3 + vec3(0.24, 0.37, 0.12) * 0.35 + mix(vec3(0.24, 0.37, 0.12), forest, lowland) * 0.35;
-  col = mix(col, mean, wetGone);
-  col = mix(vec3(0.6, 0.56, 0.43), col, smoothstep(0.004, 0.015, e));
+  vec3 col = biome(cl.x, cl.y, lowland, mott);
+  // Once the wetness pattern is smaller than a pixel: the average over it, not the mean's colour.
+  float wetGone = 1.0 - seen(uFeature, fw);
+  if (wetGone > 0.0) {
+    vec3 mean = (biome(cl.x - 0.55, cl.y, lowland, mott) + biome(cl.x, cl.y, lowland, mott) * 2.0 + biome(cl.x + 0.55, cl.y, lowland, mott)) * 0.25;
+    col = mix(col, mean, wetGone);
+  }
+  col = mix(mix(vec3(0.6, 0.56, 0.43), vec3(0.62, 0.62, 0.6), smoothstep(0.3, 0.6, cl.y)), col, smoothstep(0.004, 0.015, e));
   vec3 rock = mix(vec3(0.33, 0.31, 0.29), vec3(0.45, 0.42, 0.38), mott * 0.5 + 0.5);
   col = mix(col, rock, max(smoothstep(0.32, 0.55, slope), smoothstep(0.65, 0.9, e + mott * 0.06)));
-  col = mix(col, vec3(0.86, 0.88, 0.92), smoothstep(1.05, 1.15, e + mott * 0.08 - slope * 0.4));
+  col = mix(col, vec3(0.86, 0.88, 0.92), smoothstep(1.05, 1.15, e + mott * 0.08 - slope * 0.4 + max(cl.y, 0.0) * 0.9));
   return col * (0.9 + 0.1 * mott);
 }
 
@@ -179,25 +214,25 @@ vec3 landColour(vec2 site, float h, float slope, float fw) {
  */
 vec3 landFrom(vec2 site, float fp) {
   // A blob of noise is about half its octave's size across: keep only those of two pixels or more.
-  float oct = clamp(log2(uFeature / max(fp * 4.0, 1e-6)), -11.0, 5.0);
+  float oct = clamp(log2(uFeature / max(fp * 4.0, 1e-6)), -17.0, 5.0);
   float land = groundNoise(site, oct) - uSea;
   // The octaves left out still put coast through the pixel: how much of it is land, from their
   // spread (a simplex octave's is about a third of its amplitude), so a far pixel is the blend of
   // its land and sea rather than whichever the octaves it can show say.
   float spread = 0.0;
-${BROAD_OCTAVES.map(([sc, amp]) => `  spread += pow(${amp.toFixed(3)} * (1.0 - clamp(oct + ${Math.log2(sc).toFixed(1)}, 0.0, 1.0)), 2.0);`).join('\n')}
+${BROAD_OCTAVES.map(([sc, amp], i) => `  if (uBroad > ${i}.5) spread += pow(${amp.toFixed(3)} * (1.0 - clamp(oct + ${Math.log2(sc).toFixed(1)}, 0.0, 1.0)), 2.0);`).join('\n')}
   float a = 0.5;
   for (int i = 0; i < 8; i++) { spread += pow(a * (1.0 - clamp(oct - float(i), 0.0, 1.0)), 2.0); a *= 0.5; }
   spread = 0.35 * sqrt(spread);
   float cover = smoothstep(-0.5 * spread, 0.5 * spread, land);
   // rawHeight, its ridges (a few hundred km across) gone to their mean once a pixel is wider.
-  float shore = max(land, 0.03);
+  float shore = max(0.8 * tanh(land / 0.8), 0.03);
   float sharp = 1.0 - smoothstep(uFeature * 0.04, uFeature * 0.15, fp);
   float m = sharp > 0.0 ? mix(0.45, ridges(site), sharp) : 0.45;
   float h = (shore * 0.6 + smoothstep(0.14, 0.5, shore) * m * m * 1.9) * uRelief;
   vec3 ground = landColour(site, h, 0.0, fp);
   if (cover >= 1.0) return ground;
-  vec3 sea = landColour(site, min(land, -0.002) * uRelief * 0.8, 0.0, fp);
+  vec3 sea = landColour(site, min(0.8 * tanh(land / 0.8), -0.002) * uRelief * 0.8, 0.0, fp);
   return mix(sea, ground, cover);
 }
 

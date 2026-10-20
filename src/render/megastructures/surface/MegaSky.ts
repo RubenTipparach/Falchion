@@ -76,10 +76,14 @@ float squaresDay(float a) {
  * The land dist km away: its colour, blurred to the land's average as a pixel there spans more
  * than its features (the far side of a shell is 60 million km off: its continents are specks).
  */
-/** The land dist km off along d, its up n: a pixel's footprint stretched as the view grazes it. */
+/**
+ * The land dist km off along d, its up n: a pixel's footprint stretched as the view grazes it (by
+ * the square root: a grazing pixel is long but not wide, and blurring it all to its length leaves
+ * the land toward the horizon one flat colour).
+ */
 float farFp = 0.0;
 vec3 farLand(vec2 site, float dist, vec3 d, vec3 n) {
-  farFp = dist * uPixelAngle / max(abs(dot(d, n)), 0.15);
+  farFp = dist * uPixelAngle / sqrt(max(abs(dot(d, n)), 0.02));
   return landFrom(site, farFp);
 }
 vec3 lightLand(vec3 col, vec2 site, float day, float sunUp) {

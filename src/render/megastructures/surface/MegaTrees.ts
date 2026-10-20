@@ -53,10 +53,12 @@ void main() {
   float h = groundHeight(site, octavesAt(camDist(rel)));
   float e = h / uRelief;
   if (h < 0.004 || e > 1.05) { gl_FragColor = none; return; }
-  // What grows here: forest where it is wet (thick in groves), shrubs and stones on dry plains,
-  // boulders up among the rocks.
+  // What grows here, by the land's climate (as its colour has it): forest where it is wet (thick in
+  // groves), shrubs and stones on dry plains, bare desert and ice, boulders up among the rocks.
   vec3 q = vec3(wrapSite(site) / uFeature + uOffset.xy, uOffset.z);
-  float wet = snoise(q * 0.8 + vec3(40.0, 11.0, 7.0));
+  vec2 cl = climate(site, 0.0);
+  float wet = cl.x;
+  if (cl.y > 0.65 || wet < -1.0) { gl_FragColor = none; return; }
   float groves = snoise(q * 120.0 + vec3(5.0)) * 0.5 + 0.5;
   float forest = smoothstep(-0.45, -0.05, wet) * mix(0.25, 1.0, smoothstep(0.3, 0.6, groves + wet * 0.25)) * (1.0 - smoothstep(0.5, 0.75, e));
 #ifdef HABITAT

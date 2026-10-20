@@ -24,7 +24,7 @@ import { setThumbs } from '../ui/thumbs';
 import { ResourceLedger } from '../ui/ResourceLedger';
 import { NebulaLayer } from '../render/map/NebulaLayer';
 import { LowResBackground } from '../render/map/LowResBackground';
-import { touchFirst } from '../ui/dom';
+import { h, touchFirst } from '../ui/dom';
 import { OrbitStick } from '../ui/OrbitStick';
 import { LoadingPill } from '../ui/LoadingPill';
 import { ShaderWarmup } from '../render/planets/surface/ShaderWarmup';
@@ -417,11 +417,20 @@ async function bootstrap(): Promise<void> {
   // (or this one after a reload) picks up exactly where this tab left off.
   const persistNow = () => { clearTimeout(saveTimer); persist(); };
   window.addEventListener('pagehide', () => persistNow());
-  // A new version on the server: save, say so, and reload onto it.
+  // A new version on the server: save, and offer to reload onto it. A player away from the keys
+  // for a minute is reloaded for them; one who is playing chooses when.
+  let lastInput = performance.now();
+  for (const e of ['pointerdown', 'keydown', 'wheel', 'touchstart']) window.addEventListener(e, () => { lastInput = performance.now(); }, { passive: true, capture: true });
+  let updateShown = false;
   clock.onNewVersion(() => {
     persistNow();
-    hud.setContact('Falchion was updated. Saving and reloading…');
-    setTimeout(() => location.reload(), 2_500);
+    if (updateShown) return;
+    updateShown = true;
+    const reload = () => { persistNow(); setTimeout(() => location.reload(), 300); };
+    app.append(h('div', { class: 'update-banner frame', role: 'status' },
+      h('span', {}, 'Falchion was updated.'),
+      h('button', { class: 'btn primary', onclick: reload }, 'Refresh now')));
+    const idle = setInterval(() => { if (performance.now() - lastInput >= 60_000) { clearInterval(idle); reload(); } }, 5_000);
   });
   // One tab plays the empire: if another tab saves it, this one stops writing and offers to take over.
   // Server announcements (set in the admin portal) show as a banner for everyone.

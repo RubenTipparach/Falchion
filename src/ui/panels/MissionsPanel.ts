@@ -1,6 +1,7 @@
 import type { GameState } from '../../app/GameState';
 import type { Store } from '../../app/Store';
 import { SEATS, SEAT_BY_ID, SEEK_COST, type Seat } from '../../content/advisors';
+import { portrait } from '../portrait';
 import { CHAPTERS, MISSION_BY_ID } from '../../content/missions';
 import type { Resource } from '../../content/resources';
 import { ADVISOR_MAX, LEADER_MAX, NEW_COURT, advisorEffects, describeEffects, openSeats, xpToNext, type Advisor } from '../../core/empire/Court';
@@ -11,6 +12,8 @@ import type { GameActions, GameQueries } from '../GameActions';
 import { icon, resourceIcon, type IconName } from '../icons';
 
 type Tab = 'missions' | 'quests' | 'court' | 'chronicle';
+/** Each seat's uniform, in its portraits. */
+const UNIFORM: Record<Seat, string> = { steward: '#3f6a4a', chancellor: '#5a3f7a', admiral: '#2f4a7a', science: '#2f6a78', prelate: '#7a5a2f', spymaster: '#3a3a44' };
 const TABS: Array<[Tab, string]> = [['missions', 'Story'], ['quests', 'Faction quests'], ['court', 'Court'], ['chronicle', 'Chronicle']];
 
 /**
@@ -139,7 +142,8 @@ export class MissionsPanel extends Drawer {
     const influence = this.store.state.empire.materials.influence ?? 0;
     this.content.append(
       h('div', { class: 'ruler' },
-        h('div', { class: 'ruler-level' }, h('span', { class: 'eyebrow' }, 'Level'), h('b', {}, String(L.level))),
+        h('div', { class: 'ruler-face' }, portrait(`ruler:${this.q.rulerName()}`, { size: 72, uniform: '#7a5a1e' }),
+          h('div', { class: 'ruler-level' }, h('span', { class: 'eyebrow' }, 'Level'), h('b', {}, String(L.level)))),
         h('div', { class: 'ruler-info' },
           h('h3', {}, this.q.rulerName()),
           L.level < LEADER_MAX
@@ -165,7 +169,7 @@ export class MissionsPanel extends Drawer {
     const trait = seat.traits.find((t) => t.id === a.trait);
     const bonus = advisorEffects(a).map(describeEffects).filter(Boolean).join(', ');
     return h('div', { class: 'advisor' },
-      h('div', { class: 'row' }, h('b', {}, a.name), h('span', { class: 'pill' }, `Lv ${a.level}`), trait ? h('span', { class: 'small muted', title: trait.blurb }, trait.name) : '', a.origin ? h('span', { class: 'small muted' }, `of the ${a.origin}`) : ''),
+      h('div', { class: 'row' }, portrait(a.id, { size: 52, uniform: UNIFORM[a.seat] }), h('b', {}, a.name), h('span', { class: 'pill' }, `Lv ${a.level}`), trait ? h('span', { class: 'small muted', title: trait.blurb }, trait.name) : '', a.origin ? h('span', { class: 'small muted' }, `of the ${a.origin}`) : ''),
       a.level < ADVISOR_MAX ? h('div', { class: 'xp' }, h('span', { class: 'meter' }, h('i', { style: `width:${Math.round((100 * a.xp) / xpToNext(a.level))}%` })), h('span', { class: 'mono small muted' }, `${a.xp} / ${xpToNext(a.level)} XP`)) : '',
       h('div', { class: 'small green' }, bonus),
       h('div', { class: 'row' },
@@ -176,6 +180,7 @@ export class MissionsPanel extends Drawer {
   private candidateRow(c: Advisor, room: boolean): HTMLElement {
     const trait = SEAT_BY_ID[c.seat].traits.find((t) => t.id === c.trait);
     return h('div', { class: 'candidate' },
+      portrait(c.id, { size: 40, uniform: UNIFORM[c.seat] }),
       h('span', { class: 'small' }, h('b', {}, c.name), ` · ${trait?.name ?? ''}${c.origin ? ` · of the ${c.origin}` : ''}`),
       h('span', { class: 'small muted' }, trait?.blurb ?? ''),
       h('button', { class: 'chip', disabled: !room, title: room ? '' : 'Your ruler cannot keep another advisor yet', onclick: () => this.actions.appointAdvisor(c.id) }, 'Appoint'));

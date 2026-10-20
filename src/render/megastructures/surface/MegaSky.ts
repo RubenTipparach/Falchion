@@ -90,7 +90,7 @@ vec3 lightLand(vec3 col, vec2 site, float day, float sunUp) {
   // Cities' lights on the night side, as far off as they can be told apart.
   float city = step(0.94, hash13(vec3(floor(site / 60.0), 3.0)));
   lit += vec3(1.0, 0.72, 0.4) * city * 0.35 * (1.0 - day);
-  return lit + col * 0.01 * (1.0 - day);
+  return lit + col * vec3(0.16, 0.19, 0.27) * (1.0 - day);
 }
 void main() {
   vec3 d = normalize(vDir);
@@ -204,7 +204,7 @@ void main() {
     float sd = dot(r, s);
     col += uSunCol * (smoothstep(cos(uStarRad), cos(uStarRad * 0.85), sd) * 4.0 + pow(max(sd, 0.0), 300.0) * 1.2);
     // Down an endless tube, past the land drawn near, it goes on into its own haze.
-    if (uStrands > 0.5) col = mix(col, mix(vec3(0.03, 0.04, 0.07), vec3(0.62, 0.72, 0.84), uDay), smoothstep(0.93, 0.995, abs(d.z)));
+    if (uStrands > 0.5) col = mix(col, mix(vec3(0.08, 0.1, 0.16), vec3(0.62, 0.72, 0.84), uDay), smoothstep(0.93, 0.995, abs(d.z)));
     gl_FragColor = vec4(col, 1.0);
     return;
   }

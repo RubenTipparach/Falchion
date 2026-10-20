@@ -113,7 +113,7 @@ void main() {
   // Off the star, the panels catch the habitat's own light.
   vec3 col = panels * 0.22 + env * (0.75 + 0.25 * panels.r);
   // Shut for the night, they turn their silvering away: only a glint is left.
-  gl_FragColor = vec4(col * mix(0.15, 1.0, uDay), 1.0);
+  gl_FragColor = vec4(col * mix(0.35, 1.0, uDay), 1.0);
 }`;
 
 const PUFF_VERT = /* glsl */ `

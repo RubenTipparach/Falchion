@@ -203,7 +203,7 @@ vec3 skyColour(vec3 dir) {
   float toward = max(dot(normalize(vec3(dir.x, 0.0, dir.z) + 1e-6), normalize(vec3(uSun.x, 0.0, uSun.z) + 1e-6)), 0.0);
   day = mix(day, vec3(0.95, 0.55, 0.3), uDawn * (1.0 - smoothstep(0.0, 0.35, abs(e))) * toward * 0.75);
   day += uSunCol * pow(max(dot(dir, uSun), 0.0), 24.0) * 0.3;
-  vec3 night = mix(vec3(0.02, 0.03, 0.06), vec3(0.04, 0.05, 0.09), 1.0 - abs(e));
+  vec3 night = mix(vec3(0.05, 0.07, 0.13), vec3(0.1, 0.12, 0.19), 1.0 - abs(e));
   vec3 c = mix(night, day, uDay);
   return c * mix(0.0, 1.0, thick) * smoothstep(-0.25, 0.0, e + (1.0 - thick) * 0.25);
 }
@@ -216,7 +216,7 @@ float airPath(vec3 dir, float dist) {
 /** Haze over something dist km away along dir. */
 vec3 airOver(vec3 col, vec3 dir, float dist) {
   float f = 1.0 - exp(-airPath(dir, dist) / uHazeKm);
-  vec3 haze = mix(vec3(0.03, 0.04, 0.07), mix(vec3(0.62, 0.72, 0.84), vec3(0.95, 0.62, 0.4), uDawn * 0.6), uDay);
+  vec3 haze = mix(vec3(0.08, 0.1, 0.16), mix(vec3(0.62, 0.72, 0.84), vec3(0.95, 0.62, 0.4), uDawn * 0.6), uDay);
   return mix(col, haze, f);
 }
 `;

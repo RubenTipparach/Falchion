@@ -249,7 +249,8 @@ void main() {
     lit += uSunCol * pow(max(dot(n, hv), 0.0), 120.0) * 0.8 * uDay;
     lit = mix(lit, skyColour(reflect(view, n)) * 0.7, pow(1.0 - max(dot(-view, n), 0.0), 4.0) * 0.6);
   }
-  lit += col * vec3(0.015, 0.02, 0.035) * (1.0 - uDay);
+  // Night is a blue dusk (starlight, the glow of the far side, the cities), never black.
+  lit += col * vec3(0.16, 0.19, 0.27) * (0.75 + 0.25 * n.y) * (1.0 - uDay);
   lit += vec3(1.0, 0.72, 0.38) * glow * (1.0 - uDay) * 0.7;
   gl_FragColor = vec4(airOver(lit, view, dist), 1.0);
 }`;

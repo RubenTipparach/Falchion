@@ -75,12 +75,13 @@ void main() {
   vec3 col = roof > 0.5 ? wall * 0.6 : mix(wall, glass, pane * 0.85);
   float ndl = max(dot(n, sunAt(vRel)), 0.0);
   vec3 lit = col * (uSunCol * ndl + vec3(0.34, 0.38, 0.46) * (0.45 + 0.2 * n.y)) * uDay;
-  lit += col * vec3(0.02, 0.025, 0.04) * (1.0 - uDay);
+  lit += col * vec3(0.16, 0.19, 0.27) * (1.0 - uDay);
   // Lit windows at night, room by room.
   float on = step(0.55, hash13(vec3(floor(w), vSeed * 97.0)));
   lit += vec3(1.0, 0.8, 0.52) * pane * mix(on, 0.45, tiny) * (1.0 - roof) * (1.0 - uDay) * 0.9;
-  // A beacon on the tallest roofs.
-  lit += vec3(1.0, 0.2, 0.15) * roof * step(0.3, vHeight) * (0.5 + 0.5 * sin(uTime * 3.0 + vSeed * 40.0)) * (1.0 - uDay * 0.7);
+  // An aircraft beacon, a small blinking point, on some of the tallest roofs at night.
+  float beacon = roof * step(0.3, vHeight) * step(fract(vSeed * 13.7), 0.35) * (1.0 - smoothstep(0.002, 0.003, length(vLocal.xz)));
+  lit += vec3(1.0, 0.25, 0.18) * beacon * step(0.6, fract(uTime * 0.7 + vSeed * 5.0)) * 3.0 * (1.0 - uDay);
   gl_FragColor = vec4(airOver(lit, view, dist), 1.0);
 }`;
 

@@ -1030,9 +1030,11 @@ button.field-row:hover { background: var(--raise); }
 table.data.stocks td { vertical-align: middle; }
 .trade-btns { display: inline-flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
 .exchange { display: grid; border-top: 1px solid var(--line-strong); }
-.ex-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 7px 4px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.ex-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 7px 4px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .ex-head { font: 600 10px var(--font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); padding: 6px 4px; }
-.ex-res { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.ex-res { display: flex; gap: 8px; align-items: center; min-width: 0; background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ex-row.charted .ex-res b { color: var(--chart); }
+.ex-trend { display: grid; justify-items: end; gap: 1px; }
 .ex-res > span { display: grid; }
 .ex-price { display: grid; text-align: right; font-size: 12px; }
 .ex-row .trade-btns { flex-direction: column; align-items: stretch; }
@@ -1180,3 +1182,39 @@ body.battle-open .orbit-stick { top: calc(50% - 42px); bottom: auto; }
 @keyframes lp-slide { 0% { left: -35%; } 100% { left: 100%; } }
 .loading-pill.nudge { border-color: var(--chart); animation: lp-nudge 0.5s ease-out; }
 @keyframes lp-nudge { 0% { transform: translateX(-50%) scale(1); } 40% { transform: translateX(-50%) scale(1.08); } 100% { transform: translateX(-50%) scale(1); } }
+.hold { display: grid; gap: 4px; }
+.hold .hold-res { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); }
+
+/* Market history (change holds-and-market-history). */
+.price-chart { display: grid; gap: 8px; }
+.pc-head { flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.pc-head h4 { margin: 0 auto 0 0; }
+.pc-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.market-chart { display: grid; gap: 6px; }
+.mc-plot { position: relative; }
+.mc-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.mc-grid { stroke: var(--line); stroke-width: 1; }
+.mc-axis { fill: var(--muted); font: 10px var(--font-mono); }
+.mc-end { fill: var(--muted); font: 11px var(--font-body); }
+.mc-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.mc-key { stroke-width: 2; stroke-linecap: round; }
+.mc-hair { stroke: var(--line-strong); stroke-width: 1; }
+.mc-dot { stroke: var(--panel-solid); stroke-width: 2; }
+.mc-hit { fill: transparent; cursor: crosshair; touch-action: pan-y; }
+.mc-tip { position: absolute; top: 6px; min-width: 150px; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel-solid); font-size: 12px; pointer-events: none; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4); }
+.mc-tip-when { color: var(--muted); margin-bottom: 3px; }
+.mc-tip-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.mc-tip-row i { width: 10px; height: 2px; border-radius: 1px; }
+.mc-tip-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
+.mc-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.mc-legend i { width: 12px; height: 2px; border-radius: 1px; }
+.mc-table table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+.mc-table th, .mc-table td { text-align: right; padding: 2px 6px; border-bottom: 1px solid var(--line); }
+.mc-table th:first-child, .mc-table td:first-child { text-align: left; }
+.mc-spark { width: 72px; height: 20px; }
+.mc-spark path { fill: none; stroke: var(--chart); stroke-width: 1.5; }
+@media (max-width: 640px) {
+  .ex-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .ex-row .ex-trend { display: none; }
+}

@@ -83,7 +83,7 @@ to them bumps `v` and is written down here. Ids are the game's own: resource ids
 | `buildings` | Count of each building across all worlds. |
 | `depots` | Supply depots built. |
 | `ships` | Every ship owned: `ships.total`, `ships.byClass`, `ships.byRole` (`combat`, `capital`, `mining`, `logistics`), `ships.deployed` (in fleets), `ships.docked` (at the home dock). |
-| `fleets` | `{ count, moving, inBattle, list }`; each of `list`: `{ id, name, ships, at, star, moving, stance, supply, hull, inBattle, company }` where `at` is the hex it is in, `star` the star there (or null in deep space), `stance` `aggressive` or `passive`, `hull` the share of hull points left (0 to 1), `company` the company running it (or null). |
+| `fleets` | `{ count, moving, inBattle, list }`; each of `list`: `{ id, name, ships, at, star, moving, stance, supply, hull, inBattle, company, hold }` where `at` is the hex it is in, `star` the star there (or null in deep space), `stance` `aggressive` or `passive`, `hull` the share of hull points left (0 to 1), `company` the company running it (or null), `hold` the ore its miners carry by resource (mined away from a friendly system and not yet unloaded: not in `resources`), or null. |
 | `military` | `{ warships, attack, hull, power }`: ships with an attack, the sum of attack and of hull over every ship owned, and the encounter strength `10 + attack / 3`. |
 | `construction` | `{ queued, ships, buildings }`: jobs in the yards and on worlds, by ship class and building. |
 | `research` | `{ researched, of, nodes, focus, inProgress }`: nodes researched and in the whole tree, their ids, the node research is focused on, and shards collected toward unfinished nodes. |

@@ -2,6 +2,7 @@ import type { BattleRecord } from '../combat/BattleRecord';
 import type { Damage, Squadron } from '../combat/Combat';
 import { arrivalTurn, type FleetMovement } from './Fleet';
 import type { Stores } from './Logistics';
+import type { Resource } from '../../content/resources';
 
 /** What a fleet does on its own while the player is away. */
 export interface FleetOrders {
@@ -48,6 +49,11 @@ export interface Loadout extends Stores {
   readonly company?: string;
   /** Colony arks loaded with colonists: one colony's worth each (change commerce). */
   readonly colonists?: number;
+  /**
+   * Ore its mining ships mined away from a friendly system, carried until it reaches one
+   * (change holds-and-market-history): not the empire's to sell or spend until unloaded.
+   */
+  readonly hold?: Readonly<Partial<Record<Resource, number>>>;
 }
 
 export interface FleetBattle {

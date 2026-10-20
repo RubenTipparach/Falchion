@@ -34,15 +34,14 @@ export const BUILDINGS: readonly BuildingDef[] = [
 ];
 
 /**
- * Storage caps. Income stops at the cap (the world runs every minute, so
- * stockpiles would otherwise grow without limit while you are away).
+ * Storage caps for what has to be stored somewhere: minerals, food and trade goods. Income stops at
+ * the cap (the world runs every minute, so a stockpile would otherwise grow without limit while you
+ * are away). Credits, influence and faith are not things in a warehouse and have no cap.
  */
 export const STORAGE = {
-  base: { credits: 4000, influence: 600, faith: 600, food: 500, goods: 600, metals: 1500, gases: 1200, crystals: 800 },
+  base: { food: 500, goods: 600, metals: 1500, gases: 1200, crystals: 800 },
   /** Added per colony to minerals, food and goods. */
   perColony: 150,
-  /** Added per colony to credits. */
-  creditsPerColony: 500,
 } as const;
 
 /** Building slots: bigger worlds hold more; the capital gets two extra. */

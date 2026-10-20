@@ -52,6 +52,9 @@ export interface FleetGroup {
   /** The company that runs it (its own fleet, not the state's), and colonists its arks carry. */
   readonly company?: { readonly id: string; readonly name: string };
   readonly colonists?: number;
+  /** Ore its miners hold (mined away from a friendly system, not yet unloaded), and how much it can hold. */
+  readonly hold?: Readonly<Partial<Record<Resource, number>>>;
+  readonly holdSize?: number;
 }
 
 /** What the fleet card shows about any fleet, yours or not. */
@@ -154,6 +157,8 @@ export interface GameQueries {
   exchanges(): ExchangeInfo[];
   exchangePrice(exchangeId: string, r: Resource, side: 'buy' | 'sell'): number;
   exchangeQuote(exchangeId: string, r: Resource, side: 'buy' | 'sell', amount: number): number;
+  /** A commodity's market price on an exchange over the last `span` years, at `points` years. */
+  exchangeHistory(exchangeId: string, r: Resource, span: number, points: number): ReadonlyArray<{ readonly year: number; readonly price: number }>;
   /** Trade goods on an exchange against a freighter run to that empire. */
   shippingQuote(exchangeId: string): { exchange: number; freighter: number; years: number; from: string; to: string } | null;
   /** The population a colony must have to give up colonists. */

@@ -8,7 +8,7 @@ buildings appeared instantly, and fleets did nothing while the player was away.
 
 ## What Changes
 
-- **Storage caps** per resource, raised by each colony and by a new Warehouse building.
+- **Storage caps** per stored resource (minerals, food, goods; never credits, influence or faith), raised by each colony and by a new Warehouse building.
   Income stops at the cap; stock above it (from loot) is kept.
 - **Upkeep**: every ship costs credits each year (civilian 1, warship 2, capital 8);
   Conscription still waives warship upkeep.

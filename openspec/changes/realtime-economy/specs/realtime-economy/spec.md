@@ -7,11 +7,15 @@ Keeps a realtime economy bounded and gives the empire work that takes time.
 ## ADDED Requirements
 
 ### Requirement: Storage caps
-Each resource SHALL have a storage cap, raised by each colony and by Warehouses. Yearly income SHALL stop at the cap; stock already above the cap SHALL be kept.
+Each stored resource (metals, gases, crystals, food and trade goods) SHALL have a storage cap, raised by each colony and by Warehouses. Yearly income SHALL stop at the cap; stock already above the cap SHALL be kept. Credits, influence and faith are not stored goods and SHALL have no cap.
 
 #### Scenario: Full storage
 - **WHEN** metals are at their cap and a year resolves with positive metal income
 - **THEN** metals stay at the cap and the report says storage is full
+
+#### Scenario: No cap on money
+- **WHEN** an empire with a million credits resolves a year with positive credit income
+- **THEN** its credits grow by that income, with no storage limit
 
 ### Requirement: Upkeep
 Every ship in service SHALL cost credits each year by role; the Conscription policy SHALL waive upkeep for warships.

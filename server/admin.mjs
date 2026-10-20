@@ -2,6 +2,11 @@
 // The allowlist uses the same secret as High Frontier: ADMIN_DISCORD_ID (or
 // ADMIN_DISCORD_IDS), a comma-separated list of Discord user ids.
 import { ADMIN_EVENT_LIMIT } from './eventLog.mjs';
+import { RESET_CONFIRMATION } from './reset.mjs';
+import { exportLines, parseTime } from './snapshots.mjs';
+
+/** An export with no range given covers the last day. */
+const DEFAULT_EXPORT_MS = 24 * 60 * 60 * 1000;
 
 /** Parse the admin allowlist from the environment. */
 export function adminIds(env) {
@@ -35,10 +40,18 @@ async function readJson(req, limit = 16_384) {
 }
 
 /**
- * @param {{ auth: any, store: any, admins: Set<string>, notifier?: any, info: () => object, events?: any }} deps
+ * @param {{
+ *   auth: any, store: any, admins: Set<string>, notifier?: any, info: () => object, events?: any,
+ *   snapshots?: { stats(): object, takeAll(worldYear: number, reason: string): Promise<number>, range(o: object): Iterable<any> } | null,
+ *   reset?: { run(admin: { id: string, name: string }): Promise<object> } | null,
+ *   hideSystems?: { get(): boolean, set(on: boolean, by: { id: string, name: string }): Promise<void> } | null,
+ *   now?: () => number,
+ * }} deps
+ *   snapshots: hourly empire snapshots and their export; reset: the server reset; hideSystems: the
+ *   hide-systems flag (change admin-snapshots-and-fog).
  * @returns {(req: any, res: any, pathname: string) => Promise<boolean>} handles the request if it is an admin route
  */
-export function createAdmin({ auth, store, admins, notifier, info, events }) {
+export function createAdmin({ auth, store, admins, notifier, info, events, snapshots = null, reset = null, hideSystems = null, now = () => Date.now() }) {
   const isAdmin = (user) => !!user && admins.has(user.id);
 
   return async function handle(req, res, pathname) {
@@ -67,7 +80,75 @@ export function createAdmin({ auth, store, admins, notifier, info, events }) {
 
     if (pathname === '/api/admin/overview' && req.method === 'GET') {
       const players = await store.summaries();
-      json(res, 200, { ...info(), admins: admins.size, players: players.length, you: user, announcement: (await store.getSetting('announcement')) ?? null });
+      json(res, 200, { ...info(), admins: admins.size, players: players.length, you: user, announcement: (await store.getSetting('announcement')) ?? null, hideSystems: hideSystems?.get() ?? false });
+      return true;
+    }
+    // ── Snapshots (change admin-snapshots-and-fog) ──
+    if (pathname === '/api/admin/snapshots' && req.method === 'GET') {
+      if (!snapshots) { json(res, 404, { error: 'snapshots are not kept on this server' }); return true; }
+      json(res, 200, snapshots.stats());
+      return true;
+    }
+    if (pathname === '/api/admin/snapshots' && req.method === 'POST') {
+      if (!snapshots) { json(res, 404, { error: 'snapshots are not kept on this server' }); return true; }
+      const taken = await snapshots.takeAll(Number(info().worldTick), 'manual');
+      json(res, 200, { taken, ...snapshots.stats() });
+      return true;
+    }
+    if (pathname === '/api/admin/snapshots/export' && req.method === 'GET') {
+      if (!snapshots) { json(res, 404, { error: 'snapshots are not kept on this server' }); return true; }
+      const p = new URL(req.url ?? '/', 'http://localhost').searchParams;
+      const to = p.has('to') && p.get('to') !== '' ? parseTime(p.get('to')) : now();
+      const from = p.has('from') && p.get('from') !== '' ? parseTime(p.get('from')) : to - DEFAULT_EXPORT_MS;
+      const empire = p.get('empire') || null;
+      if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) { json(res, 400, { error: 'bad range: give from and to as ISO times or ms, from before to' }); return true; }
+      if (empire && !/^\d{5,25}$/.test(empire)) { json(res, 400, { error: 'bad empire id' }); return true; }
+      const includeState = p.get('state') === '1';
+      const stamp = (t) => new Date(t).toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
+      res.writeHead(200, {
+        'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store',
+        'Content-Disposition': `attachment; filename="falchion-snapshots-${stamp(from)}-${stamp(to)}${empire ? `-${empire}` : ''}.jsonl"`,
+      });
+      for (const line of exportLines({ snapshots, events, from, to, empire, includeState, now })) {
+        if (!res.write(`${line}\n`)) await new Promise((r) => res.once('drain', r));
+      }
+      res.end();
+      return true;
+    }
+    // ── Server reset (change admin-snapshots-and-fog): every empire back to its founding ──
+    if (pathname === '/api/admin/reset' && req.method === 'POST') {
+      if (!reset) { json(res, 404, { error: 'reset is not available on this server' }); return true; }
+      let body = {};
+      try {
+        body = await readJson(req);
+      } catch {
+        json(res, 400, { error: 'bad request' });
+        return true;
+      }
+      if (body?.confirm !== RESET_CONFIRMATION) { json(res, 400, { error: `type ${RESET_CONFIRMATION} to confirm` }); return true; }
+      try {
+        json(res, 200, { ok: true, ...(await reset.run({ id: user.id, name: user.name })) });
+      } catch (err) {
+        json(res, err?.status ?? 500, { ok: false, error: String(err?.message ?? err) });
+      }
+      return true;
+    }
+    // ── Hide systems (change admin-snapshots-and-fog) ──
+    if (pathname === '/api/admin/settings' && req.method === 'GET') {
+      json(res, 200, { hideSystems: hideSystems?.get() ?? false });
+      return true;
+    }
+    if (pathname === '/api/admin/settings' && req.method === 'PUT') {
+      if (!hideSystems) { json(res, 404, { error: 'not available on this server' }); return true; }
+      try {
+        const body = await readJson(req);
+        if (typeof body?.hideSystems !== 'boolean') { json(res, 400, { error: 'hideSystems must be true or false' }); return true; }
+        await hideSystems.set(body.hideSystems, { id: user.id, name: user.name });
+        console.log(`admin ${user.id} turned hide systems ${body.hideSystems ? 'on' : 'off'}`);
+        json(res, 200, { hideSystems: hideSystems.get() });
+      } catch {
+        json(res, 400, { error: 'bad settings' });
+      }
       return true;
     }
     if (pathname === '/api/admin/players' && req.method === 'GET') {
@@ -139,6 +220,10 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; }
 td img { width: 22px; height: 22px; border-radius: 50%; vertical-align: middle; margin-right: 6px; }
 button { background: transparent; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; cursor: pointer; font: inherit; }
 button:hover { border-color: var(--chart); } button.danger:hover { border-color: var(--bad); color: var(--bad); }
+input, select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+label { display: inline-flex; gap: 6px; align-items: center; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.danger-zone { border: 1px solid #5a2630; background: #170c12; border-radius: 10px; padding: 4px 14px 12px; }
 textarea { width: 100%; min-height: 64px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font: inherit; }
 .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
 .muted { color: var(--muted); } .ok { color: var(--good); } .err { color: var(--bad); }
@@ -148,6 +233,16 @@ textarea { width: 100%; min-height: 64px; background: var(--panel); color: var(-
 const ADMIN_HTML = `<main>
 <div class="row" style="justify-content:space-between"><div><h1>Falchion admin</h1><div class="muted" id="who"></div></div><div class="row"><a href="/">Game</a><a href="/auth/logout">Sign out</a></div></div>
 <h2>Server</h2><div class="cards" id="cards"></div>
+<h2>Galaxy visibility</h2>
+<p class="muted">When systems are hidden, each player sees on the map only the systems they have explored or sighted (and those their allies share); the server stops sending other empires' and NPCs' worlds and fleets they cannot see. Megastructures are always hidden until a player's ship (or an ally's) has visited them.</p>
+<div class="row"><span>Hide systems: <b id="hideState">…</b></span><button id="hideToggle">…</button><span id="hideMsg" class="muted"></span></div>
+<h2>Snapshots</h2>
+<p class="muted">Every empire is recorded once an hour (a summary for analysis and the full state). Export a time range as JSON Lines, with the event log of the same range merged in by time; <code>docs/snapshots.md</code> describes every field.</p>
+<div class="cards" id="snapCards"></div>
+<div class="row"><label>From <input type="datetime-local" id="snapFrom"></label><label>To <input type="datetime-local" id="snapTo"></label>
+<label>Empire <select id="snapEmpire"><option value="">All empires</option></select></label>
+<label><input type="checkbox" id="snapState"> include full state</label></div>
+<div class="row"><button id="snapExport">Export</button><button id="snapNow">Take snapshot now</button><span id="snapMsg" class="muted"></span></div>
 <h2>Discord channel</h2>
 <p class="muted" id="notifyState"></p>
 <div class="row"><button id="notifyTest">Send test message</button><span id="notifyMsg" class="muted"></span></div>
@@ -163,6 +258,11 @@ const ADMIN_HTML = `<main>
 <h2>NPC decisions</h2>
 <p class="muted">The last 100 things the NPC empires decided: fleets built, garrisons reinforced, raids launched and struck. Newest first. Read only.</p>
 <div class="scroll"><table><thead><tr><th>Time (UTC)</th><th>Year</th><th>NPC</th><th>Decision</th><th>Aimed at</th></tr></thead><tbody id="npcLog"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table></div>
+<h2>Server reset</h2>
+<div class="danger-zone">
+<p>Every empire goes back to its start as first founded: the same name, ruler, capital, colours, flag and home system, at the current world year, with its starting worlds, ships and research. Players do not found their empire again. The shared world starts fresh: NPC empires dormant, asteroid fields full, no alliances, wars or first contacts. Snapshots and the event log are kept, and every empire is snapshotted just before.</p>
+<div class="row"><label>Type <code>RESET</code> to confirm <input id="resetConfirm" autocomplete="off" spellcheck="false"></label><button id="resetGo" class="danger" disabled>Reset the server</button><span id="resetMsg" class="muted"></span></div>
+</div>
 </main>
 <script>
 const H = { 'X-Falchion-Admin': '1', 'Content-Type': 'application/json' };
@@ -176,6 +276,7 @@ async function load() {
     const c = el('div', undefined, 'card'); c.append(el('b', String(value)), el('span', label)); cards.append(c);
   }
   document.getElementById('ann').value = o.announcement && o.announcement.text ? o.announcement.text : '';
+  showHide(!!o.hideSystems);
   document.getElementById('notifyState').textContent = o.notifications
     ? 'On (' + o.notifications + '): new players, announcements, battles, colonies and depots are posted to the channel.'
     : 'Off: ' + (o.notificationsProblem || 'see docs/discord.md');
@@ -249,8 +350,73 @@ document.getElementById('notifyTest').onclick = async () => {
   msg.textContent = r.ok ? 'Sent: check the channel.' : 'Failed (' + (b.status || r.status) + '). ' + (b.error || '');
   msg.className = r.ok ? 'ok' : 'err';
 };
+// ── Galaxy visibility ──
+let hidden = false;
+function showHide(on) {
+  hidden = on;
+  document.getElementById('hideState').textContent = on ? 'on: players see only what they have explored' : 'off: every system is shown';
+  document.getElementById('hideToggle').textContent = on ? 'Show every system' : 'Hide unexplored systems';
+}
+document.getElementById('hideToggle').onclick = async () => {
+  const msg = document.getElementById('hideMsg');
+  const r = await fetch('/api/admin/settings', { method: 'PUT', headers: H, body: JSON.stringify({ hideSystems: !hidden }) });
+  const b = await r.json().catch(() => ({}));
+  if (r.ok) { showHide(b.hideSystems); msg.textContent = 'Saved: players see it within seconds.'; msg.className = 'ok'; }
+  else { msg.textContent = 'Failed: ' + (b.error || r.status); msg.className = 'err'; }
+};
+// ── Snapshots ──
+const local = (t) => { const d = new Date(t - new Date(t).getTimezoneOffset() * 60000); return d.toISOString().slice(0, 16); };
+async function loadSnapshots() {
+  const r = await fetch('/api/admin/snapshots');
+  const cards = document.getElementById('snapCards'); cards.replaceChildren();
+  if (!r.ok) { cards.append(el('span', 'Snapshots unavailable: ' + r.status, 'err')); return; }
+  const s = await r.json();
+  for (const [label, value] of [['Snapshots', s.count.toLocaleString()], ['Empires covered', s.empires], ['First', s.first ? when(s.first) : '—'], ['Latest', s.latest ? when(s.latest) + ' (' + ago(s.latest) + ')' : '—'], ['Next due', s.nextDue ? when(s.nextDue) : '—'], ['Full states', Math.round(s.stateBytes / 1024).toLocaleString() + ' KB']]) {
+    const c = el('div', undefined, 'card'); c.append(el('b', String(value)), el('span', label)); cards.append(c);
+  }
+  const from = document.getElementById('snapFrom'), to = document.getElementById('snapTo');
+  if (!from.value) from.value = local(Date.now() - 24 * 3600 * 1000);
+  if (!to.value) to.value = local(Date.now() + 60 * 1000);
+}
+async function loadEmpireChoices() {
+  const r = await fetch('/api/admin/players');
+  const sel = document.getElementById('snapEmpire');
+  for (const p of r.ok ? await r.json() : []) { const o = el('option', p.name + ' (' + p.id + ')'); o.value = p.id; sel.append(o); }
+}
+document.getElementById('snapExport').onclick = () => {
+  const msg = document.getElementById('snapMsg');
+  const from = new Date(document.getElementById('snapFrom').value), to = new Date(document.getElementById('snapTo').value);
+  if (isNaN(from) || isNaN(to) || from > to) { msg.textContent = 'Pick a From before the To.'; msg.className = 'err'; return; }
+  const q = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+  const empire = document.getElementById('snapEmpire').value;
+  if (empire) q.set('empire', empire);
+  if (document.getElementById('snapState').checked) q.set('state', '1');
+  msg.textContent = 'Downloading…'; msg.className = 'muted';
+  location.href = '/api/admin/snapshots/export?' + q;
+};
+document.getElementById('snapNow').onclick = async () => {
+  const msg = document.getElementById('snapMsg');
+  const r = await fetch('/api/admin/snapshots', { method: 'POST', headers: H });
+  const b = await r.json().catch(() => ({}));
+  msg.textContent = r.ok ? 'Recorded ' + b.taken + ' snapshots.' : 'Failed: ' + (b.error || r.status); msg.className = r.ok ? 'ok' : 'err';
+  loadSnapshots();
+};
+// ── Server reset ──
+const resetInput = document.getElementById('resetConfirm');
+resetInput.oninput = () => { document.getElementById('resetGo').disabled = resetInput.value !== 'RESET'; };
+document.getElementById('resetGo').onclick = async () => {
+  if (resetInput.value !== 'RESET' || !confirm('Reset the whole server? Every empire goes back to its founding and the shared world starts fresh. This cannot be undone.')) return;
+  const msg = document.getElementById('resetMsg');
+  msg.textContent = 'Resetting…'; msg.className = 'muted';
+  const r = await fetch('/api/admin/reset', { method: 'POST', headers: H, body: JSON.stringify({ confirm: resetInput.value }) });
+  const b = await r.json().catch(() => ({}));
+  if (r.ok) { msg.textContent = 'Done: ' + b.empires + ' empires reset at year ' + b.worldYear + (b.skipped && b.skipped.length ? ', ' + b.skipped.length + ' skipped' : '') + '.'; msg.className = 'ok'; resetInput.value = ''; document.getElementById('resetGo').disabled = true; load(); loadSnapshots(); }
+  else { msg.textContent = 'Failed: ' + (b.error || r.status); msg.className = 'err'; }
+};
 document.getElementById('annSave').onclick = () => announce(document.getElementById('ann').value);
 document.getElementById('annClear').onclick = () => announce('');
 load().catch((e) => { document.getElementById('players').textContent = 'Failed to load: ' + e.message; });
 loadNpcLog().catch(() => {});
+loadSnapshots().catch(() => {});
+loadEmpireChoices().catch(() => {});
 </script>`;

@@ -1,5 +1,6 @@
 // Player empires in the database (server/db.mjs): one row per Discord user id holding the record
-// { player, save, public, updatedAt }, plus small server-wide settings. On Fly the database file is
+// { player, save, public, updatedAt }, the save each was founded with (for the server reset), plus
+// small server-wide settings. On Fly the database file is
 // on a volume (/data) on a single machine, so writes have one owner. Saves from before the database
 // (one <id>.json file per player in the data directory) are imported on first start.
 import { readdir, readFile } from 'node:fs/promises';
@@ -33,6 +34,8 @@ export function createStore(where) {
     del: db.prepare('DELETE FROM empires WHERE id = ?'),
     ids: db.prepare('SELECT id FROM empires ORDER BY id'),
     all: db.prepare('SELECT id, record FROM empires ORDER BY updated_at DESC'),
+    getFounding: db.prepare('SELECT at, record FROM foundings WHERE empire_id = ?'),
+    putFounding: db.prepare('INSERT INTO foundings (empire_id, at, record) VALUES (?, ?, ?) ON CONFLICT(empire_id) DO UPDATE SET at = excluded.at, record = excluded.record'),
     getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
     putSetting: db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
   };
@@ -73,6 +76,20 @@ export function createStore(where) {
         });
       }
       return out;
+    },
+    /**
+     * How an empire was founded: the save it was founded with ({ at, worldYear, save }), kept for
+     * the server reset (server/reset.mjs). Founding again replaces it.
+     */
+    async saveFounding(id, founding) {
+      if (!validId(id)) throw new Error('invalid player id');
+      q.putFounding.run(id, Number(founding?.at) || 0, JSON.stringify(founding));
+    },
+    /** An empire's founding, or null (empires founded before foundings were kept have none). */
+    async founding(id) {
+      if (!validId(id)) return null;
+      const row = q.getFounding.get(id);
+      return row ? parse(row.record) : null;
     },
     /** Small server-wide settings (e.g. the announcement). */
     async getSetting(key) {

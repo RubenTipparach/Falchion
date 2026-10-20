@@ -166,7 +166,28 @@ export function createSimTicker({ store, loadSim, world = null, withLock = (_key
     }
   }
 
-  return { tick };
+  /**
+   * Run `fn` with the yearly tick held off (the server reset): it waits for a tick in progress to
+   * finish, and a tick that arrives meanwhile is skipped (the next one catches every empire up).
+   */
+  async function exclusive(fn) {
+    while (running) {
+      try {
+        await running;
+      } catch {
+        // The tick's own failure is its business.
+      }
+    }
+    const work = Promise.resolve().then(fn);
+    running = work.then(() => 0, () => 0);
+    try {
+      return await work;
+    } finally {
+      running = null;
+    }
+  }
+
+  return { tick, exclusive };
 }
 
 /**

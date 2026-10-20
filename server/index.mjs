@@ -23,6 +23,9 @@ import { createLocks } from './locks.mjs';
 import { oncePerTick } from './markets.mjs';
 import { createStore, importLegacySaves } from './store.mjs';
 import { createSharedWorld } from './world.mjs';
+import { createSnapshots } from './snapshots.mjs';
+import { createVision } from './vision.mjs';
+import { createReset } from './reset.mjs';
 import { clientKey, createCached, createConnectionCap, createRateLimiter } from './throttle.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -57,6 +60,8 @@ const MAX_SAVE_BYTES = 3 * 1024 * 1024;
 const STARTED_AT = Date.now();
 // Same secret as High Frontier: ADMIN_DISCORD_ID (or ADMIN_DISCORD_IDS), comma-separated.
 export const admins = adminIds(process.env);
+// Hide systems (change admin-snapshots-and-fog): when on, players see only what they have explored.
+let hideSystems = (await store.getSetting('hidesystems')) === true;
 // Channel notifications (optional): DISCORD_WEBHOOK_URL, or DISCORD_BOT_TOKEN + DISCORD_CHANNEL_ID.
 // The bot token also lets the server tell players about chat mentions.
 export const notifier = createNotifier({
@@ -83,12 +88,9 @@ export const activity = createActivity({
   broadcast: (event, data) => chat.broadcast(event, data),
   forward: (user, kind, text, place) => notifier.report(user, kind, text, place),
 });
-// Each save's public view reaches the other players at once (server/live.mjs).
-export const playerFeed = createPlayerFeed({ broadcast: (event, data, opts) => chat.broadcast(event, data, opts) });
-const admin = createAdmin({
-  auth, store, admins, notifier, events,
-  info: () => ({ version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, notifications: notifier.mode, notificationsProblem: notifier.problem, uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000) }),
-});
+// Each save's public view reaches the other players at once (server/live.mjs); while systems are
+// hidden, each sees only what they can (server/vision.mjs).
+export const playerFeed = createPlayerFeed({ broadcast: (event, data, opts) => chat.broadcast(event, data, { ...opts, ...(hideSystems ? { shape: (uid, view) => vision.player(uid, view) } : {}) }) });
 
 function json(res, status, body) {
   send(res, status, JSON.stringify(body), { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -108,7 +110,7 @@ export const limits = {
   /** Open live streams (the world clock, chat) per client: a few tabs' worth. */
   streams: createConnectionCap(6),
 };
-const HEAVY_READS = new Set(['/api/players', '/api/world', '/api/activity', '/api/save', '/api/online']);
+const HEAVY_READS = new Set(['/api/players', '/api/world', '/api/activity', '/api/save', '/api/online', '/api/vision']);
 
 function tooMany(res, retryAfter) {
   send(res, 429, JSON.stringify({ error: 'too many requests: slow down a moment', retryAfter }), { 'Content-Type': 'application/json', 'Retry-After': String(retryAfter), 'Cache-Control': 'no-store' });
@@ -218,8 +220,13 @@ export function publicView(p) {
 
 async function api(req, res, pathname) {
   const user = auth.userFrom(req);
-  // The shared world is public: guests see the same asteroid fields and NPCs.
-  if (pathname === '/api/world' && req.method === 'GET') return send(res, 200, sharedWorldJson(await sharedWorld.get()), { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  // The shared world is public: guests see the same asteroid fields and NPCs. While systems are
+  // hidden, each player gets only the NPCs they have met and what they can see of them.
+  if (pathname === '/api/world' && req.method === 'GET') {
+    const w = await sharedWorld.get();
+    const body = hideSystems ? JSON.stringify(await vision.world(user?.id ?? null, w)) : sharedWorldJson(w);
+    return send(res, 200, body, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  }
   if (pathname === '/api/me') return user ? json(res, 200, { ...user, admin: admins.has(user.id) }) : json(res, 401, { authEnabled: auth.enabled, login: '/auth/discord' });
   if (!user) return json(res, 401, { error: 'sign in with Discord first' });
   if (pathname === '/api/save' && req.method === 'GET') {
@@ -238,6 +245,8 @@ async function api(req, res, pathname) {
         const pub = publicView(body.public);
         const updatedAt = Date.now();
         await store.save(user.id, { player: user, save: body.save, public: pub, updatedAt });
+        // The founding is kept: the server reset puts the empire back to it (server/reset.mjs).
+        await store.saveFounding(user.id, { at: updatedAt, worldYear: worldTick, save: body.save });
         playersCache.invalidate();
         playerFeed.publish({ ...pub, id: user.id, name: user.name, avatar: user.avatar ?? null, updatedAt });
         // A log failure never fails the founding.
@@ -266,7 +275,12 @@ async function api(req, res, pathname) {
   }
   if (pathname === '/api/players' && req.method === 'GET') {
     const players = (await playersCache.get()).filter((p) => p.id !== user.id);
-    return json(res, 200, players);
+    return json(res, 200, await vision.players(user.id, players));
+  }
+  // What the player sees beyond their own empire (change admin-snapshots-and-fog): the hide-systems
+  // flag, and the systems their allies have explored and sighted (allies share vision).
+  if (pathname === '/api/vision' && req.method === 'GET') {
+    return json(res, 200, { hideSystems, ...(await vision.sharedFor(user.id)) });
   }
   return json(res, 404, { error: 'not found' });
 }
@@ -293,7 +307,12 @@ function scheduleTick() {
   setTimeout(() => {
     worldTick = tickAt(Date.now());
     broadcast('tick', clockInfo());
-    void simTicker.tick(worldTick);
+    const year = worldTick;
+    void simTicker.tick(year).then(async () => {
+      // Once an hour, every empire is snapshotted; while systems are hidden, who sees what is worked out afresh.
+      await snapshots.maybeTake(year);
+      if (hideSystems) await vision.refresh(chat.online().map((u) => u.id));
+    }).catch((err) => console.error(`tick: ${err?.message ?? err}`));
     scheduleTick();
   }, wait).unref?.();
 }
@@ -315,7 +334,12 @@ const withLock = createLocks();
 /** World time in years, fractional (one year per tick). */
 const worldTime = () => (Date.now() - CLOCK.epochMs) / CLOCK.msPerTick;
 // The galaxy everyone shares: mined asteroid fields and discovered NPC empires (server/world.mjs).
-export const sharedWorld = createSharedWorld({ doc: dbDoc(db, 'world'), loadSim, withLock, broadcast: (event, data) => chat.broadcast(event, data), record: recordEvent });
+// While systems are hidden, each player is sent only the NPCs they have met and what they can see of them.
+export const sharedWorld = createSharedWorld({ doc: dbDoc(db, 'world'), loadSim, withLock, broadcast: (event, data) => chat.broadcast(event, data, hideSystems ? { shape: (uid, w) => vision.worldNow(uid, w) } : {}), record: recordEvent });
+// What each player can see (change admin-snapshots-and-fog).
+export const vision = createVision({ store, loadSim, world: sharedWorld, hidden: () => hideSystems, worldTick: () => worldTick });
+// Every empire, once an hour, for analysis (server/snapshots.mjs, docs/snapshots.md).
+export const snapshots = createSnapshots({ db, store, loadSim, world: sharedWorld, log: (m) => console.warn(m) });
 export const simTicker = createSimTicker({
   store, loadSim, withLock, world: sharedWorld, events,
   publish: (p) => playerFeed.publish(p),
@@ -323,6 +347,30 @@ export const simTicker = createSimTicker({
   notifyOwner: (id, save) => chat.sendTo(id, 'state', { save }),
   publicView: (p) => publicView(p),
   log: (m) => console.warn(m),
+});
+// The admin's server reset: every empire back to its founding, the shared world fresh (server/reset.mjs).
+export const serverReset = createReset({
+  store, loadSim, withLock, world: sharedWorld, snapshots, ticker: simTicker, events, worldTick: () => tickAt(Date.now()),
+  publicView: (p) => publicView(p),
+  publish: (p) => playerFeed.publish(p),
+  notifyOwner: (id, save) => chat.sendTo(id, 'state', { save }),
+  afterReset: () => { vision.invalidate(); playersCache.invalidate(); },
+  log: (m) => console.warn(m),
+});
+const admin = createAdmin({
+  auth, store, admins, notifier, events, snapshots, reset: serverReset,
+  hideSystems: {
+    get: () => hideSystems,
+    async set(on, by) {
+      await store.setSetting('hidesystems', on);
+      hideSystems = on;
+      vision.invalidate();
+      if (on) await vision.refresh(chat.online().map((u) => u.id));
+      chat.broadcast('settings', { hideSystems: on });
+      recordEvent({ actor: by.id, kind: 'setting', worldTime: worldTime(), data: { hideSystems: on, text: `Hide systems turned ${on ? 'on' : 'off'} by ${by.name}` } });
+    },
+  },
+  info: () => ({ version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, notifications: notifier.mode, notificationsProblem: notifier.problem, uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000) }),
 });
 // Other players' worlds are markets: orders read the other empires once a world year.
 const otherEmpires = oncePerTick(() => store.players(), () => worldTick);
@@ -412,7 +460,7 @@ export const server = createServer(async (req, res) => {
     }
   }
   if (pathname === '/api/info') {
-    return send(res, 200, JSON.stringify({ name: 'falchion', version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled }), { 'Content-Type': 'application/json' });
+    return send(res, 200, JSON.stringify({ name: 'falchion', version: VERSION, worldTick, listeners: listeners.size, discord: auth.enabled, hideSystems }), { 'Content-Type': 'application/json' });
   }
   if (pathname === '/api/clock') return send(res, 200, JSON.stringify(clockInfo()), { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   if (pathname === '/api/ticks') return streamTicks(req, res, key);
@@ -423,7 +471,7 @@ export const server = createServer(async (req, res) => {
   if (await activity.handle(req, res, pathname)) return;
   if (pathname === '/auth/discord/callback') return auth.enabled ? auth.callback(req, res, new URL(req.url ?? '/', 'http://localhost')) : send(res, 404, 'not configured');
   if (pathname === '/auth/logout') return auth.logout(res);
-  if (pathname === '/api/me' || pathname === '/api/world' || pathname === '/api/save' || pathname === '/api/command' || pathname === '/api/players') return api(req, res, pathname);
+  if (pathname === '/api/me' || pathname === '/api/world' || pathname === '/api/save' || pathname === '/api/command' || pathname === '/api/players' || pathname === '/api/vision') return api(req, res, pathname);
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed');
   return serveStatic(pathname, res);
 });

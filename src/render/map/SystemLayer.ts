@@ -12,6 +12,7 @@ import { Rng, hashSeed } from '../../core/rng/Rng';
 import type { SettlementInput } from '../../core/surface/SurfaceLayout';
 import { createPlanetMaterial, createRingMaterial, setPlanetLights } from '../planets/PlanetMaterial';
 import { hasPlanetLightMap, planetLightMap } from '../planets/planetLayouts';
+import { primePrograms, programsOf } from '../programs';
 import { createStarVisual, StarVisual } from '../stars/StarVisuals';
 import { AsteroidBelt, type BeltField } from './AsteroidBelts';
 import { MEGA_BY_ID, isMegastructure } from '../../content/megastructures';
@@ -69,6 +70,8 @@ interface BuiltSystem {
   readonly belts: DrawnBelt[];
   /** A megastructure system's structure (change megastructures): its only world. */
   readonly mega: DrawnMega | null;
+  /** Its shaders: not yet asked for (false), compiling (null), ready and shown (true). */
+  ready: boolean | null;
 }
 
 interface DrawnMega {
@@ -110,6 +113,8 @@ export interface SystemEvents {
 export class SystemLayer implements MapLayer {
   readonly object3d = new THREE.Group();
   private current: BuiltSystem | null = null;
+  /** Systems left, kept until the one shown now is ready (see prerender). */
+  private readonly retired: BuiltSystem[] = [];
   private selectedId: string | null = null;
   private hoverId: string | null = null;
   /** A planet a close-up draws instead (the surface view): hidden here. */
@@ -379,7 +384,8 @@ export class SystemLayer implements MapLayer {
     }
     this.lightsDirty = true;
     const belts = this.buildBelts(star, root, visual, orbits, firstOrbit);
-    return { star, root, visual, planets, starLabel, belts, mega };
+    root.visible = false;
+    return { star, root, visual, planets, starLabel, belts, mega, ready: false };
   }
 
   /** Each asteroid field as a belt in a gap between planet orbits (see beltLayout). */
@@ -419,24 +425,57 @@ export class SystemLayer implements MapLayer {
     this.lightsDirty = pending;
   }
 
+  /**
+   * Before the map is drawn: a system just built stays hidden while its shaders compile in the
+   * background (KHR_parallel_shader_compile), so zooming into it never stops the frame to compile.
+   * The system it replaced is kept until then: its materials keep alive the programs the new one
+   * shares with it (three.js deletes a program once no material uses it).
+   */
+  prerender(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    const sys = this.current;
+    if (!sys || sys.ready !== false) return;
+    sys.ready = null;
+    let scene: THREE.Object3D = this.object3d;
+    while (scene.parent) scene = scene.parent;
+    const show = () => {
+      if (sys.ready) return;
+      primePrograms(programsOf(renderer, sys.root));
+      sys.ready = true;
+      sys.root.visible = true;
+      if (this.current === sys) this.disposeRetired();
+    };
+    try {
+      renderer.compileAsync(sys.root, camera, scene as THREE.Scene).then(show, show);
+    } catch {
+      show();
+    }
+  }
+
   private clear(): void {
     if (!this.current) return;
     this.object3d.remove(this.current.root);
-    this.current.visual.dispose();
-    this.current.mega?.visual.dispose();
-    for (const b of this.current.belts) b.belt.dispose();
-    this.current.root.traverse((o) => {
-      if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
-        o.geometry.dispose();
-        (o.material as THREE.Material).dispose();
-      }
-      if (o instanceof CSS2DObject) o.element.remove();
-    });
+    this.retired.push(this.current);
     this.current = null;
+  }
+
+  private disposeRetired(): void {
+    for (const sys of this.retired.splice(0)) {
+      sys.visual.dispose();
+      sys.mega?.visual.dispose();
+      for (const b of sys.belts) b.belt.dispose();
+      sys.root.traverse((o) => {
+        if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
+          o.geometry.dispose();
+          (o.material as THREE.Material).dispose();
+        }
+        if (o instanceof CSS2DObject) o.element.remove();
+      });
+    }
   }
 
   dispose(): void {
     this.clear();
+    this.disposeRetired();
   }
 }
 

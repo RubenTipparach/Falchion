@@ -48,3 +48,10 @@ Until the warm-up has finished, no planet or megastructure close-up SHALL open. 
 #### Scenario: Landing during the warm-up
 - **WHEN** the player presses Land on a colony while the warm-up is at 20 of 91
 - **THEN** the view stays at planet view and the bar reads "Preparing shaders · 20/91 · landing opens when done"
+
+### Requirement: Zooming into a star system compiles nothing on the spot
+The warm-up SHALL also prepare the system view: its planets, rings, orbits, every kind of star, each megastructure, each asteroid belt and the nebula sky, compiled with the map's own lights (three.js keys a program on the scene's lights, even for a material that ignores them). A system that is built SHALL stay hidden until its shaders are ready, and the system it replaced SHALL be kept until then, so programs the two share are not deleted and rebuilt. No megastructure SHALL write a per-system number into its shader source.
+
+#### Scenario: Zooming from system to system
+- **WHEN** the player zooms into five systems in turn after the warm-up
+- **THEN** no shader is compiled and the game does not wait on the GPU process for any of them

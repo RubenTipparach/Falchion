@@ -567,6 +567,16 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     this.refreshSurface();
   }
 
+  /** Your colonies' planets, capital first. */
+  ownPlanets(): Planet[] {
+    const colonies = [...this.state.economy.colonies].sort((a, b) => Number(!!b.capital) - Number(!!a.capital));
+    return colonies.flatMap((c) => {
+      const star = c.starId ? this.starById(c.starId) : null;
+      const planet = star && this.planets(star).find((p) => p.id === c.planetId);
+      return planet ? [planet] : [];
+    });
+  }
+
   /** A planet or megastructure with a close-up to land in. */
   private landable(planet: Planet): boolean {
     return planet.biome !== 'gas' && (!isMegastructure(planet.biome) || hasMegaSurface(planet.biome));

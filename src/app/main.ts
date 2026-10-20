@@ -28,6 +28,7 @@ import { touchFirst } from '../ui/dom';
 import { OrbitStick } from '../ui/OrbitStick';
 import { LoadingPill } from '../ui/LoadingPill';
 import { ShaderWarmup } from '../render/planets/surface/ShaderWarmup';
+import { planetLightMap } from '../render/planets/planetLayouts';
 import { NebulaSkyboxLayer } from '../render/map/NebulaSkyboxLayer';
 import { GalaxyDiscLayer } from '../render/map/GalaxyDiscLayer';
 import { StarfieldLayer } from '../render/map/StarfieldLayer';
@@ -263,14 +264,15 @@ async function bootstrap(): Promise<void> {
   const pill = new LoadingPill();
   app.append(pill.el);
   const warmup = new ShaderWarmup();
-  // Until it is done, planet close-ups are held back; trying one says why (change surface-perf).
+  // It covers the system view and planet close-ups. Until it is done, close-ups are held back;
+  // trying one says why (change surface-perf).
   let warming = true;
   let nudgeUntil = 0;
   const showWarmup = () => {
     if (!warming) return;
     const counted = warmup.total ? ` · ${warmup.ready}/${warmup.total}` : '';
     const nudged = performance.now() < nudgeUntil;
-    pill.set(nudged ? `Preparing shaders${counted} · landing opens when done` : `Preparing planet surfaces${counted}`, warmup.total ? warmup.ready / warmup.total : null);
+    pill.set(nudged ? `Preparing shaders${counted} · landing opens when done` : `Preparing shaders${counted}`, warmup.total ? warmup.ready / warmup.total : null);
     pill.el.classList.toggle('nudge', nudged);
   };
   controller.setShadersPreparing(true);
@@ -283,10 +285,26 @@ async function bootstrap(): Promise<void> {
     const done = () => (performance.now() < nudgeUntil ? setTimeout(done, nudgeUntil - performance.now() + 20) : showWarmup());
     setTimeout(done, ms + 20);
   };
-  const warmed = () => { warming = false; pill.el.classList.remove('nudge'); pill.set(null); controller.setShadersPreparing(false); };
+  const warmed = () => {
+    warming = false;
+    pill.el.classList.remove('nudge');
+    pill.set(null);
+    controller.setShadersPreparing(false);
+    // Then, one at a time while idle, your worlds' night-light maps (a layout and a texture, tens of
+    // milliseconds each), so the first look at your systems does not stop to draw them.
+    const queue = controller.ownPlanets().slice(0, 6);
+    const idle = (fn: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(fn, { timeout: 3000 }) : setTimeout(fn, 500));
+    const next = () => {
+      const planet = queue.shift();
+      if (!planet) return;
+      planetLightMap(planet, controller.surfaceTarget(planet)?.colony ?? null);
+      idle(next);
+    };
+    idle(next);
+  };
   warmup.onProgress((ready, total) => { if (ready >= total) warmed(); else showWarmup(); });
   showWarmup();
-  setTimeout(() => { try { warmup.start(map.renderer, lite); if (!warmup.total) warmed(); } catch (e) { console.warn('shader warm-up', e); warmed(); } }, 2500);
+  setTimeout(() => { try { warmup.start(map.renderer, lite, map.scene); if (!warmup.total) warmed(); } catch (e) { console.warn('shader warm-up', e); warmed(); } }, 2500);
   setInterval(() => { if (!warming) pill.set(surface.status.building ? 'Building the surface' : null); }, 200);
   // Touch screens: a joystick to orbit the view (the battle's camera while one is open), kept above
   // the bottom sheet on a phone.

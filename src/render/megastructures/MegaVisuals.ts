@@ -52,8 +52,13 @@ interface HullOptions {
   readonly front: string;
   readonly back?: string;
   readonly emit?: string;
-  /** GLSL that may change `base` and `emit` (vObj, vUv, uTime, vnoise available). */
+  /** GLSL that may change `base` and `emit` (vObj, vUv, uTime, uShape, vnoise available). */
   readonly pattern?: string;
+  /**
+   * Sizes the pattern reads (as uShape), kept out of its source: a number written into the GLSL
+   * would make every system's structure a program of its own, compiled as the system is opened.
+   */
+  readonly shape?: readonly [number, number];
   readonly side?: THREE.Side;
   /** Choose front or back by which side of the shell (round the star) the camera sees, not by winding. */
   readonly radial?: boolean;
@@ -72,6 +77,7 @@ function hullMaterial(o: HullOptions & { light: THREE.Color; seed: number }): TH
       uEmit: { value: new THREE.Color(o.emit ?? '#000000') },
       uTime: { value: 0 },
       uSeed: { value: (o.seed % 1000) / 37 },
+      uShape: { value: new THREE.Vector2(...(o.shape ?? [0, 0])) },
     },
     vertexShader: HULL_VERT,
     fragmentShader: /* glsl */ `
@@ -82,6 +88,7 @@ function hullMaterial(o: HullOptions & { light: THREE.Color; seed: number }): TH
       uniform vec3 uEmit;
       uniform float uTime;
       uniform float uSeed;
+      uniform vec2 uShape;
       varying vec3 vW;
       varying vec3 vN;
       varying vec3 vObj;
@@ -302,10 +309,10 @@ const dysonSphere: Builder = (k) => {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(keep, 3));
   geo.computeVertexNormals();
-  const mat = k.hull({ front: '#3a3c44', back: '#7a5430', side: THREE.DoubleSide, radial: true,
+  const mat = k.hull({ front: '#3a3c44', back: '#7a5430', side: THREE.DoubleSide, radial: true, shape: [600 / R, 0],
     pattern: /* glsl */ `
       // Waste heat: a dull red glow over the shell, brighter in bands; its inner face blazes.
-      float band = 0.5 + 0.5 * sin(vObj.y * ${(600 / R).toFixed(1)} + uTime * 0.3);
+      float band = 0.5 + 0.5 * sin(vObj.y * uShape.x + uTime * 0.3);
       emit = outer ? vec3(0.16, 0.03, 0.01) * (0.6 + 0.4 * band) : uBack * 0.3;
     ` });
   const shell = k.add(new THREE.Mesh(geo, mat));
@@ -358,14 +365,14 @@ const matrioshka: Builder = (k) => {
 /** A flat disc reaching far out from the star, which sits in a hole at its centre. */
 const aldersonDisk: Builder = (k) => {
   const inner = Math.max(0.03, k.o.clearance * 1.6), outer = Math.max(0.3, inner * 8);
-  const mat = k.hull({ front: '#3a6a3a', back: '#3a3a40', side: THREE.DoubleSide,
+  const mat = k.hull({ front: '#3a6a3a', back: '#3a3a40', side: THREE.DoubleSide, shape: [inner, outer],
     pattern: /* glsl */ `
       float r = length(vObj.xy);
       float a = atan(vObj.y, vObj.x);
       vec2 q = vec2(a * 40.0, r * 160.0);
       float n = vnoise(q) * 0.6 + vnoise(q * 3.0) * 0.3 + vnoise(q * 8.0) * 0.1;
       // Scorched and molten near the star, temperate further out, frozen at the rim.
-      float t = smoothstep(${inner.toFixed(4)}, ${outer.toFixed(4)}, r);
+      float t = smoothstep(uShape.x, uShape.y, r);
       vec3 hot = vec3(0.45, 0.2, 0.1), mild = n < 0.45 ? vec3(0.1, 0.25, 0.45) : vec3(0.32, 0.48, 0.24), cold = vec3(0.8, 0.85, 0.9);
       base = t < 0.12 ? mix(hot, mild, smoothstep(0.04, 0.12, t)) : mix(mild, cold, smoothstep(0.6, 0.95, t));
       base *= 0.85 + 0.15 * step(0.5, fract(r * 120.0));

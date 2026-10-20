@@ -50,7 +50,11 @@ Until the warm-up has finished, no planet or megastructure close-up SHALL open. 
 - **THEN** the view stays at planet view and the bar reads "Preparing shaders · 20/91 · landing opens when done"
 
 ### Requirement: Zooming into a star system compiles nothing on the spot
-The warm-up SHALL also prepare the system view: its planets, rings, orbits, every kind of star, each megastructure, each asteroid belt and the nebula sky, compiled with the map's own lights (three.js keys a program on the scene's lights, even for a material that ignores them). A system that is built SHALL stay hidden until its shaders are ready, and the system it replaced SHALL be kept until then, so programs the two share are not deleted and rebuilt. No megastructure SHALL write a per-system number into its shader source.
+The warm-up SHALL also prepare the system view (planets, rings, orbits, every kind of star, each megastructure, each belt, the nebula sky) with the map's own lights. A new system SHALL stay hidden until its shaders are ready, and the one it replaced SHALL be kept until then. No megastructure SHALL write a per-system number into its shader source.
+
+#### Scenario: A system replaces another
+- **WHEN** the view moves from one system to the next
+- **THEN** the programs the two share are reused, not deleted and rebuilt
 
 #### Scenario: Zooming from system to system
 - **WHEN** the player zooms into five systems in turn after the warm-up

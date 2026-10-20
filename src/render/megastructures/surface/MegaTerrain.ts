@@ -265,8 +265,13 @@ void main() {
     lit += uSunCol * pow(max(dot(n, hv), 0.0), 120.0) * 0.8 * uDay;
     lit = mix(lit, skyColour(reflect(view, n)) * 0.7, pow(1.0 - max(dot(-view, n), 0.0), 4.0) * 0.6);
   }
-  // Night is a blue dusk (starlight, the glow of the far side, the cities), never black.
-  lit += col * vec3(0.16, 0.19, 0.27) * (0.75 + 0.25 * n.y) * (1.0 - uDay);
+  // Night is a blue dusk (starlight, the glow of the far side, the cities), never black; in a
+  // habitat the light down its axis keeps it a warm evening.
+#ifdef HABITAT
+  lit += col * vec3(0.4, 0.38, 0.4) * (0.8 + 0.2 * ndl) * (1.0 - uDay);
+#else
+  lit += col * vec3(0.26, 0.3, 0.4) * (0.75 + 0.25 * n.y) * (1.0 - uDay);
+#endif
   lit += vec3(1.0, 0.72, 0.38) * glow * (1.0 - uDay) * 0.7;
   gl_FragColor = vec4(airOver(lit, view, dist), 1.0);
 }`;

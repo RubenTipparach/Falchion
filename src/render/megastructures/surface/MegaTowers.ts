@@ -75,7 +75,7 @@ void main() {
   vec3 col = roof > 0.5 ? wall * 0.6 : mix(wall, glass, pane * 0.85);
   float ndl = max(dot(n, sunAt(vRel)), 0.0);
   vec3 lit = col * (uSunCol * ndl + vec3(0.34, 0.38, 0.46) * (0.45 + 0.2 * n.y)) * uDay;
-  lit += col * vec3(0.16, 0.19, 0.27) * (1.0 - uDay);
+  lit += col * vec3(0.26, 0.3, 0.4) * (1.0 - uDay);
   // Lit windows at night, room by room.
   float on = step(0.55, hash13(vec3(floor(w), vSeed * 97.0)));
   lit += vec3(1.0, 0.8, 0.52) * pane * mix(on, 0.45, tiny) * (1.0 - roof) * (1.0 - uDay) * 0.9;

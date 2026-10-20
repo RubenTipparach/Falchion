@@ -92,7 +92,7 @@ vec3 lightLand(vec3 col, vec2 site, float day, float sunUp) {
   // (farLand's) is wider than a cell.
   float city = mix(step(0.94, hash13(vec3(floor(site / 60.0), 3.0))), 0.06, smoothstep(20.0, 60.0, farFp));
   lit += vec3(1.0, 0.72, 0.4) * city * 0.35 * (1.0 - day);
-  return lit + col * vec3(0.16, 0.19, 0.27) * (1.0 - day);
+  return lit + col * vec3(0.26, 0.3, 0.4) * (1.0 - day);
 }
 void main() {
   vec3 d = normalize(vDir);

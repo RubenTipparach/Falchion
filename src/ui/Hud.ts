@@ -17,6 +17,7 @@ export class Hud {
   private readonly rulerBar = h('span', { class: 'ruler-bar' });
   private readonly rulerLabel = h('span', { class: 'ruler-label' });
   private readonly width = h('span', { class: 'hud-width' });
+  private readonly clock = h('div', { class: 'hud-clock', hidden: true });
   private readonly thumb = h('span', { class: 'ladder-thumb' });
 
   private readonly rulerEl: HTMLElement;
@@ -27,6 +28,7 @@ export class Hud {
     this.el = h('div', { class: 'hud' },
       h('div', { class: 'hud-panel frame' },
         h('div', { class: 'hud-row' }, this.mode, this.width),
+        this.clock,
         this.rulerEl,
         this.hover),
       h('div', { class: 'hud-help' }, 'Scroll zoom · Drag pan · Right-drag tilt · G toggle view · 1 year = 1 minute'));
@@ -54,14 +56,23 @@ export class Hud {
     this.rulerBar.style.width = `${Math.round(nice * pxPerLy)}px`;
     this.rulerLabel.textContent = `${ly(nice)} ly`;
     this.thumb.style.top = `${this.pos(altitude) * 100}%`;
+    this.clock.hidden = true;
   }
 
   /** On a planet's surface: altitude above the ground instead of the ly ruler. */
-  setSurface(altitudeKm: number, altitude: number): void {
+  setSurface(altitudeKm: number, altitude: number, daylight: { day: boolean; turnsInS: number } | null = null): void {
     this.mode.textContent = 'Surface view';
     this.width.textContent = `${altitudeKm >= 1000 ? `${(altitudeKm / 1000).toFixed(1)}k` : altitudeKm.toFixed(altitudeKm < 10 ? 1 : 0)} km up`;
     this.rulerEl.hidden = true;
     this.thumb.style.top = `${this.pos(altitude) * 100}%`;
+    // Where you stand: day or night, and how long until it turns.
+    this.clock.hidden = !daylight;
+    if (daylight) {
+      const s = Math.ceil(daylight.turnsInS);
+      const when = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      this.clock.className = `hud-clock ${daylight.day ? 'day' : 'night'}`;
+      this.clock.textContent = daylight.day ? `☀ Day here · nightfall in ${when}` : `☾ Night here · daylight in ${when}`;
+    }
   }
 
   setContact(text: string | null): void {

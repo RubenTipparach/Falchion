@@ -76,7 +76,7 @@ float ridges(vec2 site) {
 }
 float hills(vec2 site) {
   site = wrapSite(site);
-  float rugged = smoothstep(-0.25, 0.45, snoise(vec3(site / (uFeature * 2.5) + uOffset.xy + vec2(19.0, 41.0), uOffset.z + 23.0)));
+  float rugged = smoothstep(-0.65, 0.25, snoise(vec3(site / (uFeature * 2.5) + uOffset.xy + vec2(19.0, 41.0), uOffset.z + 23.0)));
   if (rugged <= 0.0) return 0.0;
   vec3 p = vec3(site / uFeature * 30.0 + uOffset.xy + vec2(7.0, 3.0), uOffset.z + 11.0);
   float v = 0.0, a = 0.55;
@@ -92,7 +92,7 @@ float rawHeight(vec2 site, float oct) {
   float land = 0.8 * tanh((groundNoise(site, oct) - uSea) / 0.8);
   if (land <= 0.0) return land * uRelief * 0.8;
   float m = ridges(site);
-  return (land * 0.6 + smoothstep(0.14, 0.5, land) * m * m * 1.9 + smoothstep(0.0, 0.12, land) * hills(site) * 0.7) * uRelief;
+  return (land * 0.6 + smoothstep(0.14, 0.5, land) * m * m * 1.9 + smoothstep(0.0, 0.12, land) * hills(site)) * uRelief;
 }
 float groundHeight(vec2 site, float oct) {
   float h = rawHeight(site, oct);

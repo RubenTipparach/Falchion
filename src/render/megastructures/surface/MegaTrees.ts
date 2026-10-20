@@ -126,7 +126,7 @@ void main() {
   vec3 toCam = uCam - vPos;
   float dist = length(toCam);
   vec3 lit = vCol * (uSunCol * max(dot(n, sunAt(vRel)), 0.0) * 0.9 + vec3(0.3, 0.36, 0.44) * (0.5 + 0.25 * n.y)) * uDay;
-  lit += vCol * vec3(0.16, 0.19, 0.27) * (1.0 - uDay);
+  lit += vCol * vec3(0.26, 0.3, 0.4) * (1.0 - uDay);
   gl_FragColor = vec4(airOver(lit, -toCam / dist, dist), 1.0);
 }`;
 

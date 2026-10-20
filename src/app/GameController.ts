@@ -857,7 +857,7 @@ export class GameController extends EmpireSim implements GameActions, GameQuerie
     const planet = this.state.selectedPlanet;
     if (planet && !hasMegaSurface(planet.biome) && this.landable(planet) && view.altitude <= this.view.map.controller.zoom.floor * 1.05 && !this.closeUpReady(planet)) this.onShadersBusy?.(1500, planet);
     if (surface.engaged) return this.view.hud.setSurface(surface.altitudeKm, view.altitude);
-    if (mega.engaged) return this.view.hud.setSurface(mega.altitudeKm, view.altitude);
+    if (mega.engaged) return this.view.hud.setSurface(mega.altitudeKm, view.altitude, mega.daylight);
     const mode = this.state.selectedPlanet ? 'Planet view' : view.visibleWidth < SYSTEM_VIEW_WIDTH ? 'System view' : view.visibleWidth < 420 ? 'Hex view' : view.visibleWidth < 7_000 ? 'Sector view' : 'Galaxy view';
     const pxPerLy = this.view.map.viewportWidth() / view.visibleWidth;
     this.view.hud.setScale(view.visibleWidth, pxPerLy, mode, view.altitude);

@@ -74,7 +74,7 @@ void main() {
   float a = wrapSite(vSite).x / uRadius, rr = 1.0 - vH / uRadius;
   vec4 dome = texture2D(uDome, 0.5 + 0.5 * rr * vec2(cos(a), sin(a)));
   float ring = lineW(rr * 14.0, 0.05, fwidth(rr * 14.0));
-  vec3 lit = dome.rgb * (0.22 + 0.7 * uDay) * (0.75 + 0.25 * rr) * (1.0 - ring * 0.25);
+  vec3 lit = dome.rgb * (0.38 + 0.54 * uDay) * (0.75 + 0.25 * rr) * (1.0 - ring * 0.25);
   lit += vec3(1.0, 0.8, 0.5) * dome.a * (0.35 + 0.65 * (1.0 - uDay));
   gl_FragColor = vec4(airOver(lit, -toCam / dist, dist), 1.0);
 }`;

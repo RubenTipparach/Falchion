@@ -39,6 +39,8 @@ export interface MegaSurfaceStatus {
   /** The close-up fills the screen and is in charge of the camera. */
   readonly engaged: boolean;
   readonly altitudeKm: number;
+  /** Where the camera stands: day or night, and seconds until that turns (null: no nights here). */
+  readonly daylight: { readonly day: boolean; readonly turnsInS: number } | null;
 }
 
 /**
@@ -154,7 +156,52 @@ export class MegaSurfaceLayer implements MapLayer {
   }
 
   get status(): MegaSurfaceStatus {
-    return { active: this.mix > 0, engaged: this.mix >= 1, altitudeKm: this.altKm };
+    return { active: this.mix > 0, engaged: this.mix >= 1, altitudeKm: this.altKm, daylight: this.daylight() };
+  }
+
+  private clock: { at: number; key: string; value: MegaSurfaceStatus['daylight'] } | null = null;
+
+  /** Day or night where the camera stands, and how long until it turns (worked out every half second). */
+  private daylight(): MegaSurfaceStatus['daylight'] {
+    const b = this.built;
+    if (!b || b.def.type === 'dyson-sphere') return null;
+    const key = `${b.key}:${Math.round(this.focus[0])}`;
+    if (this.clock && this.clock.key === key && Math.abs(this.time - this.clock.at) < 0.5) {
+      const c = this.clock.value;
+      return c && { day: c.day, turnsInS: Math.max(0, c.turnsInS - (this.time - this.clock.at)) };
+    }
+    const day = this.dayAt(b.def, this.time) > 0.5;
+    let turnsInS = -1;
+    for (let dt = 0.5; dt <= 600; dt += 0.5) {
+      if (this.dayAt(b.def, this.time + dt) > 0.5 !== day) { turnsInS = dt; break; }
+    }
+    const value = turnsInS < 0 ? null : { day, turnsInS };
+    this.clock = { at: this.time, key, value };
+    return value;
+  }
+
+  /** How much daylight the focus has at time t (s): 0 night, 1 day (a sphere's sun never sets). */
+  private dayAt(def: MegaGroundDef, t: number): number {
+    if (def.type === 'ringworld') {
+      const step = (2 * Math.PI) / SQUARES.n;
+      const phase = ((((2 * Math.PI) / (SQUARES.n * 90)) * t - this.focus[0] / def.radiusKm) % step + step) % step;
+      const x = (((0 - phase) / step) % 1 + 1) % 1;
+      return smoothstep(SQUARES.cover / 2 - 0.03, SQUARES.cover / 2 + 0.03, Math.min(x, 1 - x));
+    }
+    if (def.type === 'alderson-disk') return smoothstep(-0.015, 0.03, this.diskBob(t));
+    if (def.type === 'topopolis') return smoothstep(-0.3, 0.3, Math.cos(this.topoSpin(def, t)) + 0.35);
+    if (def.type === 'dyson-swarm') return smoothstep(-0.35, 0.25, Math.sin((2 * Math.PI * t) / 180) + 0.25);
+    return 1;
+  }
+
+  /** The disc's star bobbing through its hole (units of the disc's unit). */
+  private diskBob(t: number): number {
+    return Math.sin((2 * Math.PI * t) / 160) * 0.13 + 0.06;
+  }
+
+  /** A topopolis turns once in five minutes: a window faces the star for a day, then turns away. */
+  private topoSpin(def: MegaGroundDef, t: number): number {
+    return (2 * Math.PI * t) / 300 + this.focus[0] / def.radiusKm;
   }
 
   /** The megastructure chosen (null: none): its ground is built and compiled now, so a zoom can go on down to it. */
@@ -470,14 +517,12 @@ export class MegaSurfaceLayer implements MapLayer {
     let day = 1, dawn = 0;
     // Overhead stars light the land a little off the vertical, so relief still reads.
     const sun = new THREE.Vector3(0.22, 1, 0.12).normalize();
+    day = this.dayAt(def, t);
     if (def.type === 'ringworld') {
       // Shadow squares orbit faster than the ring turns: a day and a night every 90 s or so.
       const step = (2 * Math.PI) / SQUARES.n;
-      const phase = ((((2 * Math.PI) / (SQUARES.n * 90)) * t - this.focus[0] / def.radiusKm) % step + step) % step;
-      su.uSquarePhase.value = phase;
+      su.uSquarePhase.value = ((((2 * Math.PI) / (SQUARES.n * 90)) * t - this.focus[0] / def.radiusKm) % step + step) % step;
       su.uRingZ.value = -this.focus[1] / b.sky.unitKm;
-      const x = (((0 - phase) / step) % 1 + 1) % 1;
-      day = smoothstep(SQUARES.cover / 2 - 0.03, SQUARES.cover / 2 + 0.03, Math.min(x, 1 - x));
       su.uStarPos.value.set(0, 1, 0);
       su.uStarRad.value = 0.014;
     } else if (def.type === 'dyson-sphere') {
@@ -485,23 +530,19 @@ export class MegaSurfaceLayer implements MapLayer {
       su.uStarRad.value = 0.024;
     } else if (def.type === 'alderson-disk') {
       // The star bobs through the hole: it rises and sets over the disc.
-      const bob = Math.sin((2 * Math.PI * t) / 160) * 0.13 + 0.06;
+      const bob = this.diskBob(t);
       su.uStarPos.value.set(-1, bob, 0);
       su.uStarRad.value = 0.006;
       sun.set(-1, bob, 0).normalize();
-      day = smoothstep(-0.015, 0.03, bob);
       dawn = 1 - smoothstep(0.02, 0.12, bob);
       col.multiplyScalar(1.6);
     } else if (def.type === 'topopolis') {
       // A topopolis turns once in five minutes: a window faces the star for a day, then turns away.
-      const spin = (2 * Math.PI * t) / 300 + this.focus[0] / def.radiusKm;
-      su.uSpin.value = spin;
+      su.uSpin.value = this.topoSpin(def, t);
       su.uStarPos.value.set(1, 0, 0.15);
       su.uStarRad.value = 0.012;
-      day = smoothstep(-0.3, 0.3, Math.cos(spin) + 0.35);
     } else {
       // A habitat: its mirrors open and close on a day; the habitat spins once in two minutes.
-      day = smoothstep(-0.35, 0.25, Math.sin((2 * Math.PI * t) / 180) + 0.25);
       su.uSpin.value = (2 * Math.PI * t) / 120 + this.focus[0] / def.radiusKm;
       // The star is down the axis (the mirrors throw its light in through the windows).
       su.uStarPos.value.set(0, 0, -1);

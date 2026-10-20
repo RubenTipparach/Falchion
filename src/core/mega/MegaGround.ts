@@ -190,7 +190,7 @@ export function rawHeight(def: MegaGroundDef, x: number, z: number, oct: number)
   if (land <= 0) return land * def.reliefKm * 0.8;
   // Plains and hills, with mountain chains only where the land is high.
   const m = ridges(def, x, z);
-  return (land * 0.6 + smoothstep(0.14, 0.5, land) * m * m * 1.9 + smoothstep(0, 0.12, land) * hills(def, x, z) * 0.7) * def.reliefKm;
+  return (land * 0.6 + smoothstep(0.14, 0.5, land) * m * m * 1.9 + smoothstep(0, 0.12, land) * hills(def, x, z)) * def.reliefKm;
 }
 
 /**
@@ -199,7 +199,7 @@ export function rawHeight(def: MegaGroundDef, x: number, z: number, oct: number)
  */
 export function hills(def: MegaGroundDef, x: number, z: number): number {
   x = wrapX(def, x);
-  const rugged = smoothstep(-0.25, 0.45, snoise(x / (def.featureKm * 2.5) + def.offset[0] + 19, z / (def.featureKm * 2.5) + def.offset[1] + 41, def.offset[2] + 23));
+  const rugged = smoothstep(-0.65, 0.25, snoise(x / (def.featureKm * 2.5) + def.offset[0] + 19, z / (def.featureKm * 2.5) + def.offset[1] + 41, def.offset[2] + 23));
   if (rugged <= 0) return 0;
   let px = (x / def.featureKm) * 30 + def.offset[0] + 7, py = (z / def.featureKm) * 30 + def.offset[1] + 3, pz = def.offset[2] + 11;
   let v = 0, a = 0.55;

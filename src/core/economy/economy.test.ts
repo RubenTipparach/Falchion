@@ -69,7 +69,17 @@ describe('economy', () => {
     const one = capsOf({ colonies: [{ name: 'A', biome: 'barren' }] }, capped);
     const two = capsOf({ colonies: [{ name: 'A', biome: 'barren', buildings: ['warehouse'] }, { name: 'B', biome: 'ice' }] }, capped);
     expect(two.metals! - one.metals!).toBe(STORAGE.perColony + 1000);
-    expect(two.credits! - one.credits!).toBe(STORAGE.creditsPerColony);
+  });
+
+  it('caps nothing that is not stored: credits, influence and faith', () => {
+    const capped = { ...tables, storage: STORAGE };
+    const caps = capsOf({ colonies: [{ name: 'A', biome: 'barren', buildings: ['warehouse'] }] }, capped);
+    expect(caps.credits).toBeUndefined();
+    expect(caps.influence).toBeUndefined();
+    expect(caps.faith).toBeUndefined();
+    const rich = resolveTurn(econ({ colonies: [{ name: 'A', biome: 'barren' }], stock: { ...START_RESOURCES, credits: 1_000_000 } }), EMPTY_RESEARCH, 1, capped);
+    expect(rich.economy.stock.credits).toBeGreaterThan(1_000_000 - 1000);
+    expect(rich.report.lines.some((l) => l.startsWith('Storage full') && l.includes('Credits'))).toBe(false);
   });
 
   it('charges upkeep for every ship; conscription waives warships', () => {

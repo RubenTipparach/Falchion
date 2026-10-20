@@ -73,12 +73,12 @@ export interface EconomyTables {
 }
 
 export interface StorageTable {
+  /** The caps with no colonies; a resource not named here (credits, influence, faith) has none. */
   readonly base: Readonly<Partial<Record<Resource, number>>>;
   readonly perColony: number;
-  readonly creditsPerColony: number;
 }
 
-/** Most of each resource the empire can hold. Income stops at the cap. */
+/** Most of each stored resource the empire can hold. Income stops at the cap. */
 export function capsOf(e: Pick<EconomyState, 'colonies'>, t: EconomyTables): Partial<Record<Resource, number>> {
   const s = t.storage;
   if (!s) return {};
@@ -87,7 +87,6 @@ export function capsOf(e: Pick<EconomyState, 'colonies'>, t: EconomyTables): Par
   for (const r of Object.keys(caps) as Resource[]) {
     if (MINERALS.has(r) || r === 'food' || r === 'goods') caps[r] = caps[r]! + e.colonies.length * s.perColony + extra;
   }
-  if (caps.credits !== undefined) caps.credits += e.colonies.length * s.creditsPerColony;
   return caps;
 }
 

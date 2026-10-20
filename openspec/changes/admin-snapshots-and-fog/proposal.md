@@ -1,0 +1,26 @@
+## Why
+The owner: "can you start recording snapshots of people's empires every hour or so? and add a button to export by time range in admin portal. I'll need you to analyze these logs in the future, so make them useful. Need a server reset button, each user shouldn't have to recreate their empire, the reset just resets them to the start when they first created an empire. Need to hide all systems eventually, so have a button to toggle hide systems (only explored systems will be visible if this flag is active). Make sure to show discovered systems vs hidden systems in the galaxy on the map, maybe some sort of fog of war system would be cool. Definitely don't show all those mega structures unless the player has visited them with their ship, or an ally sharing vision."
+
+## What Changes
+- **Hourly empire snapshots** (`server/snapshots.mjs`, a `snapshots` table in `falchion.db`): once every `SNAPSHOT_INTERVAL_MS` (one hour of real time) the server records one row per empire with the time, the world year, the empire's id, owner and name, a stable, documented summary for analysis (`src/sim/snapshot.ts`, `docs/snapshots.md`) and the full record gzipped. Nothing is pruned.
+- **Admin export**: a from/to form (and an optional empire) downloads the snapshots in the range as JSON Lines, interleaved by time with the event log entries of the same range; the portal shows how many snapshots there are, of how many empires, the first and the latest.
+- **Server reset** (admin, with a typed confirmation): every empire goes back to its start as first founded (same name, ruler, capital, colours, flag, ship style and home system), rebuilt at the current world year; players keep their empire and do not found it again. The founding is kept when an empire is founded (`foundings` table); an empire founded before that has its choices read from its current save. The shared world starts fresh (NPC empires dormant, asteroid fields full, no relations, contacts, stakes or payouts). Snapshots and the event log are kept: a snapshot of every empire is taken just before (`reason: "reset"`) and the reset is logged.
+- **Hide systems toggle** (admin, persisted as the `hidesystems` setting, announced live and in `/api/info` and `/api/vision`): when on, a player sees on the map only the systems they have explored or sighted, and those an ally shares; the server stops sending other players' worlds and fleets, and NPC worlds and fleets, that the player cannot see.
+- **Vision rules in `src/core/visibility/Vision.ts`** (pure): explored systems (home, colonies, depots, surveyed planets, systems a ship of yours has been in), sighted systems (near those, near your fleets, and in your territory), allies sharing vision, how a star shows (`explored`, `sighted`, `fogged`, `hidden`), megastructures masked until explored, and the server-side filters.
+- **Visited systems**: an empire records every system its ships pass through or stop in (`visited` in the save).
+- **Fog of war on the galaxy map** (`src/render/map/FogOfWarLayer.ts`, a new `MapLayer`): a soft, drifting fog over unexplored space, cleared around explored and sighted systems and your fleets; uncharted stars are dim, grey and unnamed (`NearStarLayer`), and hidden ones are not drawn while the flag is on.
+- **Megastructures hidden until visited**: the beacon, the structure in the system view, its card, its thumbnail and its search listing appear only once one of your ships (or an ally's) has explored the system; before that it is an ordinary star.
+
+Out of scope: hiding the procedural galaxy itself (stars are generated from a seed every client has; the far-view star cloud stays as the galaxy's shape, under fog), hiding other players from the Players drawer, pruning snapshots, and resetting chat, the activity feed or guests' own browser empires.
+
+## Capabilities
+
+### New Capabilities
+- `admin-snapshots-and-fog`: hourly empire snapshots and their export, the server reset, the hide-systems flag, fog of war and megastructure discovery.
+
+## Impact
+- **Server**: `server/snapshots.mjs` (+ test), `server/vision.mjs` (+ test), `server/reset.mjs` (+ test), `server/db.mjs` (tables), `server/store.mjs` (foundings), `server/eventLog.mjs` (range reads), `server/admin.mjs` (export, snapshot summary, reset, hide toggle), `server/world.mjs` (reset), `server/chat.mjs` (per-recipient broadcast), `server/simTicker.mjs` (exclusive runs), `server/index.mjs` (wiring, `/api/vision`, filtered `/api/players` and `/api/world`).
+- **Rules**: `src/core/visibility/Vision.ts` (+ `vision.test.ts`), `src/sim/snapshot.ts` (+ test), `src/sim/EmpireSim.ts` (records visited systems), `src/sim/headless.ts` (summary, founding and vision exports), `src/sim/newEmpireState.ts`, `src/app/GameState.ts` and `SaveGame.ts` (`visited`).
+- **Client**: `src/app/Vision.ts` (the player's lens on the galaxy), `src/render/map/FogOfWarLayer.ts`, `NearStarLayer`, `MegaBeaconLayer`, `SystemLayer`, `StarPointsMaterial`, `src/core/galaxy/GalaxySearch.ts` (a lens in the scan context), `GameController`, `main.ts`, `Router.ts`.
+- **Docs**: `docs/snapshots.md`.
+- Extension points used: `MapLayer`/`LayerStack` (the fog), the `ScanContext` of galaxy search, `SystemEvents` (a `see` lens), the admin portal's routes, the chat stream's `broadcast` (now with a per-recipient `shape`) and the `LiveHooks` taps (`settings`).

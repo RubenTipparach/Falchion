@@ -461,17 +461,23 @@ export function resolveTurn(e: EconomyState, research: ResearchState, turn: numb
 }
 
 /**
- * One year of every colony's population. Each world's own food balance drives it; when the empire's
- * stores plus this year's food cannot cover every shortfall, the gap is shared among the hungry
- * worlds in proportion to their shortfall.
+ * One year of every colony's population. Each world's own food balance drives it. When the empire's
+ * stores plus this year's food cannot feed everyone, the worlds with the most people go hungry
+ * first: each takes as much of the shortfall as it eats, the next the rest, and so on.
  */
 function populationYear(e: EconomyState, t: EconomyTables, foodIncome: number, lines: string[]): Colony[] {
   const balances = e.colonies.map((c) => colonyYield(c, t).income.food ?? 0);
-  const gap = Math.max(0, -((e.stock.food ?? 0) + foodIncome));
-  const short = balances.reduce((n, b) => n + Math.max(0, -b), 0);
+  let gap = Math.max(0, -((e.stock.food ?? 0) + foodIncome));
+  const hungry = new Array<number>(e.colonies.length).fill(0);
+  const order = e.colonies.map((_, i) => i).sort((a, b) => populationOf(e.colonies[b]) - populationOf(e.colonies[a]) || a - b);
+  for (const i of order) {
+    if (gap <= 0) break;
+    hungry[i] = Math.min(gap, populationOf(e.colonies[i]) * FOOD_PER_POP);
+    gap -= hungry[i];
+  }
   let changed = false;
   const out = e.colonies.map((c, i) => {
-    const uncovered = gap > 0 && balances[i] < 0 ? Math.min(-balances[i], (gap * -balances[i]) / short) : 0;
+    const uncovered = hungry[i];
     const r = growWorld(c, balances[i], uncovered);
     if (r.colony !== c) changed = true;
     if (r.change > 0) lines.push(`${c.name} grew to population ${r.colony.pop}`);

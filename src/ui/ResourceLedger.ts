@@ -96,6 +96,12 @@ export class ResourceLedger {
       section('Income', income, 'up'),
       section('Costs', costs, 'down'),
       section('Adjustments', adjust, ''),
+      byWorld(income, costs),
+      income.length || costs.length || adjust.length ? h('div', { class: 'ledger-total' },
+        h('span', {}, 'Total each year'),
+        h('span', { class: 'mono small muted' }, [income, costs, adjust].filter((es) => es.length).map((es) => sum(es)).map(signed).join(' ')),
+        h('b', { class: `mono ${net > 0 ? 'green' : net < 0 ? 'red' : ''}` }, `= ${signed(net)}`)) : '',
+      r === 'food' && sum(income) + sum(costs) < 0 && stock + sum(income) + sum(costs) < 0 ? h('p', { class: 'small red' }, 'The stores run dry this year: the most populous worlds go hungry first and lose population.') : '',
       !income.length && !costs.length ? h('p', { class: 'small muted' }, `Nothing makes or uses ${def.name.toLowerCase()} each year yet. ${def.source}.`) : '',
       flows.length ? h('section', { class: 'ledger-sec' },
         h('h5', {}, 'Recent'),
@@ -105,6 +111,20 @@ export class ResourceLedger {
       h('p', { class: 'ledger-foot small muted' }, 'Forecast for next year from your colonies, ships and policies now.'),
     );
   }
+}
+
+const sum = (es: readonly LedgerEntry[]) => es.reduce((n, e) => n + e.n, 0);
+const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${fmt(Math.abs(n))}`;
+
+/** Each world's income less its costs (when more than one world makes or uses it). */
+function byWorld(income: readonly LedgerEntry[], costs: readonly LedgerEntry[]): HTMLElement | string {
+  const worlds = new Map<string, number>();
+  for (const e of [...income, ...costs]) worlds.set(e.group, (worlds.get(e.group) ?? 0) + e.n);
+  if (worlds.size < 2) return '';
+  const rows = [...worlds.entries()].sort((a, b) => a[1] - b[1]);
+  return h('section', { class: 'ledger-sec' },
+    h('h5', {}, 'Net by source'),
+    ...rows.map(([group, n]) => h('div', { class: 'ledger-row' }, h('span', { class: 'ledger-label' }, group), h('span', { class: `mono ${n > 0 ? 'green' : n < 0 ? 'red' : ''}` }, signed(n)))));
 }
 
 /** Items grouped under their headings, biggest first, each with a subtotal. */

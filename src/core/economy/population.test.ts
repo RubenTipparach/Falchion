@@ -28,9 +28,15 @@ describe('population', () => {
   });
 
   it('an uncovered shortfall shrinks it, never below 1', () => {
-    expect(years({ pop: 3, size: 4 }, 3, -6, 6).pop).toBe(2);
+    // A world of 3 that goes without 6 a year loses a point in a year (at −2 × pop), and another the next.
+    expect(years({ pop: 3, size: 4 }, 1, -6, 6).pop).toBe(2);
+    expect(years({ pop: 3, size: 4 }, 2, -6, 6).pop).toBe(1);
     expect(years({ pop: 1, size: 4 }, 20, -6, 6).pop).toBe(1);
-    expect(DECLINE_PER_POP).toBe(5);
+    expect(DECLINE_PER_POP).toBe(2);
+  });
+
+  it('a world that goes hungry does not grow, even from its own surplus', () => {
+    expect(years({ pop: 3, growth: 25, size: 4 }, 1, 8, 4)).toMatchObject({ pop: 3, growth: -4 });
   });
 
   it('stops at the world\'s cap (3 × planet size)', () => {

@@ -983,6 +983,9 @@ img.thumb:not(.ready) { animation: thumb-wait 1.2s ease-in-out infinite alternat
 .ledger-net.down b { color: var(--red, #ff7a7a); }
 .ledger-net small { margin-left: auto; }
 .ledger-sec { margin: 0 0 10px; }
+.ledger-total { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; margin: 0 0 10px; border-top: 1px solid var(--line-strong); }
+.ledger-total > span:first-child { font: 600 10px var(--font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.ledger-total b { margin-left: auto; font-size: 15px; }
 .ledger-sec h5 { display: flex; justify-content: space-between; margin: 0 0 4px; font: 600 10px var(--font-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
 .ledger-row, .ledger-group summary, .ledger-list li { display: flex; justify-content: space-between; gap: 10px; padding: 3px 4px; }
 .ledger-group summary { cursor: pointer; list-style: none; border-radius: 4px; }

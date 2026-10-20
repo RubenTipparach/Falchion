@@ -102,8 +102,17 @@ describe('population and food', () => {
     const fed = year(econ({ colonies: [hungry], stock: { ...START_RESOURCES, food: 500 } }), 10);
     expect(fed.colonies[0]).toMatchObject({ pop: 3 });
     expect(fed.colonies[0].growth ?? 0).toBe(0);
-    const starved = year(econ({ colonies: [hungry], stock: { ...START_RESOURCES, food: 0 } }), 3);
+    const starved = year(econ({ colonies: [hungry], stock: { ...START_RESOURCES, food: 0 } }), 1);
     expect(starved.colonies[0].pop).toBe(2);
+  });
+
+  it('when the stores run dry, the most populous world starves first', () => {
+    // Two barren worlds eat 12; the stores hold 4, so 8 go without: all of it on the bigger world,
+    // which eats 8.
+    const colonies = [{ name: 'Small', biome: 'barren', size: 6, pop: 2 }, { name: 'Big', biome: 'barren', size: 6, pop: 4 }];
+    const r = year(econ({ colonies, stock: { ...START_RESOURCES, food: 4 } }), 1);
+    expect(r.colonies.find((c) => c.name === 'Big')!.pop).toBe(3);
+    expect(r.colonies.find((c) => c.name === 'Small')!.pop).toBe(2);
   });
 
   it('another world\'s surplus keeps a hungry world from shrinking, but does not make it grow', () => {

@@ -36,18 +36,18 @@ Shortly after the game starts it SHALL compile every shader a close-up can use (
 - **THEN** no close-up shader is compiled during the landing
 
 ### Requirement: The warm-up never floods the driver
-The warm-up SHALL hand the driver one program at a time, the next only once the last has finished. It SHALL pause while the tab is hidden or the player is moving the view. Handing all of them over at once froze every Chrome tab on Windows.
+The warm-up SHALL hand the driver at most two programs at a time (one without parallel compile), the next only once those have finished. It SHALL pause while the tab is hidden or the player is moving the view. Handing all of them over at once froze every Chrome tab on Windows.
 
 #### Scenario: The warm-up does not freeze the browser
 - **WHEN** the warm-up runs on Chrome on Windows
-- **THEN** at most one of its programs is compiling at any moment, and other tabs stay responsive
+- **THEN** at most two of its programs are compiling at any moment, and other tabs stay responsive
 
-### Requirement: Close-ups wait for the warm-up
-Until the warm-up has finished, no planet or megastructure close-up SHALL open. Pressing Land, or zooming all the way in on a planet, SHALL leave the view where it is and SHALL say that the shaders are being prepared and that landing opens when they are done. Once the warm-up finishes, close-ups SHALL be offered again without a reload.
+### Requirement: A planet's close-up waits only for its own shaders
+A planet's close-up SHALL open once its own shaders are ready (its terrain and what every close-up shares), not the whole warm-up. Pressing Land, or zooming all the way in, SHALL move them to the front of the warm-up, keep the view at planet view, and say so with that planet's own progress. A Land pressed early SHALL land by itself once they are ready.
 
 #### Scenario: Landing during the warm-up
-- **WHEN** the player presses Land on a colony while the warm-up is at 20 of 91
-- **THEN** the view stays at planet view and the bar reads "Preparing shaders · 20/91 · landing opens when done"
+- **WHEN** the player presses Land on a colony while the warm-up is at 4 of 75
+- **THEN** the bar reads "Preparing <planet> · 1/11 · landing when ready", and the view descends once those 11 are compiled, while the rest carry on
 
 ### Requirement: Zooming into a star system compiles nothing on the spot
 The warm-up SHALL also prepare the system view (planets, rings, orbits, every kind of star, each megastructure, each belt, the nebula sky) with the map's own lights. A new system SHALL stay hidden until its shaders are ready, and the one it replaced SHALL be kept until then. No megastructure SHALL write a per-system number into its shader source.

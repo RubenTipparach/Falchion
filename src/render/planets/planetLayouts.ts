@@ -27,11 +27,16 @@ const maps = new Map<string, THREE.DataTexture>();
 
 const keyOf = (planet: PlanetRef, colony: SettlementInput | null) => JSON.stringify([planet.id, planet.biome, colony]);
 
+/** A planet's surface look (cheap: no layout). */
+export function planetLook(planet: PlanetRef): SurfaceLook {
+  return surfaceLookOf(PLANET_LOOKS[planet.biome] ?? PLANET_LOOKS.barren, hashSeed(planet.id, 'surface'));
+}
+
 export function planetLayout(planet: PlanetRef, colony: SettlementInput | null): PlanetLayout {
   const key = keyOf(planet, colony);
   let hit = layouts.get(key);
   if (!hit) {
-    const look = surfaceLookOf(PLANET_LOOKS[planet.biome] ?? PLANET_LOOKS.barren, hashSeed(planet.id, 'surface'));
+    const look = planetLook(planet);
     hit = { key, look, layout: surfaceLayout(planet.id, look, colony) };
     remember(layouts, key, hit);
   } else touch(layouts, key, hit);

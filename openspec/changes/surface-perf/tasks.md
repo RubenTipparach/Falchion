@@ -16,5 +16,6 @@
 - [x] 4.3 The placed flora shader leaves the terrain out
 - [x] 4.4 Shader warm-up at start-up (ShaderWarmup) with a progress pill (LoadingPill); "Building the surface" while a close-up builds
 - [x] 4.5 Warm-up compiles one program at a time, pausing while the tab is hidden or the view is being moved (all at once froze Chrome)
-- [x] 4.6 Close-ups wait for the warm-up: Land and zooming in say the shaders are being prepared
+- [x] 4.6 Close-ups wait for their own shaders: Land and zooming in move the planet's to the front, say so, and land when ready
 - [x] 4.7 System view in the warm-up, against the map's lights; a new system hidden until ready, the last kept until then; megastructure sizes as uniforms; your worlds' night lights built while idle
+- [x] 4.8 Two programs in flight with parallel compile, 30 ms between batches

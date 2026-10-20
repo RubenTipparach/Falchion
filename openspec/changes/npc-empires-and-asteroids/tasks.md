@@ -1,0 +1,20 @@
+## 1. Shared world
+- [x] 1.1 SharedWorld state, effects and their application (pure, tested)
+- [x] 1.2 Server: world.json, /api/world, the world lock, effects applied after each empire write, `world` broadcast
+- [x] 1.3 Client: shared world from the server (guests local), applied to the map and panels
+
+## 2. Asteroid mining
+- [x] 2.1 Asteroid fields per system (deterministic) and refill over 24 h
+- [x] 2.2 Mining ships mine only asteroid fields, faster, drawing them down (shared)
+- [x] 2.3 Star card: fields, what is left, refill time
+
+## 3. NPC empires
+- [x] 3.1 Archetypes (content) and the catalogue: spawn NPCs and grid NPCs, regenerated from ids
+- [x] 3.2 Discovery: fleets within range activate an NPC; spawn NPCs known from the start
+- [x] 3.3 NPC world step: raider fleets, raids, contact battles (deterministic)
+- [x] 3.4 Battles and raids delivered to empires; War Room targets from known NPCs; engage effects
+- [x] 3.5 Map: known NPC territories and fleets; retire the fake neighbours, cosmetic fleets and fixed targets
+
+## 4. Checks
+- [x] 4.1 Tests: catalogue determinism, discovery, mining and refill, NPC step and battles, server/client agreement
+- [x] 4.2 End to end: discovery, a raid, a War Room battle, a depleted field

@@ -1,15 +1,21 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { HEX_SIZE, Hex, hexKey, hexSpiral, hexToWorld } from '../../core/hex/Hex';
+import type { Flag } from '../../core/empire/Identity';
+import { flagSvg } from '../flag';
 import type { MapLayer, ViewState } from './MapLayer';
 import { fade, fadeIn } from './ZoomModel';
 
 export interface TerritoryClaim {
+  /** Another player's id: their marker can be clicked (see onMarkerClick). */
+  readonly id?: string;
   readonly name: string;
   readonly color: string;
   readonly kind: 'player' | 'other-player' | 'alien';
   readonly home: Hex;
   readonly colonies: ReadonlyArray<{ readonly hex: Hex; readonly radius: number }>;
+  /** Shown on the name marker instead of the colour dot (validated flag parts only). */
+  readonly flag?: Flag;
 }
 
 /** One set of claims drawn as hex fills and name markers. */
@@ -20,17 +26,26 @@ interface ClaimSet {
   readonly materials: THREE.MeshBasicMaterial[];
 }
 
+/** Height of an empire name marker (CSS px), for keeping them apart. */
+const MARKER_H = 26;
+/** Longest a marker's name shows before it is cut short with an ellipsis (about 240px). */
+const MARKER_CHARS = 26;
+
 const HEX_GEO = new THREE.CircleGeometry(HEX_SIZE * 0.96, 6).rotateX(-Math.PI / 2);
 
 /**
  * Filled hex territory for each empire, plus an always-visible name marker.
- * Fixed claims (your empire, the generated neighbours) are drawn once; other
- * players' claims can be replaced at any time with setDynamic.
+ * Fixed claims are drawn once; your own empire (setOwn), other players' claims (setDynamic)
+ * and the NPC empires you know (setNpcs) are replaced whenever they change.
  */
 export class TerritoryLayer implements MapLayer {
   readonly object3d = new THREE.Group();
   private readonly fixed: ClaimSet;
   private dynamic: ClaimSet | null = null;
+  private npcs: ClaimSet | null = null;
+  private own: ClaimSet | null = null;
+  /** Called when the name marker of a claim with an id (another player) is clicked. */
+  onMarkerClick: ((claim: TerritoryClaim) => void) | null = null;
 
   constructor(claims: readonly TerritoryClaim[]) {
     this.fixed = this.build(claims);
@@ -39,12 +54,27 @@ export class TerritoryLayer implements MapLayer {
 
   /** Replace the live claims (other players in the shared galaxy). */
   setDynamic(claims: readonly TerritoryClaim[]): void {
-    if (this.dynamic) {
-      this.object3d.remove(this.dynamic.group);
-      this.release(this.dynamic);
+    this.dynamic = this.replace(this.dynamic, claims);
+  }
+
+  /** Replace the NPC empires' claims (the ones you know). */
+  setNpcs(claims: readonly TerritoryClaim[]): void {
+    this.npcs = this.replace(this.npcs, claims);
+  }
+
+  /** Replace your own empire's claim (it grows with colonies and takes your colours). */
+  setOwn(claim: TerritoryClaim): void {
+    this.own = this.replace(this.own, [claim]);
+  }
+
+  private replace(old: ClaimSet | null, claims: readonly TerritoryClaim[]): ClaimSet {
+    if (old) {
+      this.object3d.remove(old.group);
+      this.release(old);
     }
-    this.dynamic = this.build(claims);
-    this.object3d.add(this.dynamic.group);
+    const set = this.build(claims);
+    this.object3d.add(set.group);
+    return set;
   }
 
   private build(claims: readonly TerritoryClaim[]): ClaimSet {
@@ -66,9 +96,24 @@ export class TerritoryLayer implements MapLayer {
       const el = document.createElement('div');
       el.className = `empire-marker ${claim.kind}`;
       const dot = document.createElement('span');
-      dot.className = 'dot';
-      dot.style.background = claim.color;
-      el.append(dot, document.createTextNode(claim.name)); // player names are untrusted: no innerHTML
+      if (claim.flag) {
+        dot.className = 'flag-wrap';
+        dot.innerHTML = flagSvg(claim.flag, 18); // built only from validated parts and #rrggbb colours
+      } else {
+        dot.className = 'dot';
+        dot.style.background = claim.color;
+      }
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = claim.name; // player names are untrusted: no innerHTML
+      el.title = claim.name;
+      el.append(dot, name);
+      if (claim.id) {
+        el.classList.add('clickable');
+        el.title = `${claim.name}: show in Players`;
+        el.addEventListener('pointerdown', (e) => e.stopPropagation()); // a click here is not a map drag
+        el.addEventListener('click', (e) => { e.stopPropagation(); this.onMarkerClick?.(claim); });
+      }
       const marker = new CSS2DObject(el);
       const hp = hexToWorld(claim.home);
       marker.position.set(hp.x, 0, hp.z);
@@ -87,15 +132,31 @@ export class TerritoryLayer implements MapLayer {
   update(view: ViewState): void {
     const opacity = fade(view.visibleWidth, 600, 1_500) * fadeIn(view.visibleWidth, 4, 9);
     const showMarkers = view.visibleWidth > 80;
-    for (const set of this.dynamic ? [this.fixed, this.dynamic] : [this.fixed]) {
+    // Your own empire's name first, then other players', then NPCs': a name that would overlap one
+    // already placed is hidden until you zoom in and they separate.
+    const sets = [this.own, this.dynamic, this.npcs, this.fixed];
+    const placed: Array<{ x: number; y: number; w: number }> = [];
+    const cssH = typeof window === 'undefined' ? 800 : window.innerHeight;
+    const cssW = cssH * view.camera.aspect;
+    const p = new THREE.Vector3();
+    for (const set of sets) {
+      if (!set) continue;
       set.fills.visible = opacity > 0.01;
       set.materials.forEach((mat) => (mat.opacity = 0.2 * opacity));
-      set.markers.forEach((mk) => (mk.visible = showMarkers));
+      for (const mk of set.markers) {
+        if (!showMarkers) { mk.visible = false; continue; }
+        mk.getWorldPosition(p).project(view.camera);
+        const at = { x: (p.x * cssW) / 2, y: (-p.y * cssH) / 2, w: 34 + 8 * Math.min(MARKER_CHARS, mk.element.textContent?.length ?? 8) };
+        mk.visible = !placed.some((o) => Math.abs(o.y - at.y) < MARKER_H && Math.abs(o.x - at.x) < (o.w + at.w) / 2);
+        if (mk.visible) placed.push(at);
+      }
     }
   }
 
   dispose(): void {
     this.release(this.fixed);
     if (this.dynamic) this.release(this.dynamic);
+    if (this.own) this.release(this.own);
+    if (this.npcs) this.release(this.npcs);
   }
 }

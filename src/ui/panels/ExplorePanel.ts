@@ -11,10 +11,12 @@ import { RESOURCES } from '../../content/resources';
 import { Drawer } from '../Drawer';
 import type { FleetGroup, GameActions, GameQueries } from '../GameActions';
 import { exploreCost } from '../../core/fleet/Logistics';
-import { countOf } from '../../core/fleet/Presence';
 import { locateButton, storesView } from '../widgets';
 import { clear, fmt, h } from '../dom';
+import { collectWithFx } from '../collectFx';
 import { icon, IconName } from '../icons';
+import { thumb } from '../thumbs';
+import { settleable } from '../../content/biomes';
 
 
 
@@ -47,16 +49,16 @@ export class ExplorePanel extends Drawer {
     this.body.append(
       h('div', { class: 'row-between' },
         h('p', { class: 'muted' }, `System: `, h('b', {}, star.name), star.id === s.home.id ? ' (home)' : '', ' — select another star on the map to explore it.'),
-        locateButton(`Locate ${star.name}`, () => this.actions.flyTo(star, true))),
+        locateButton(`Locate ${star.name}`, (closeUp) => this.actions.flyTo(star, closeUp))),
       groups.length
-        ? h('div', {}, ...groups.map((g) => h('div', { class: 'group-card' }, h('header', {}, icon('fleet'), h('h4', {}, g.name), locateButton(`Locate ${g.name}`, () => this.actions.focusFleet(g.id))), storesView(g))))
+        ? h('div', {}, ...groups.map((g) => h('div', { class: 'group-card' }, h('header', {}, icon('fleet'), h('h4', {}, g.name), locateButton(`Locate ${g.name}`, (closeUp) => this.actions.focusFleet(g.id, closeUp))), storesView(g))))
         : h('div', { class: 'notice warn' }, `No ships on station in ${star.name}. Exploring needs a ship here with supply; survey ships carry the most.`,
           h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => { this.actions.select(star); this.actions.openPanel('fleets'); } }, icon('fleet'), ' Send a fleet here'))),
       h('div', { class: 'loot-bar' },
         h('button', { class: 'btn', disabled: !unexplored.length || !supply, title: `Needs ${need} supply in total`, onclick: () => this.actions.exploreAll(star) }, icon('explore'),
           unexplored.length ? ` Explore all ${unexplored.length} (${need} supply)` : ' All planets explored'),
-        h('button', { class: 'btn primary collect', disabled: !caches.length && !unopened, title: haulText, onclick: () => this.actions.collectResources(star) }, icon('crate'),
-          caches.length ? ` Collect resources (${caches.length} world${caches.length > 1 ? 's' : ''})` : unopened ? ` Open ${unopened} crate${unopened > 1 ? 's' : ''}` : ' Nothing to collect')),
+        // Collecting happens on each planet below; this gathers every world here at once.
+        caches.length + unopened > 1 ? h('button', { class: 'btn', title: haulText, onclick: (e: Event) => collectWithFx(e.currentTarget as Element, () => this.actions.collectResources(star)) }, icon('crate'), ' Collect all') : ''),
       caches.length ? h('p', { class: 'small haul' }, 'Waiting: ', haulText, unopened ? ` · ${unopened} crate${unopened > 1 ? 's' : ''}` : '') : '',
     );
     if (!planets.length) this.body.append(h('p', {}, 'No planets in this system.'));
@@ -70,37 +72,52 @@ export class ExplorePanel extends Drawer {
     const biome = BIOMES.find((b) => b.id === p.biome)!;
     const colony = this.q.colonyAt(p.id);
     const cost = exploreCost(p);
-    const canExplore = groups.some((g) => g.stores.supply >= cost);
-    const ark = groups.some((g) => countOf(g.ships, 'colony-ark') > 0);
+    const canExplore = groups.some((g) => !g.company && g.stores.supply >= cost);
+    const ark = this.q.arkAt(star);
     const card = h('div', { class: 'planet-card' },
       h('div', { class: 'pc-head' },
         h('img', { class: 'planet-thumb', src: this.thumb(p), alt: `${p.name}, ${biome.name}` }),
         h('div', {}, h('b', {}, p.name), colony ? h('span', { class: 'tag good' }, 'COLONY') : null, h('div', { class: 'muted small' }, `${biome.name} · size ${p.size}`)),
         locateButton(`Zoom to ${p.name}`, () => this.actions.focusPlanet(star, p)),
-        !result && !colony ? h('button', { class: 'btn primary', disabled: !canExplore, title: canExplore ? '' : 'Needs a ship on station with enough supply', onclick: () => this.actions.explore(p) }, `Explore · ${cost}`, icon('supply')) : null));
+        !result && !colony ? h('button', { class: 'btn primary', disabled: !canExplore, title: canExplore ? '' : 'Needs a ship on station with enough supply', onclick: () => this.actions.explore(p) }, `Explore · ${cost}`, icon('supply')) : null,
+        this.collectButton(star, p)));
     if (result) {
       const kind = ENCOUNTER_KINDS.find((k) => k.id === result.kind)!;
       card.append(
         h('div', { class: `encounter ${result.success ? 'ok' : 'bad'}` },
-          h('div', { class: 'enc-kind' }, icon(kind.id as IconName), ' ', kind.name, h('span', { class: 'muted small' }, ` · ${Math.round(result.successChance * 100)}% chance`)),
+          h('div', { class: 'enc-kind' }, thumb('event', kind.id, 44), ' ', kind.name, h('span', { class: 'muted small' }, ` · ${Math.round(result.successChance * 100)}% chance`)),
           h('p', {}, result.narrative),
           result.success ? h('p', { class: 'green' }, 'Success!') : h('p', { class: 'red' }, `Failure — ${result.cost?.description} (−${result.cost?.fleetPower} fleet power)`)));
       if (result.crate) card.append(this.crateView(p.id, result.crate.tier, result.crate.cards));
-      if (!colony && p.biome !== 'gas') {
-        card.append(h('div', { class: 'row' }, h('button', { class: 'btn', disabled: !ark, title: ark ? 'Uses one Colony Ark' : 'Needs a Colony Ark on station here', onclick: () => this.actions.settle(p) }, icon('build'), ark ? ' Settle colony' : ' Settle (needs a Colony Ark here)')));
+      if (!colony && settleable(p.biome)) {
+        const why = typeof ark === 'string' ? ark : null;
+        card.append(h('div', { class: 'row' }, h('button', { class: 'btn', disabled: !!why, title: why ?? 'The ark lands its colonists and spends its supply; it goes back for more', onclick: () => this.actions.settle(p) }, icon('build'), why ? ' Settle (no ark ready here)' : ' Settle colony')), why ? h('p', { class: 'small muted' }, why) : '');
       }
     }
     return card;
   }
 
+  /** Collect on the planet that holds something: its resource cache and/or loot crate. */
+  private collectButton(star: StarSystem, p: Planet): HTMLElement | null {
+    const s = this.store.state;
+    const cache = this.q.pendingCaches(star).find((c) => c.planet.id === p.id)?.cache;
+    const crate = !!s.explored[p.id]?.crate && !s.openedCrates.includes(p.id);
+    if (!cache && !crate) return null;
+    const what = [
+      ...Object.entries(cache ?? {}).map(([r, n]) => `+${fmt(n!)} ${RESOURCES.find((x) => x.id === r)?.short ?? r}`),
+      ...(crate ? [`${s.explored[p.id].crate!.tier} crate`] : []),
+    ].join(' · ');
+    return h('button', { class: 'btn primary collect', title: `Collect ${what}`, onclick: (e: Event) => collectWithFx(e.currentTarget as Element, () => this.actions.collectPlanet(p)) }, icon('crate'), ' Collect');
+  }
+
   private crateView(planetId: string, tier: string, cards: readonly Card[]): HTMLElement {
     const opened = this.store.state.openedCrates.includes(planetId);
     if (!opened) {
-      return h('button', { class: `crate ${tier}`, onclick: () => this.actions.collectCrate(planetId) },
-        icon('crate'), `Open ${tier} loot crate (${cards.length} cards)`);
+      // Unopened: the planet's Collect button opens it.
+      return h('div', { class: `crate ${tier} closed` }, icon('crate'), `${tier} loot crate (${cards.length} cards) · Collect to open`);
     }
     return h('div', { class: 'cards' }, ...cards.map((c, i) => h('div', { class: `card ${c.rarity}`, style: `animation-delay:${i * 90}ms` },
-      h('span', { class: 'card-rarity' }, c.rarity), h('span', { class: 'card-icon' }, icon(cardIcon(c))), h('span', { class: 'card-text' }, this.cardText(c)))));
+      h('span', { class: 'card-rarity' }, c.rarity), h('span', { class: 'card-icon' }, cardThumb(c) ?? icon(cardIcon(c))), h('span', { class: 'card-text' }, this.cardText(c)))));
   }
 
   private cardText(c: Card): string {
@@ -118,6 +135,13 @@ export class ExplorePanel extends Drawer {
       h('p', { class: 'small' }, h('b', {}, 'Ship blueprints: '), e.chassis.length ? e.chassis.map((id) => SHIP_CLASSES.find((x) => x.id === id)?.name ?? id).join(', ') : '—'),
       h('p', { class: 'small' }, h('b', {}, 'Parts: '), e.parts.length ? e.parts.join(', ') : '—'));
   }
+}
+
+/** A rendered picture for a card that has one: the material, the ship class, the part. */
+function cardThumb(c: Card): HTMLElement | null {
+  if (c.type === 'materials') return thumb('resource', c.material, 40);
+  if (c.type === 'chassis') return thumb('ship', c.id, 40);
+  return null;
 }
 
 function cardIcon(c: Card): IconName {

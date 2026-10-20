@@ -1,0 +1,6 @@
+- [x] 1 Identity model, validation and suggestions in core, with tests
+- [x] 2 Heraldry content: colours, flag patterns, emblems, titles, name parts
+- [x] 3 Flag SVG renderer and founding screen (found and edit modes)
+- [x] 4 Identity in state and save; territory, fleets and ships in the empire colour; top bar and Empire panel
+- [x] 5 Public view with identity, validated on server and client; join announcement uses the empire name
+- [x] 6 One starting star system per empire; 1 ly/min base speed for all

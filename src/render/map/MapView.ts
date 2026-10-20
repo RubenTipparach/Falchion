@@ -12,6 +12,8 @@ export interface MapViewOptions {
   /** Right-click without dragging (RTS move order). */
   readonly onRightClick?: (world: THREE.Vector3, ray: THREE.Raycaster) => void;
   readonly onFrame?: (view: ViewState, dt: number) => void;
+  /** Phones and tablets: lighter rendering (see the constructor). */
+  readonly lite?: boolean;
 }
 
 /** Owns the renderer, scene, camera and layer stack; runs the frame loop. */
@@ -22,14 +24,17 @@ export class MapView {
   readonly camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
   readonly layers: LayerStack;
   readonly controller: MapCameraController;
-  private readonly renderer: THREE.WebGLRenderer;
+  readonly renderer: THREE.WebGLRenderer;
   private readonly labelRenderer = new CSS2DRenderer();
   private readonly clock = new THREE.Clock();
   private lastView: ViewState | null = null;
 
   constructor(private readonly opts: MapViewOptions) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+    // stencil: the selected ship masks itself so its outline is drawn only around its silhouette.
+    // Phones (lite): no kept drawing buffer, and at most 1.5 device pixels per CSS pixel.
+    const lite = opts.lite ?? false;
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: !lite, stencil: true, ...(lite ? { powerPreference: 'high-performance' as const } : {}) });
+    this.renderer.setPixelRatio(Math.min(lite ? 1.5 : 2, window.devicePixelRatio));
     this.renderer.setClearColor('#03060d');
     opts.container.appendChild(this.renderer.domElement);
     this.labelRenderer.domElement.className = 'label-layer';
@@ -70,8 +75,36 @@ export class MapView {
     this.renderer.setAnimationLoop(this.frame);
   }
 
+  /** Pixels of the view's bottom edge covered by a panel (a phone's bottom sheet), read each frame. */
+  private bottomInset: (() => number) | null = null;
+  private insetShown = 0;
+
+  /**
+   * Keep what the camera looks at centred in the part of the screen a panel leaves open: the
+   * projection's centre moves up by half the covered height (an off-axis view, so nothing is
+   * scaled and picking still lines up).
+   */
+  setBottomInset(fn: (() => number) | null): void {
+    this.bottomInset = fn;
+  }
+
+  private applyInset(dt: number): void {
+    const want = this.bottomInset?.() ?? 0;
+    if (Math.abs(want - this.insetShown) < 0.5 && (want !== 0 || this.insetShown === 0)) return;
+    this.insetShown += (want - this.insetShown) * Math.min(1, dt * 10);
+    if (Math.abs(want - this.insetShown) < 0.5) this.insetShown = want;
+    this.offsetCamera();
+  }
+
+  private offsetCamera(): void {
+    const { clientWidth: w, clientHeight: h } = this.opts.container;
+    if (this.insetShown < 0.5) this.camera.clearViewOffset();
+    else this.camera.setViewOffset(w, h, 0, this.insetShown / 2, w, h);
+  }
+
   private readonly frame = (): void => {
     const dt = Math.min(0.1, this.clock.getDelta());
+    this.applyInset(dt);
     this.controller.update(dt);
     const view: ViewState = {
       camera: this.camera,
@@ -86,14 +119,25 @@ export class MapView {
     this.lastView = view;
     this.layers.update(view);
     this.controller.refollow();
+    // A close-up that drives the view (a planet's surface) puts the map camera at its viewpoint.
+    this.layers.poseCamera(this.camera);
     this.opts.onFrame?.(view, dt);
-    this.renderer.render(this.scene, this.camera);
+    // A layer whose own view fills the screen (a planet's surface) replaces the map: skip drawing it, hide its labels.
+    const covered = this.layers.covered();
+    if (!covered) {
+      this.layers.prerender(this.renderer, this.camera);
+      this.renderer.render(this.scene, this.camera);
+    }
+    this.world.visible = !covered;
     this.labelRenderer.render(this.scene, this.camera);
+    this.world.visible = true;
+    this.layers.overlay(this.renderer, this.labelRenderer, this.camera);
   };
 
   private readonly resize = (): void => {
     const { clientWidth: w, clientHeight: h } = this.opts.container;
     this.camera.aspect = w / Math.max(1, h);
+    this.offsetCamera();
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.labelRenderer.setSize(w, h);

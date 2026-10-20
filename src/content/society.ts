@@ -57,15 +57,8 @@ export const POLICIES: readonly PolicyDef[] = [
 export const TENETS: ReadonlyArray<{ id: string; name: string; blurb: string; effects: Effects }> = [
   { id: 'star-pilgrims', name: 'Star Pilgrims', blurb: 'Pilgrims ride the trade lanes: +10% trade.', effects: { tradePct: 10 } },
   { id: 'machine-saints', name: 'Machine Saints', blurb: 'Prayer as computation: +3 science.', effects: { science: 3 } },
-  { id: 'void-ascetics', name: 'Void Ascetics', blurb: 'Monks in the dark: +1 exotics, +1 dark matter.', effects: { income: { exotics: 1, darkMatter: 1 } } },
+  { id: 'void-ascetics', name: 'Void Ascetics', blurb: 'Monks in the dark: +2 crystals.', effects: { income: { crystals: 2 } } },
   { id: 'harmony', name: 'Harmony of Spheres', blurb: 'Order above all: +3 influence.', effects: { income: { influence: 3 } } },
   { id: 'brood-mother', name: 'The Brood Mother', blurb: 'All life is one family: +10% mining.', effects: { miningPct: 10 } },
   { id: 'iron-covenant', name: 'Iron Covenant', blurb: 'Faith that fights: +2 faith, militarists approve.', effects: { income: { faith: 2 }, approval: { militarists: 10 } } },
 ];
-
-export interface TradePartner {
-  readonly id: string;
-  readonly name: string;
-  readonly kind: 'colony' | 'player' | 'alien';
-  readonly distance: number;
-}

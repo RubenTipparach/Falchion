@@ -4,6 +4,8 @@ import { h, fmt } from './dom';
 const ly = (v: number): string => (v >= 10 ? fmt(v) : v >= 1 ? v.toFixed(1).replace(/\.0$/, '') : String(Number(v.toPrecision(1))));
 
 const ZOOM_MARKS: Array<[string, number]> = [['Planet', 0.05], ['System', 0.45], ['Hex', 40], ['Sector', 1_500], ['Galaxy', 80_000]];
+/** Where the Surface mark sits on the ladder (the surface itself depends on the planet). */
+const SURFACE_MARK = 0.003;
 
 /** Astrogation readout: hovered hex, scale ruler, zoom ladder and contact banner. */
 export class Hud {
@@ -15,20 +17,27 @@ export class Hud {
   private readonly rulerBar = h('span', { class: 'ruler-bar' });
   private readonly rulerLabel = h('span', { class: 'ruler-label' });
   private readonly width = h('span', { class: 'hud-width' });
+  private readonly clock = h('div', { class: 'hud-clock', hidden: true });
   private readonly thumb = h('span', { class: 'ladder-thumb' });
 
-  constructor(private readonly zoomRange: { min: number; max: number }, onZoomTo: (altitude: number) => void) {
+  private readonly rulerEl: HTMLElement;
+
+  /** `onSurface`: the ladder's Surface mark (land on the focused planet). */
+  constructor(private readonly zoomRange: { min: number; max: number }, onZoomTo: (altitude: number) => void, onSurface?: () => void) {
+    this.rulerEl = h('div', { class: 'ruler' }, this.rulerBar, this.rulerLabel);
     this.el = h('div', { class: 'hud' },
       h('div', { class: 'hud-panel frame' },
         h('div', { class: 'hud-row' }, this.mode, this.width),
-        h('div', { class: 'ruler' }, this.rulerBar, this.rulerLabel),
+        this.clock,
+        this.rulerEl,
         this.hover),
       h('div', { class: 'hud-help' }, 'Scroll zoom · Drag pan · Right-drag tilt · G toggle view · 1 year = 1 minute'));
     const track = h('div', { class: 'ladder-track' }, this.thumb);
     for (const [label, alt] of ZOOM_MARKS) {
       track.append(h('button', { class: 'ladder-mark', style: `top:${this.pos(alt) * 100}%`, onclick: () => onZoomTo(alt) }, h('span', {}, label)));
     }
-    this.ladder = h('div', { class: 'ladder', 'aria-label': 'Zoom' }, h('span', { class: 'ladder-cap' }, '0.03 ly'), track, h('span', { class: 'ladder-cap' }, '70k ly'));
+    if (onSurface) track.append(h('button', { class: 'ladder-mark', style: `top:${this.pos(SURFACE_MARK) * 100}%`, title: 'Land on the focused planet', onclick: () => onSurface() }, h('span', {}, 'Surface')));
+    this.ladder = h('div', { class: 'ladder', 'aria-label': 'Zoom' }, h('span', { class: 'ladder-cap' }, onSurface ? 'Ground' : '0.03 ly'), track, h('span', { class: 'ladder-cap' }, '70k ly'));
   }
 
   setHover(text: string): void {
@@ -39,6 +48,7 @@ export class Hud {
   setScale(widthLy: number, pxPerLy: number, mode: string, altitude: number): void {
     this.mode.textContent = mode;
     this.width.textContent = `${ly(widthLy)} ly across`;
+    this.rulerEl.hidden = false;
     // Pick a 1/2/5 × 10^k ruler that is 60–150 px long.
     const target = 110 / pxPerLy;
     const p = Math.pow(10, Math.floor(Math.log10(target)));
@@ -46,6 +56,23 @@ export class Hud {
     this.rulerBar.style.width = `${Math.round(nice * pxPerLy)}px`;
     this.rulerLabel.textContent = `${ly(nice)} ly`;
     this.thumb.style.top = `${this.pos(altitude) * 100}%`;
+    this.clock.hidden = true;
+  }
+
+  /** On a planet's surface: altitude above the ground instead of the ly ruler. */
+  setSurface(altitudeKm: number, altitude: number, daylight: { day: boolean; turnsInS: number } | null = null): void {
+    this.mode.textContent = 'Surface view';
+    this.width.textContent = `${altitudeKm >= 1000 ? `${(altitudeKm / 1000).toFixed(1)}k` : altitudeKm.toFixed(altitudeKm < 10 ? 1 : 0)} km up`;
+    this.rulerEl.hidden = true;
+    this.thumb.style.top = `${this.pos(altitude) * 100}%`;
+    // Where you stand: day or night, and how long until it turns.
+    this.clock.hidden = !daylight;
+    if (daylight) {
+      const s = Math.ceil(daylight.turnsInS);
+      const when = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      this.clock.className = `hud-clock ${daylight.day ? 'day' : 'night'}`;
+      this.clock.textContent = daylight.day ? `☀ Day here · nightfall in ${when}` : `☾ Night here · daylight in ${when}`;
+    }
   }
 
   setContact(text: string | null): void {

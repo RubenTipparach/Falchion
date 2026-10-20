@@ -1,6 +1,9 @@
 import * as THREE from 'three';
+import { makeOutward } from '../geometry/orientation';
 import { Rng, hashSeed } from '../../core/rng/Rng';
 import type { ShipDesign } from '../../core/ships/ShipDesign';
+import { applyHullTexture, hullTextureFor } from './hullTextures';
+import { liveryIndex } from '../../content/liveries';
 
 export type PartType = 'hull' | 'engine' | 'weapon' | 'wing' | 'detail' | 'trait';
 
@@ -55,6 +58,10 @@ export class ShipKit {
       glow: this.own(new THREE.MeshBasicMaterial({ color: design.colors.accent, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })),
       gold: this.own(new THREE.MeshStandardMaterial({ color: '#d4af37', metalness: 0.9, roughness: 0.25 })),
     };
+    // Plating: the style's on the hull, machinery on the detail; their lights glow in the accent.
+    applyHullTexture(this.mat.hull, hullTextureFor(design.style), design.colors.accent, undefined,
+      { index: liveryIndex(design.livery), paint: design.colors.secondary, trim: design.colors.accent });
+    applyHullTexture(this.mat.detail, 'machinery', design.colors.accent, 0.6);
   }
 
   own<M extends THREE.Material>(m: M): M {
@@ -85,10 +92,15 @@ export class ShipKit {
 
   // ── Primitives (all oriented along z) ───────────────────────────────
 
-  /** Revolve a profile of [radius, z] pairs around the z axis. */
+  /**
+   * Revolve a profile of [radius, z] pairs around the z axis. The profile may run either way:
+   * which way LatheGeometry winds its faces depends on the point order, so the result is
+   * turned outward here (a profile written front to back used to come out inside-out).
+   */
   lathe(profile: ReadonlyArray<readonly [number, number]>, material: THREE.Material, segments = 24): THREE.Mesh {
     const pts = profile.map(([r, z]) => new THREE.Vector2(Math.max(0.0001, r), z));
     const geo = new THREE.LatheGeometry(pts, segments).rotateX(Math.PI / 2);
+    makeOutward(geo);
     return new THREE.Mesh(geo, material);
   }
 

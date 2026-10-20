@@ -1,6 +1,9 @@
+import * as THREE from 'three';
+import { isSolid, makeOutward } from '../geometry/orientation';
 import type { ShipDesign } from '../../core/ships/ShipDesign';
 import { ShipKit, ShipModel } from './ShipKit';
 import type { ShipStyleGenerator, ShipTraitDecorator } from './ShipStyleGenerator';
+import { bakeShipSpace } from './hullTextures';
 
 /** Generic id → implementation registry (Open/Closed: add by registering). */
 export class Registry<T extends { readonly id: string }> {
@@ -34,7 +37,14 @@ export class ShipFactory {
     const kit = new ShipKit(design, { flat: style.flatShading });
     style.build(kit);
     kit.freezeHull();
+    // Styles mixed in from research add their signature pieces to this hull.
+    for (const id of design.blend ?? []) if (id !== style.id) this.styles.get(id)?.accent?.(kit);
     for (const id of design.traits) this.traits.get(id)?.apply(kit);
-    return kit.finish();
+    const model = kit.finish();
+    // Safety net for any style or trait: every solid part faces outward, normals included.
+    model.group.traverse((o) => { if (o instanceof THREE.Mesh && isSolid(o)) makeOutward(o.geometry); });
+    // Hull plating (ship-materials skill): lay it in the ship's own frame.
+    bakeShipSpace(model.group, new Set([kit.mat.hull, kit.mat.detail]));
+    return model;
   }
 }

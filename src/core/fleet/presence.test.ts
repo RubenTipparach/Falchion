@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { hex } from '../hex/Hex';
 import { planMovement } from './Fleet';
-import { adjustShips, dockedShips, hasShips, isStationed, shipTotal } from './Presence';
+import { adjustShips, dockedShips, hasShips, isStationed, shipTotal, startsFight } from './Presence';
 
 describe('fleet presence', () => {
   it('is on station only after arriving', () => {
@@ -12,7 +12,7 @@ describe('fleet presence', () => {
 
   it('docks whatever is not deployed', () => {
     const roster = { cutter: 4, frigate: 6 };
-    expect(dockedShips(roster, [{ ships: [{ classId: 'cutter', count: 2 }], supply: 0, ammo: 0 }])).toEqual([
+    expect(dockedShips(roster, [{ ships: [{ classId: 'cutter', count: 2 }], supply: 0 }])).toEqual([
       { classId: 'cutter', count: 2 }, { classId: 'frigate', count: 6 },
     ]);
   });
@@ -23,5 +23,15 @@ describe('fleet presence', () => {
     expect(shipTotal(ships)).toBe(2);
     expect(hasShips(ships, [{ classId: 'b', count: 2 }])).toBe(true);
     expect(hasShips(ships, [{ classId: 'a', count: 1 }])).toBe(false);
+  });
+
+  it('fleets fight at sea only when one is aggressive and armed', () => {
+    const passive = { aggressive: false, armed: true };
+    const attacker = { aggressive: true, armed: true };
+    const unarmed = { aggressive: true, armed: false };
+    expect(startsFight(passive, passive)).toBe(false);
+    expect(startsFight(attacker, passive)).toBe(true);
+    expect(startsFight(passive, attacker)).toBe(true);
+    expect(startsFight(unarmed, passive)).toBe(false);
   });
 });

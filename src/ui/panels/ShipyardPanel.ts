@@ -1,12 +1,13 @@
 import * as THREE from 'three';
+import { DEFAULT_LIVERY, LIVERIES, SHIP_PALETTES } from '../../content/liveries';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { GameState } from '../../app/GameState';
 import type { Store } from '../../app/Store';
 import { RESOURCES, Resource } from '../../content/resources';
-import { DOCTRINES, SHIP_CLASSES, ShipClassDef, ShipRole } from '../../content/shipClasses';
+import { DOCTRINES, hullsOf, SHIP_CLASSES, ShipClassDef, ShipRole, SIZE_NAMES, sizeOf } from '../../content/shipClasses';
 import { canAfford } from '../../core/economy/Economy';
 import type { TechTree } from '../../core/research/TechTree';
-import { DESIGN_LIMITS, ShipDesign, decodeDesign, encodeDesign } from '../../core/ships/ShipDesign';
+import { DESIGN_LIMITS, MAX_BLEND, ShipDesign, decodeDesign, encodeDesign } from '../../core/ships/ShipDesign';
 import type { ShipFactory, ShipGeneratorRegistry, ShipTraitRegistry } from '../../render/ships/ShipFactory';
 import type { ShipModel } from '../../render/ships/ShipKit';
 import { Drawer } from '../Drawer';
@@ -15,13 +16,12 @@ import { buildYears, logisticsOf } from '../../content/logistics';
 import { jobProgress } from '../../core/construction/Construction';
 import { formatDuration } from '../../core/time/WorldTime';
 import { CLOCK } from '../../app/WorldClock';
-import { clear, fmt, h } from '../dom';
+import { clear, fmt, h, keepScroll } from '../dom';
 import { icon, resourceIcon } from '../icons';
+import { thumb } from '../thumbs';
+import { COMMERCE, COMPANY_KINDS } from '../../content/commerce';
+import { companyKindOf } from '../../core/economy/Companies';
 
-const PALETTES: Array<[string, string, string]> = [
-  ['#b8c4d6', '#3a4a63', '#4fd1ff'], ['#e8e2d0', '#7a2e2e', '#ffb347'], ['#2b2f3a', '#11131a', '#ff3b6b'],
-  ['#9fd8b0', '#2f5d48', '#d6ff6b'], ['#f2f2f2', '#c9a227', '#7ad7ff'], ['#7b5ea7', '#2a1e3d', '#ff9bf0'],
-];
 
 const ROLE_ORDER: Array<[ShipRole, string]> = [['mining', 'Mining'], ['logistics', 'Logistics'], ['combat', 'Combat'], ['capital', 'Capital ships']];
 
@@ -30,6 +30,9 @@ export interface ShipyardQueries {
   designFor(classId: string): ShipDesign;
   effectiveDesign(classId?: string): ShipDesign;
   unlockedTraits(): string[];
+  /** Styles the empire can build in (its own and researched ones), and its own. */
+  unlockedStyles(): string[];
+  foundingStyle(): string;
   buildDiscount(): number;
 }
 
@@ -46,6 +49,8 @@ export class ShipyardPanel extends Drawer {
   private shownKey = '';
   private readonly clock = new THREE.Clock();
   private yard: string | undefined;
+  /** Civilian ships found a company when built (change commerce): on unless unticked. */
+  private charter = true;
 
   constructor(
     private readonly store: Store<GameState>,
@@ -126,33 +131,55 @@ export class ShipyardPanel extends Drawer {
     this.camera.position.copy(sphere.center).addScaledVector(dir, sphere.radius * 2.5);
   }
 
+  /** The class buttons, built once and then updated in place (a rebuild emptied the list and lost its scroll). */
+  private classButtons: Map<string, { btn: HTMLElement; count: HTMLElement }> | null = null;
+
   private renderClasses(): void {
     const s = this.store.state;
-    clear(this.classesEl);
-    for (const [role, label] of ROLE_ORDER) {
-      this.classesEl.append(h('h4', {}, label));
-      for (const c of SHIP_CLASSES.filter((x) => x.role === role)) {
-        const unlocked = this.q.isUnlocked(c);
-        const n = s.economy.roster[c.id] ?? 0;
-        this.classesEl.append(h('button', {
-          class: `class-btn ${s.shipyardClass === c.id ? 'active' : ''} ${unlocked ? '' : 'locked'}`,
-          style: `--doc:${DOCTRINES[c.doctrine].color}`,
-          onclick: () => this.actions.selectClass(c.id),
-        },
-        h('span', { class: 'doc-dot' }),
-        h('span', { class: 'cname' }, c.name),
-        h('span', { class: 'ccount' }, unlocked ? (n ? `×${n}` : '') : icon('lock'))));
+    if (!this.classButtons) {
+      this.classButtons = new Map();
+      for (const [role, label] of ROLE_ORDER) {
+        this.classesEl.append(h('h4', {}, label));
+        for (const c of SHIP_CLASSES.filter((x) => x.role === role)) {
+          const count = h('span', { class: 'ccount' });
+          const btn = h('button', { class: 'class-btn', style: `--doc:${DOCTRINES[c.doctrine].color}`, onclick: () => this.actions.selectClass(c.id) },
+            thumb('ship', c.id, 64),
+            h('span', { class: 'cname' }, h('span', { class: 'doc-dot' }), c.name),
+            count);
+          this.classesEl.append(btn);
+          this.classButtons.set(c.id, { btn, count });
+        }
+      }
+    }
+    for (const c of SHIP_CLASSES) {
+      const el = this.classButtons.get(c.id);
+      if (!el) continue;
+      const unlocked = this.q.isUnlocked(c);
+      const n = s.economy.roster[c.id] ?? 0;
+      el.btn.classList.toggle('active', s.shipyardClass === c.id);
+      el.btn.classList.toggle('locked', !unlocked);
+      const text = unlocked ? (n ? `×${n}` : '') : 'lock';
+      if (el.count.dataset.v !== text) {
+        el.count.dataset.v = text;
+        clear(el.count);
+        if (unlocked) el.count.textContent = text;
+        else el.count.append(icon('lock'));
       }
     }
   }
 
   private renderInfo(): void {
+    keepScroll(this.infoEl, () => this.buildInfo());
+  }
+
+  private buildInfo(): void {
     const s = this.store.state;
     const c = SHIP_CLASSES.find((x) => x.id === s.shipyardClass)!;
     const unlocked = this.q.isUnlocked(c);
     const discount = this.q.buildDiscount();
     const affordable = canAfford(s.empire.materials, c.cost, discount);
     const doc = DOCTRINES[c.doctrine];
+    const kind = companyKindOf(c);
     const costRow = Object.entries(c.cost).map(([r, n]) => {
       const def = RESOURCES.find((x) => x.id === r)!;
       const need = Math.ceil(n! * (1 - discount / 100));
@@ -166,19 +193,34 @@ export class ShipyardPanel extends Drawer {
         h('span', { class: 'roster' }, `In service: ${s.economy.roster[c.id] ?? 0}`)),
       h('p', { class: 'muted' }, c.blurb, ' ', c.doctrine !== 'civilian' ? doc.summary : ''),
       h('div', { class: 'stat-row' },
-        stat('Hull', c.hull), stat('Attack', c.attack), stat('Speed', `${c.speed} ly/min`),
+        stat('Hull', c.hull), stat('Attack', c.attack),
         c.troops ? stat('Troops', c.troops) : null,
         c.mines ? stat('Mines', `+${3} ${RESOURCES.find((r) => r.id === c.mines)!.short}/yr`) : null,
-        stat('Supply', logisticsOf(c).supply), logisticsOf(c).ammo ? stat('Ammo', `${logisticsOf(c).ammo} (${logisticsOf(c).ammoUse}/battle)`) : null),
+        stat('Supply', logisticsOf(c).supply), stat(SIZE_NAMES[sizeOf(c.id)], hullsOf(c.id) === 1 ? '1 hull' : `squadron of ${hullsOf(c.id)}`)),
       c.doctrine !== 'civilian' && c.doctrine !== 'support' ? h('p', { class: 'small matchup' }, h('b', {}, 'Strong vs '), doc.strong, h('b', {}, '  ·  Weak vs '), doc.weak) : '',
       h('div', { class: 'build-row' },
         h('div', { class: 'costs' }, ...costRow, discount ? h('span', { class: 'muted small' }, `−${discount}% from research`) : null),
         unlocked
           ? h('div', { class: 'build-at' }, this.yardSelect(),
-            h('button', { class: 'btn primary', disabled: !affordable || !this.game.yards().length, onclick: () => this.actions.buildShip(c.id, this.yard) }, affordable ? `Build · ${formatDuration(buildYears(c), CLOCK)}` : 'Not enough resources'))
-          : h('span', { class: 'locked-note' }, icon('lock'), ` Research ${c.unlock ? this.tree.node(c.unlock).name : ''}`)),
+            h('button', { class: 'btn primary', disabled: !affordable || !this.game.yards().length, onclick: () => this.actions.buildShip(c.id, this.yard, kind ? this.charter : undefined) }, affordable ? `Build · ${formatDuration(buildYears(c), CLOCK)}` : 'Not enough resources'))
+          : c.unlock
+            // Locked: straight to the research that unlocks it.
+            ? h('button', { class: 'btn locked-build', title: `Open ${this.tree.node(c.unlock).name} in the research tree`, onclick: () => this.actions.openResearch(c.unlock!) }, icon('lock'), ` Research ${this.tree.node(c.unlock).name} →`)
+            : h('span', { class: 'locked-note' }, icon('lock'), ' Locked')),
+      unlocked && kind ? this.charterToggle(kind) : '',
       this.queueView(),
     );
+  }
+
+  /** Charter a company with a civilian ship: it runs the ship itself and grows when it makes money. */
+  private charterToggle(kind: keyof typeof COMPANY_KINDS): HTMLElement {
+    const box = h('input', { type: 'checkbox', checked: this.charter }) as HTMLInputElement;
+    box.addEventListener('change', () => { this.charter = box.checked; });
+    const k = COMPANY_KINDS[kind];
+    const kept = COMMERCE.stateShares, sold = COMMERCE.shares - COMMERCE.stateShares;
+    return h('label', { class: 'charter' }, box,
+      h('span', {}, h('b', {}, `Charter a ${k.name.toLowerCase()}`),
+        h('small', { class: 'muted' }, ` ${k.blurb} It pays its own upkeep, ${Math.round(COMMERCE.tax * 100)}% tax and dividends, and buys more ships when it profits. You keep ${kept} of its ${COMMERCE.shares} shares and get ${sold}% of the ship's value back; it takes no orders.`)));
   }
 
   /** What the selected yard is building, with time left. */
@@ -187,10 +229,16 @@ export class ShipyardPanel extends Drawer {
     const jobs = this.game.jobs(this.yard).filter((j) => j.kind === 'ship');
     if (!jobs.length) return '';
     const name = (id: string) => SHIP_CLASSES.find((x) => x.id === id)?.name ?? id;
+    const order = [...jobs].sort((a, b) => a.startTurn - b.startTurn || a.id.localeCompare(b.id));
+    const waiting = (j: { startTurn: number }) => j.startTurn > s.turn;
     return h('div', { class: 'queue' }, h('span', { class: 'eyebrow' }, 'Yard queue'),
-      ...jobs.map((j) => h('div', { class: 'queue-row' }, h('span', {}, name(j.item)),
+      ...order.map((j, i) => h('div', { class: 'queue-row' }, h('span', {}, name(j.item)),
         h('span', { class: 'track' }, h('i', { style: `width:${jobProgress(j, s.turn) * 100}%` })),
-        h('span', { class: 'mono small' }, j.startTurn > s.turn ? `queued · ${formatDuration(j.doneTurn - s.turn, CLOCK)}` : formatDuration(j.doneTurn - s.turn, CLOCK)))));
+        h('span', { class: 'mono small' }, waiting(j) ? `queued · ${formatDuration(j.doneTurn - s.turn, CLOCK)}` : formatDuration(j.doneTurn - s.turn, CLOCK)),
+        h('span', { class: 'queue-tools' },
+          h('button', { class: 'icon-btn', title: 'Build sooner', 'aria-label': `Move ${name(j.item)} up`, disabled: !waiting(j) || i === 0 || !waiting(order[i - 1]), onclick: () => this.actions.moveJob(j.id, true) }, '↑'),
+          h('button', { class: 'icon-btn', title: 'Build later', 'aria-label': `Move ${name(j.item)} down`, disabled: !waiting(j) || i === order.length - 1, onclick: () => this.actions.moveJob(j.id, false) }, '↓'),
+          h('button', { class: 'icon-btn', title: waiting(j) ? 'Cancel: refunded in full' : 'Cancel: what is not yet built is refunded', 'aria-label': `Cancel ${name(j.item)}`, onclick: () => this.actions.cancelJob(j.id) }, icon('close'))))));
   }
 
   /** Ships are built at a colony with an Orbital Shipyard and start in that system. */
@@ -208,10 +256,33 @@ export class ShipyardPanel extends Drawer {
   }
 
   private renderControls(): void {
+    keepScroll(this.controlsEl, () => this.buildControls());
+  }
+
+  private buildControls(): void {
     const d = this.q.designFor(this.store.state.shipyardClass);
     clear(this.controlsEl);
-    const styleBtns = this.styles.list().map((s) =>
-      h('button', { class: `style-btn ${s.id === d.style ? 'active' : ''}`, title: s.description, onclick: () => this.set({ style: s.id }) }, s.name));
+    // Your race's style is always yours; research unlocks the others to build in or mix in.
+    const styles = this.q.unlockedStyles();
+    const own = this.q.foundingStyle();
+    const shown = styles.includes(d.style) ? d.style : own;
+    const blend = (d.blend ?? []).filter((b) => styles.includes(b) && b !== shown);
+    const needs = (id: string) => this.tree.styleNode(id)?.name ?? 'research';
+    const styleBtns = this.styles.list().map((s) => {
+      const has = styles.includes(s.id);
+      return h('button', { class: `style-btn ${s.id === shown ? 'active' : ''} ${has ? '' : 'locked'}`, disabled: !has,
+        title: has ? `${s.description}${s.id === own ? ' Your race\'s own style.' : ''}` : `Locked: research ${needs(s.id)} to build in this style`,
+        onclick: () => this.set({ style: s.id, blend: blend.filter((b) => b !== s.id) }) },
+      has ? '' : icon('lock'), s.name, s.id === own ? h('small', { class: 'own' }, 'Origin') : '');
+    });
+    const mixChips = this.styles.list().filter((s) => s.id !== shown && s.accent).map((s) => {
+      const has = styles.includes(s.id);
+      const on = blend.includes(s.id);
+      const full = !on && blend.length >= MAX_BLEND;
+      return h('button', { class: `trait ${has ? (on ? 'on' : 'off') : 'locked'}`, disabled: !has || full,
+        title: !has ? `Locked: research ${needs(s.id)}` : full ? `Mix up to ${MAX_BLEND} styles` : on ? 'Remove this style\'s pieces' : `Add ${s.name} pieces to this hull`,
+        onclick: () => this.set({ blend: on ? blend.filter((b) => b !== s.id) : [...blend, s.id] }) }, has ? '' : icon('lock'), s.name);
+    });
     const slider = (label: string, key: 'length' | 'bulk' | 'engines' | 'weapons', step: number) => {
       const [min, max] = DESIGN_LIMITS[key];
       const input = h('input', { type: 'range', min, max, step, value: d[key], id: `ship-${key}` }) as HTMLInputElement;
@@ -225,7 +296,7 @@ export class ShipyardPanel extends Drawer {
     const color = (label: string, key: 'primary' | 'secondary' | 'accent') => {
       const input = h('input', { type: 'color', value: d.colors[key], id: `ship-color-${key}` }) as HTMLInputElement;
       input.addEventListener('input', () => this.set({ colors: { ...this.q.designFor(this.store.state.shipyardClass).colors, [key]: input.value } }));
-      return h('label', { class: 'swatch' }, input, h('span', {}, label));
+      return h('label', { class: 'color-pick' }, input, h('span', {}, label));
     };
     const unlocked = this.q.unlockedTraits();
     const traitChips = this.traits.list().filter((t) => !t.id.startsWith('role-')).map((t) => {
@@ -235,14 +306,20 @@ export class ShipyardPanel extends Drawer {
     });
     const code = h('input', { class: 'code', value: encodeDesign(d), spellcheck: false, id: 'ship-code', 'aria-label': 'Design code' }) as HTMLInputElement;
     this.controlsEl.append(
-      h('div', { class: 'ctl-group' }, h('h4', {}, 'Style'), h('div', { class: 'style-grid' }, ...styleBtns)),
+      h('div', { class: 'ctl-group' }, h('h4', {}, 'Style'), h('div', { class: 'style-grid' }, ...styleBtns),
+        h('h4', { class: 'sub' }, `Mix in · ${blend.length}/${MAX_BLEND}`), h('div', { class: 'traits' }, ...mixChips)),
       h('div', { class: 'ctl-group' }, h('h4', {}, 'Shape'),
         h('div', { class: 'row' }, h('span', { class: 'muted small mono' }, `seed ${d.seed}`), h('button', { class: 'btn', onclick: () => this.set({ seed: (Math.random() * 2 ** 31) >>> 0 }) }, icon('dice'), ' Randomise')),
         slider('Length', 'length', 0.05), slider('Bulk', 'bulk', 0.05), slider('Engines', 'engines', 1), slider('Weapons', 'weapons', 1)),
       h('div', { class: 'ctl-group' }, h('h4', {}, 'Colours'),
         h('div', { class: 'row' }, color('Primary', 'primary'), color('Secondary', 'secondary'), color('Accent', 'accent')),
-        h('div', { class: 'palettes' }, ...PALETTES.map(([p, s, a]) =>
-          h('button', { class: 'palette', 'aria-label': 'Apply palette', style: `background:linear-gradient(90deg,${p} 0 50%,${s} 50% 80%,${a} 80%)`, onclick: () => this.set({ colors: { primary: p, secondary: s, accent: a } }) })))),
+        h('div', { class: 'palettes' }, ...SHIP_PALETTES.map(([p, s, a]) =>
+          h('button', { class: 'palette', 'aria-label': 'Apply palette', style: `background:linear-gradient(90deg,${p} 0 50%,${s} 50% 80%,${a} 80%)`, onclick: () => this.set({ colors: { primary: p, secondary: s, accent: a } }) }))),
+        h('h4', { class: 'sub' }, 'Livery'),
+        h('div', { class: 'traits liveries' }, ...LIVERIES.map((l) => {
+          const on = (d.livery ?? DEFAULT_LIVERY) === l.id;
+          return h('button', { class: `trait ${on ? 'on' : 'off'}`, 'aria-pressed': String(on), title: `${l.blurb} Paint: secondary colour; trim: accent.`, onclick: () => this.set({ livery: l.id }) }, l.name);
+        }))),
       h('div', { class: 'ctl-group' }, h('h4', {}, 'Research traits'), h('div', { class: 'traits' }, ...traitChips)),
       h('div', { class: 'ctl-group' }, h('h4', {}, 'Share code'),
         h('div', { class: 'row' }, code,

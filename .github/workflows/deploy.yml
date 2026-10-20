@@ -1,4 +1,4 @@
-name: Build and deploy Falchion to GitHub Pages and Fly.io
+name: Build and deploy Falchion to Fly.io
 
 # Every push to every branch (and manual dispatch) is checked and deployed.
 # Each deploy overwrites the previous one, so the most recent commit on any
@@ -9,8 +9,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # NO workflow-level concurrency: cancelling the whole run on a newer push
 # would also cancel an in-flight Fly deploy. Concurrency is set per job.
@@ -26,8 +24,6 @@ jobs:
       cancel-in-progress: true
     env:
       OPENSPEC_TELEMETRY: '0'
-    outputs:
-      pages: ${{ steps.pages_gate.outputs.ready }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,42 +44,6 @@ jobs:
           curl -fsS localhost:8090/api/clock | grep -q '"msPerTick":60000'
           (curl -sN --max-time 2 localhost:8090/api/ticks || true) | grep -q 'event: tick'
           kill %1
-      # Pre-bootstrap is "skip, don't fail": until Pages is enabled with
-      # source "GitHub Actions" (Settings -> Pages), the Pages deploy skips.
-      - name: Check Pages readiness
-        id: pages_gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh api "repos/${{ github.repository }}/pages" --jq .build_type 2>/dev/null | grep -qx workflow; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::GitHub Pages is not enabled with source 'GitHub Actions'; skipping Pages deploy. Enable it in Settings -> Pages."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          fi
-      - uses: actions/configure-pages@v5
-        if: steps.pages_gate.outputs.ready == 'true'
-      - uses: actions/upload-pages-artifact@v3
-        if: steps.pages_gate.outputs.ready == 'true'
-        with:
-          path: dist
-
-  deploy-pages:
-    name: Deploy to GitHub Pages
-    needs: build
-    if: needs.build.outputs.pages == 'true'
-    runs-on: ubuntu-latest
-    # Never cancel a Pages deploy mid-flight: an orphaned in-progress
-    # deployment blocks later deploys. Queue them; the newest lands last.
-    concurrency:
-      group: pages-deploy
-      cancel-in-progress: false
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
 
   deploy-fly:
     name: Deploy to Fly.io
@@ -142,6 +102,11 @@ jobs:
           for name in DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET SESSION_SECRET ADMIN_DISCORD_ID DISCORD_WEBHOOK_URL DISCORD_BOT_TOKEN DISCORD_CHANNEL_ID; do
             [ -n "${!name}" ] && args+=("$name=${!name}")
           done
+          # Name what is missing for channel notifications (values are never printed).
+          if [ -z "$DISCORD_WEBHOOK_URL" ] && [ -n "$DISCORD_CHANNEL_ID$DISCORD_BOT_TOKEN" ]; then
+            [ -z "$DISCORD_BOT_TOKEN" ] && echo "::warning::DISCORD_CHANNEL_ID is set but the DISCORD_BOT_TOKEN repository secret is empty or missing; channel notifications stay off."
+            [ -z "$DISCORD_CHANNEL_ID" ] && echo "::warning::DISCORD_BOT_TOKEN is set but the DISCORD_CHANNEL_ID repository secret is empty or missing; channel notifications stay off."
+          fi
           if [ ${#args[@]} -eq 0 ]; then
             echo "::notice::Discord secrets not set in GitHub; sign-in stays off. See docs/discord.md."
           elif ! flyctl secrets set --stage -a "$APP" "${args[@]}" > /dev/null; then

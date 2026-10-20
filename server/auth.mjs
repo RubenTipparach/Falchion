@@ -8,7 +8,8 @@ const STATE_COOKIE = 'fal_oauth_state';
 const NEXT_COOKIE = 'fal_next';
 
 /** Where to land after sign-in: a same-site path only (never another origin). */
-export const safeNext = (next) => (typeof next === 'string' && /^\/(?![/\\])[\w\-./?=&]*$/.test(next) ? next : '/');
+// Same-site paths only; commas and percent-escapes for hotlinks like /system/-14697,20078/Norka_II.
+export const safeNext = (next) => (typeof next === 'string' && /^\/(?![/\\])[\w\-./?=&,%]*$/.test(next) ? next : '/');
 const SESSION_DAYS = 30;
 
 const b64url = (buf) => Buffer.from(buf).toString('base64url');

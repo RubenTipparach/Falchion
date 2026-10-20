@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>City Shots</title>
+<style>
+  body { margin: 0; padding: 12px; background: #0b0f17; color: #c9d4e3; font: 12px system-ui, sans-serif; }
+  #shots { display: grid; grid-template-columns: repeat(3, 520px); gap: 8px; }
+  figure { margin: 0; } img { display: block; border-radius: 4px; } figcaption { padding: 3px 0 6px; color: #8fb3d9; }
+</style>
+</head>
+<body>
+<div id="shots">Rendering...</div>
+<script type="module">
+  import { cityShots } from '/src/render/planets/cityShots.ts';
+  cityShots(document.getElementById('shots'));
+</script>
+</body>
+</html>

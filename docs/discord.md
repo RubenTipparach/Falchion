@@ -10,7 +10,7 @@ in the same galaxy as you:
 - Discord shares only the player's **user id, display name and avatar**. Falchion asks for
   the `identify` scope and nothing else: no email, no servers, no messages.
 
-Without sign-in (or on GitHub Pages, which has no server) the game runs as a **guest**,
+Without sign-in the game runs as a **guest**,
 saved in that browser only.
 
 You need to do this once. It takes about five minutes.
@@ -84,7 +84,16 @@ starting system, so friends start within an hour or two of each other at base sp
 
 **https://falchion.fly.dev/admin**: server overview, every player (year, colonies,
 fleets, last save) with a **Reset empire** button, and an **announcement** banner shown
-to all players.
+to all players. Also:
+
+- **Galaxy visibility**: hide unexplored systems (players then see only what they, or
+  their allies, have explored or sighted) or show every system again.
+- **Snapshots**: every empire is recorded once an hour; export a time range (optionally
+  one empire) as JSON Lines, with the event log of the same range merged in. Every field
+  is described in [`docs/snapshots.md`](snapshots.md).
+- **Server reset**: every empire back to its founding (players keep their empire's name,
+  flag and home and do not found it again), the shared world fresh. Type `RESET` to
+  confirm; snapshots and the event log are kept.
 
 Access uses the same secret as High Frontier: add a GitHub secret **`ADMIN_DISCORD_ID`**
 holding your Discord user id. For several admins, separate ids with commas
@@ -130,6 +139,50 @@ Use this if you want the posts to come from the bot user itself.
 If both are set, the webhook is used. When the test fails, `/admin` says why (missing
 permission, wrong channel id, rejected token, deleted webhook).
 
+## In-game chat and @mentions
+
+Signed-in players have a **Chat** tab: a global channel, private direct messages, and the
+list of players online right now (anyone with the game open). Guests are asked to sign in.
+
+- **Location links**: names of stars and planets you know (your home, colonies, explored
+  systems, depots, fleet destinations, other players' homes) become links when you send
+  them. Click one to fly there. Player names link to their home.
+- **@mentions**: type `@` to pick a player. If they are **not in the game**, the bot tells
+  them on Discord: "**Name** mentioned you in Falchion: … — https://falchion.fly.dev". A
+  direct message to someone who is away does the same.
+
+Notifications need the bot token (`DISCORD_BOT_TOKEN`, see *Channel notifications*):
+
+- The bot sends a **Discord DM**. Discord only allows that when the player **shares a
+  server with the bot** (invite the bot to your community server) and accepts DMs from
+  server members.
+- If the DM fails and `DISCORD_CHANNEL_ID` is set, the bot posts in that channel and pings
+  **only that player**. Direct-message text is never posted there, only "sent you a direct
+  message".
+- Each sender triggers at most 10 notifications an hour, and each player receives at most 6.
+
+Chat keeps the last 300 global messages and 200 per conversation in the server database (`/data/falchion.db`).
+Each player may send 5 messages every 10 seconds.
+
+## Other players and the galaxy feed
+
+Signed-in players have a **Players** tab:
+
+- **Empires**: every empire in the galaxy with its flag, ruler, Discord name, who is online
+  now (green dot), colony systems, fleets, when they were last seen and how far their home is
+  from yours. Locate a home or any of their fleets (double-click zooms in), or click **DM** to
+  open a private chat. Clicking an empire's name on the map opens it here.
+- **Galaxy feed**: what everyone is doing, newest first: empires founded, colonies settled,
+  supply depots, battles, systems fully surveyed, and players coming and going. Star names are
+  links that fly the camera there. News from other players also pops up briefly at the bottom
+  of the map.
+
+Other players' fleets and territory update **within seconds**: each save is pushed to
+everyone else over the same live connection as chat (a move order, colony, depot or founding
+is saved within a moment; other changes at most every 10 seconds). Each player may report at
+most 20 events every 10 minutes; battles, colonies and depots still go to the Discord channel
+(12 an hour) as before.
+
 ## Running it locally
 
 ```sh
@@ -145,7 +198,7 @@ Saves go to `./data/` (ignored by git).
 
 | You see | Fix |
 |---|---|
-| No sign-in screen, the game starts as a guest | Sign-in is off: check `/api/info` shows `"discord": true` and the three secrets are set. GitHub Pages never has sign-in; use the Fly URL. |
+| No sign-in screen, the game starts as a guest | Sign-in is off: check `/api/info` shows `"discord": true` and the three secrets are set. Use the Fly URL (https://falchion.fly.dev). |
 | Discord says **Invalid OAuth2 redirect_uri** | The redirect in step 1.5 must match `https://falchion.fly.dev/auth/discord/callback` exactly. |
 | "Sign-in failed: the request did not match" | The sign-in took more than 10 minutes, or cookies are blocked. Try again. |
 | Everyone was signed out | `SESSION_SECRET` changed. Sign in again; saves are kept. |
@@ -156,10 +209,11 @@ Saves go to `./data/` (ignored by git).
 One file per player at `/data/<discord id>.json`: their Discord id, name and avatar, the
 saved empire, and a public view (home, colony stars, fleets) that other players receive
 from `/api/players`. Stockpiles, research and orders are never sent to other players.
+Chat history is in the server database (`/data/falchion.db`); direct messages are only ever sent to the two
+players in them. The galaxy feed (the last 300 events) is in `/data/activity.json`.
 
 ## Not built yet
 
 - Launching Falchion as a **Discord Activity** inside a voice channel.
-- Direct messages to individual players (the bot posts in one channel only).
 
-Both are in the `mmo-core-systems` OpenSpec change.
+It is in the `mmo-core-systems` OpenSpec change.

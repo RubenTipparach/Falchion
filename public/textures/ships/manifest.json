@@ -1,0 +1,35 @@
+{
+ "files": {
+  "classic.png": {
+   "bytes": 79927,
+   "sha256": "eccaafe49e0a008778310a1200c7f49aec13b5fadf16fce2f84d961b991a293a"
+  },
+  "geometric.png": {
+   "bytes": 49815,
+   "sha256": "b06264009ba54748ea6b18f680295f2927916c814b07071c813f4090da8c5f79"
+  },
+  "industrial.png": {
+   "bytes": 98338,
+   "sha256": "e7317e1267c6589b0cda37465f7b37615509b46e7d3b01f02802287ff615f5f8"
+  },
+  "machinery.png": {
+   "bytes": 83603,
+   "sha256": "9b646ff1a4142888c73bd1d24c45a5fc7c17279970210304005b6dafccc4b73c"
+  },
+  "organic.png": {
+   "bytes": 142655,
+   "sha256": "ae2cbf301161d4ce35198ff7044ae500eda1a28aafd18bc1634e3204d2d6fd52"
+  },
+  "technological.png": {
+   "bytes": 98975,
+   "sha256": "014587931f198f4f72db8262eef2d199f2e5bd77f7f8ac50246bf64cf52516e5"
+  },
+  "utilitarian.png": {
+   "bytes": 76780,
+   "sha256": "5944190ce37e8e4716b7893116ae4870f9dd308805584c73af38a4c55985f3b8"
+  }
+ },
+ "generator": "tools/materials/postprocess.py",
+ "size": 256,
+ "source": "Material Maker 174f15edece663bf10f78588840873fa2fd17bc7, headless on lavapipe, rendered at 1024 px from tools/materials/ptex/"
+}

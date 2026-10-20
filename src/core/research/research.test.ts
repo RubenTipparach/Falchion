@@ -82,4 +82,11 @@ describe('shards', () => {
     expect(tree.canResearch(s, 't-armor')).toBe(false);
     expect(() => tree.research(s, 't-armor')).toThrow();
   });
+
+  it('each branch\'s second hull node unlocks its ship style', () => {
+    expect(tree.stylesOf(EMPTY_RESEARCH)).toEqual([]);
+    expect(tree.stylesOf(learn(EMPTY_RESEARCH, 'o-grown-hulls'))).toEqual([]);
+    expect(tree.stylesOf(learn(EMPTY_RESEARCH, 'o-grown-hulls', 'o-spore-drive'))).toEqual(['organic']);
+    for (const s of ['organic', 'technological', 'classic', 'geometric', 'utilitarian']) expect(tree.styleNode(s)?.tier, s).toBe(2);
+  });
 });

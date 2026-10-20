@@ -6,11 +6,11 @@ import type { ShipStyleGenerator } from './ShipStyleGenerator';
 describe('ship generators', () => {
   const { factory, styles, traits } = createDefaultShipFactory();
 
-  it('provides the five styles', () => {
-    expect(styles.list().map((s) => s.id).sort()).toEqual(['classic', 'geometric', 'organic', 'technological', 'utilitarian']);
+  it('provides the six styles', () => {
+    expect(styles.list().map((s) => s.id).sort()).toEqual(['classic', 'geometric', 'industrial', 'organic', 'technological', 'utilitarian']);
   });
 
-  it.each(['organic', 'technological', 'classic', 'geometric', 'utilitarian'])('%s is deterministic per design', (style) => {
+  it.each(['organic', 'technological', 'classic', 'geometric', 'utilitarian', 'industrial'])('%s is deterministic per design', (style) => {
     for (const seed of [1, 2, 99]) {
       const d = { ...DEFAULT_DESIGN, style, seed, engines: 3, weapons: 3 };
       const a = factory.create(d), b = factory.create(d);
@@ -41,5 +41,16 @@ describe('ship generators', () => {
     const custom: ShipStyleGenerator = { id: 'test-blob', name: 'Blob', description: '', build: (kit) => void kit.add(kit.sphere(1, kit.mat.hull), 'hull') };
     styles.register(custom);
     expect(factory.create({ ...DEFAULT_DESIGN, style: 'test-blob' }).parts).toEqual([{ type: 'hull', x: 0, y: 0, z: 0 }]);
+  });
+
+  it('every style can be mixed into every other: its pieces are added, deterministically', () => {
+    for (const s of styles.list().filter((x) => x.accent)) {
+      for (const o of styles.list().filter((x) => x.accent && x.id !== s.id)) {
+        const base = factory.create({ ...DEFAULT_DESIGN, style: s.id }).parts;
+        const mixed = factory.create({ ...DEFAULT_DESIGN, style: s.id, blend: [o.id] }).parts;
+        expect(mixed.length, `${s.id}+${o.id}`).toBeGreaterThan(base.length);
+        expect(factory.create({ ...DEFAULT_DESIGN, style: s.id, blend: [o.id] }).parts).toEqual(mixed);
+      }
+    }
   });
 });

@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createAuth, parseCookies } from './auth.mjs';
-import { createStore } from './store.mjs';
+import { createStore, importLegacySaves } from './store.mjs';
+import { dbDoc, fileDoc, importDoc, openDb } from './db.mjs';
 
 function fakeRes() {
   return {
@@ -82,6 +83,32 @@ describe('player store', () => {
     expect('save' in players[0]).toBe(false);
   });
 
+  it('imports the save files of earlier versions once, never over what the database holds', async () => {
+    const legacy = mkdtempSync(join(tmpdir(), 'falchion-legacy-'));
+    const { writeFileSync } = await import('node:fs');
+    const A = '111111111111111111', B = '222222222222222222';
+    writeFileSync(join(legacy, `${A}.json`), JSON.stringify({ player: { id: A, name: 'Old A' }, save: { turn: 9 }, public: { colonies: [], fleets: [] }, updatedAt: 1 }));
+    writeFileSync(join(legacy, `${B}.json`), JSON.stringify({ player: { id: B, name: 'Old B' }, save: { turn: 2 }, updatedAt: 1 }));
+    writeFileSync(join(legacy, '_announcement.json'), JSON.stringify({ text: 'hello' }));
+    writeFileSync(join(legacy, 'world.json'), JSON.stringify({ tick: 4, npcs: {}, asteroids: {} }));
+    writeFileSync(join(legacy, 'notes.txt'), 'not a save');
+    const store = createStore({ db: openDb(':memory:'), dir: legacy });
+    await store.save(B, { player: { id: B, name: 'New B' }, save: { turn: 30 }, updatedAt: 5 });
+    expect(await importLegacySaves(store)).toBe(1);
+    expect((await store.load(A)).save.turn).toBe(9);
+    expect((await store.load(B)).save.turn).toBe(30);
+    expect(await store.getSetting('announcement')).toEqual({ text: 'hello' });
+    expect(await importLegacySaves(store)).toBe(0);
+    const doc = dbDoc(store.db, 'world');
+    expect(await importDoc(doc, fileDoc(join(legacy, 'world.json')))).toBe(true);
+    expect(JSON.parse(await doc.read()).tick).toBe(4);
+    expect(await importDoc(doc, fileDoc(join(legacy, 'world.json')))).toBe(false);
+    expect((await store.summaries()).map((p) => p.name)).toEqual(['New B', 'Old A']);
+    expect(await store.remove(A)).toBe(true);
+    expect(await store.ids()).toEqual([B]);
+    rmSync(legacy, { recursive: true, force: true });
+  });
+
   it('never touches the filesystem for non-snowflake ids', async () => {
     const store = createStore(dir);
     expect(await store.load('../etc/passwd')).toBeNull();
@@ -135,6 +162,8 @@ describe('sign-in redirect', async () => {
   const { safeNext } = await import('./auth.mjs');
   it('only returns to paths on this site', () => {
     expect(safeNext('/admin')).toBe('/admin');
+    expect(safeNext('/system/-14697,20078/Norka_II/planet/2')).toBe('/system/-14697,20078/Norka_II/planet/2');
+    expect(safeNext('/system/1,2/S%C3%A9')).toBe('/system/1,2/S%C3%A9');
     expect(safeNext('//evil.example')).toBe('/');
     expect(safeNext('https://evil.example')).toBe('/');
   });
@@ -145,6 +174,15 @@ describe('discord channel notifications', async () => {
   const sent = [];
   const fakeFetch = async (url, init) => { sent.push({ url, ...JSON.parse(init.body), auth: init.headers.Authorization }); return { ok: true, status: 200 }; };
   const make2 = (extra = {}) => createNotifier({ token: 'bot-token', channelId: '123456789012345678', fetchImpl: fakeFetch, ...extra });
+
+  it('names the missing setting when off, and trims pasted values', () => {
+    expect(createNotifier({ channelId: '123456789012345678' }).problem).toContain('DISCORD_BOT_TOKEN is missing');
+    expect(createNotifier({ token: 't' }).problem).toContain('DISCORD_CHANNEL_ID is missing');
+    expect(createNotifier({ token: 't', channelId: '#general' }).problem).toContain('numeric id');
+    const n = createNotifier({ token: ' t\n', channelId: '123456789012345678\n' });
+    expect(n.enabled).toBe(true);
+    expect(n.problem).toBeNull();
+  });
 
   it('is off without a token and a channel id', () => {
     expect(createNotifier({ token: 'x' }).enabled).toBe(false);
@@ -194,5 +232,48 @@ describe('discord channel notifications', async () => {
     await admin({ method: 'POST', headers: { cookie: `fal_session=${encodeURIComponent(auth.issue({ id: '123456789012345678', name: 'R' }))}`, 'x-falchion-admin': '1' } }, res, '/api/admin/notify-test');
     expect(res.status).toBe(502);
     expect(JSON.parse(res.body).error).toContain('Send Messages');
+  });
+});
+
+describe('public empire view', async () => {
+  const { publicView } = await import('./index.mjs');
+  it('keeps a bounded, validated identity and drops bad colours', () => {
+    const v = publicView({
+      color: 'url(evil)', home: { q: 1, r: 2 },
+      empire: { name: '<img src=x>Solar Dominion', ruler: 'Ruben', title: 'Emperor', capital: 'Zarsen', flag: { field: 'cross', emblem: 'x"><script>', colors: ['#e6b450', 'red', '#000000', '#ffffff'] } },
+    });
+    expect(v.color).toBe('#e6b450');
+    expect(v.empire.name).toBe('img src=x Solar Dominion');
+    expect(v.empire.flag).toEqual({ field: 'cross', emblem: 'none', colors: ['#e6b450', '#10121c', '#000000'] });
+    expect(publicView({ empire: { name: '' } }).empire).toBeUndefined();
+  });
+
+  it('says only whether each fleet is armed and aggressive, as booleans and one known stance', () => {
+    const v = publicView({ fleets: [
+      { id: 'a', name: 'A', armed: true, stance: 'aggressive' },
+      { id: 'b', name: 'B', armed: 'yes', stance: '<script>' },
+      { id: 'c', name: 'C' },
+    ] });
+    expect(v.fleets.map((f) => [f.id, f.armed, f.stance])).toEqual([['a', true, 'aggressive'], ['b', false, undefined], ['c', false, undefined]]);
+    expect('stance' in v.fleets[1]).toBe(false);
+  });
+
+  it('keeps a fleet\'s battle and its round record, bounded, so anyone can watch it', () => {
+    const view = {
+      round: 3, before: [{ ships: [{ classId: 'lancer', count: 4 }, { classId: '<b>', count: 2 }], damage: { lancer: 12 } }, { ships: [{ classId: 'brawler', count: 3 }] }],
+      lostBy: [{ lancer: 1 }, {}], takenBy: [{}, { brawler: 1 }], by: [{ long: 80 }, { short: 40 }], jam: [1, 0.9], flak: [0, 2],
+      hull: [{ lancer: 40 }, { brawler: 90 }], wounds: [{ lancer: 10 }, {}], start: [500, 600],
+    };
+    const v = publicView({ fleets: [
+      { id: 'a', name: 'A', battle: { foe: 'p2:f1', tick: 9, round: 3, foeName: 'Third <Lance>', foeEmpire: 'Tessaly', view } },
+      { id: 'b', name: 'B', battle: { foe: 'p2:f2', tick: 9, view: { round: 'x' } } },
+      { id: 'c', name: 'C', battle: { foe: 7, tick: 9 } },
+    ] });
+    const b = v.fleets[0].battle;
+    expect(b).toMatchObject({ foe: 'p2:f1', tick: 9, round: 3, foeName: 'Third Lance' });
+    expect(b.view.before[0].ships).toEqual([{ classId: 'lancer', count: 4 }]);
+    expect(b.view.flak).toEqual([0, 0.6]);
+    expect(v.fleets[1].battle).toEqual({ foe: 'p2:f2', tick: 9 });
+    expect(v.fleets[2].battle).toBeUndefined();
   });
 });

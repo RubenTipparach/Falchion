@@ -5,6 +5,7 @@
 !index.html
 !tsconfig.json
 !vite.config.ts
+!vite.sim.config.ts
 !src
 !server
 **/*.test.ts

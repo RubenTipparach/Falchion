@@ -8,4 +8,5 @@ export const SHARD_SOURCES: readonly ShardSourceDef[] = [
   { id: 'reverse-engineering', name: 'Reverse engineering', reachesUnconnected: true },
   { id: 'observation', name: 'Distant observation', reachesUnconnected: true },
   { id: 'loot', name: 'Loot crates', reachesUnconnected: true },
+  { id: 'missions', name: 'Missions', reachesUnconnected: false },
 ];

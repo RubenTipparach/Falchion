@@ -8,19 +8,34 @@ Hex-based, at-scale 4X MMO (three.js + TypeScript, Discord integration planned).
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run build` — production build
 - `npx openspec list` / `npx openspec validate --all` — spec-driven workflow
+- `npm run planets:bench` — surface close-up frame time per planet type (run before and after touching surface shaders or flora)
 
 ## CI / deploy
 `.github/workflows/deploy.yml` runs on every push to every branch: typecheck, tests, spec
-validation, build and a server smoke test, then deploys to **GitHub Pages** (static client)
-and **Fly.io** (`server/`: zero-dependency Node server serving the client + `/healthz` +
+validation, build and a server smoke test, then deploys to **Fly.io**, the one and only server
+(`server/`: zero-dependency Node server serving the client + `/healthz` +
 `/api/info` + the world clock `/api/clock` and tick stream `/api/ticks`; future home of the MMO server).
 The world is realtime: one tick per minute = one game year (`server/clock.json`, shared with the client).
+The server runs every empire (full authority): each world year it plays every empire forward with the
+game's own rules (`src/sim/headless.ts`, bundled by `npm run build:sim` into `server/sim/`, driven by
+`server/simTicker.mjs`) and pushes the owner their state. Orders are commands (`src/sim/commands.ts`,
+`POST /api/command`, `server/commands.mjs`): the browser applies each at once, the server validates and
+applies it, and the browser adopts the server's answer (`src/app/Authority.ts`). A save is uploaded only
+to found a new empire. Any new player action must be added to `COMMANDS`. Local multiplayer dev:
+run the server, then `FALCHION_SERVER=http://localhost:8080 npm run dev`.
 The most recent push wins. The Fly job skips
 with a notice until `FLY_API_TOKEN` is set and the `falchion` app exists (see
 `server/fly.toml`). Secrets: `FLY_API_TOKEN`, plus `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` and
 `SESSION_SECRET` for Discord sign-in, optional `ADMIN_DISCORD_ID` (admin portal) and
-`DISCORD_WEBHOOK_URL` or `DISCORD_BOT_TOKEN` + `DISCORD_CHANNEL_ID` (channel notifications) (CI stages them onto Fly; see `docs/discord.md`). Player saves
-live on the `falchion_data` Fly volume (one machine).
+`DISCORD_WEBHOOK_URL` or `DISCORD_BOT_TOKEN` + `DISCORD_CHANNEL_ID` (channel notifications) (CI stages them onto Fly; see `docs/discord.md`). Everything the
+server keeps (empires, settings, shared world, chat, activity, the event log of player actions and NPC
+decisions) is in one SQLite database, `falchion.db` (`node:sqlite`, `server/db.mjs`), on the
+`falchion_data` Fly volume (one machine). Once an hour every empire is snapshotted into its
+`snapshots` table (`server/snapshots.mjs`; the summary's fields are documented in `docs/snapshots.md`,
+keep it in step with `src/sim/snapshot.ts`); the admin portal exports them by time range, resets the
+server to each empire's founding (`server/reset.mjs`) and toggles hide-systems. What a player can see
+(explored, sighted, allies' vision, megastructures found) is `src/core/visibility/Vision.ts`: views
+read the galaxy through the player's `StarLens`, never the rules.
 Pattern mirrors RubenTipparach/high-frontier-fan-game.
 
 ## Workflow
@@ -33,3 +48,7 @@ Spec first: use `/opsx:propose` → `/opsx:apply` → `/opsx:archive`. Specs liv
 - Extend via registries/interfaces (ShipStyleGenerator, MapLayer, ShardSource) — Open/Closed.
 - Load `solid-principles`, `modular-game-systems`, `deterministic-simulation`, and
   `testing-practices` skills before designing or reviewing code.
+- Load `procedural-geometry` before adding or changing ship styles, traits, parts or any
+  procedural mesh: solid parts must face outward (a test checks every generated ship).
+- Load `thumbnails` before adding or changing a thumbnail prop or kind (`src/render/thumbs`); look at
+  the contact sheet (`npm run thumbs -- --split`) before shipping.

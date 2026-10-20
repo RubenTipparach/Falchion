@@ -1,34 +1,22 @@
+import type { Squadron } from '../core/combat/Combat';
 import type { LogisticsSpec } from '../core/fleet/Logistics';
-import { SHIP_CLASSES, type Doctrine, type ShipClassDef } from './shipClasses';
-
-/** Ammunition per armed ship, by doctrine. Barrage burns through magazines fastest. */
-const AMMO: Readonly<Record<Doctrine, { ammo: number; use: number }>> = {
-  long: { ammo: 6, use: 2 },
-  short: { ammo: 6, use: 2 },
-  barrage: { ammo: 6, use: 3 },
-  siege: { ammo: 8, use: 2 },
-  suppression: { ammo: 6, use: 2 },
-  capture: { ammo: 4, use: 2 },
-  assault: { ammo: 4, use: 2 },
-  support: { ammo: 4, use: 2 },
-  civilian: { ammo: 0, use: 0 },
-};
+import { SHIP_CLASSES, type ShipClassDef } from './shipClasses';
 
 /** Supply per ship: survey hulls are purpose-built to explore. */
 const SUPPLY_OVERRIDES: Readonly<Record<string, number>> = { 'survey-cutter': 12, pathfinder: 8, 'colony-ark': 6 };
 const SUPPLY_BY_ROLE = { mining: 2, logistics: 3, combat: 2, capital: 4 } as const;
 
 export function logisticsOf(c: ShipClassDef): LogisticsSpec {
-  const armed = c.attack > 0 && c.role !== 'logistics' && c.role !== 'mining';
-  const a = armed ? AMMO[c.doctrine] : { ammo: 0, use: 0 };
-  const scale = c.role === 'capital' ? 2 : 1;
-  return {
-    supply: SUPPLY_OVERRIDES[c.id] ?? SUPPLY_BY_ROLE[c.role],
-    ammo: a.ammo * scale,
-    ammoUse: a.use * scale,
-    ammoRegen: armed ? scale : 0,
-  };
+  return { supply: SUPPLY_OVERRIDES[c.id] ?? SUPPLY_BY_ROLE[c.role] };
 }
+
+/**
+ * Hull points a fleet on station repairs on each damaged ship class per year, by what the system
+ * has: a shipyard world repairs fully, other colonies quickly, outposts (supply depots) and
+ * allies' worlds slowly.
+ */
+export const REPAIR = { shipyard: Infinity, colony: 40, depot: 15, ally: 15 } as const;
+export type RepairSite = keyof typeof REPAIR;
 
 const SPECS = new Map(SHIP_CLASSES.map((c) => [c.id, logisticsOf(c)]));
 export const specOf = (classId: string): LogisticsSpec | undefined => SPECS.get(classId);
@@ -36,6 +24,11 @@ export const specOf = (classId: string): LogisticsSpec | undefined => SPECS.get(
 /** Ships that explore well enough to form a survey group. */
 export const isSurveyClass = (c: ShipClassDef): boolean => (SUPPLY_OVERRIDES[c.id] ?? 0) >= 8;
 export const isWarship = (c: ShipClassDef): boolean => (c.role === 'combat' || c.role === 'capital') && c.attack > 0;
+const WARSHIP_IDS = new Set(SHIP_CLASSES.filter(isWarship).map((c) => c.id));
+
+/** The warships in a squadron list: what a fleet fights with. */
+export const warshipsOf = (ships: readonly Squadron[]): Squadron[] => ships.filter((x) => x.count > 0 && WARSHIP_IDS.has(x.classId));
+export const hasWarships = (ships: readonly Squadron[]): boolean => warshipsOf(ships).length > 0;
 
 /** Years (minutes) a hull takes at a shipyard: bigger, costlier hulls take longer. */
 export function buildYears(c: ShipClassDef): number {

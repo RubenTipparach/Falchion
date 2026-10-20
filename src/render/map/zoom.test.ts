@@ -28,6 +28,20 @@ describe('ZoomModel', () => {
     expect(z.targetAltitude).toBeCloseTo(DEFAULT_ZOOM.hexPreset);
   });
 
+  it('a floor lets the zoom go below the minimum', () => {
+    const z = new ZoomModel();
+    z.setFloor(0.001);
+    z.setTargetAltitude(0.002);
+    expect(z.targetAltitude).toBeCloseTo(0.002, 8);
+    z.wheel(-1e7);
+    expect(z.targetAltitude).toBeCloseTo(0.001, 8);
+    expect(z.floor).toBeCloseTo(0.001, 8);
+    // Lifting the floor eases the view back up to the map's minimum.
+    z.setFloor(null);
+    expect(z.targetAltitude).toBeCloseTo(DEFAULT_ZOOM.minAltitude, 8);
+    expect(z.floor).toBeCloseTo(DEFAULT_ZOOM.minAltitude, 8);
+  });
+
   it('fade is 1 below full and 0 above zero', () => {
     expect(fade(10, 100, 200)).toBe(1);
     expect(fade(300, 100, 200)).toBe(0);

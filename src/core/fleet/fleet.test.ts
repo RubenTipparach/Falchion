@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hex, hexDistance } from '../hex/Hex';
-import { arrivalTurn, formatTurns, hexAt, planMovement, progressAt, progressAtTime, routeIndexAt, travelTurns } from './Fleet';
+import { arrivalTurn, formatTurns, hexAt, planMovement, positionAt, progressAt, progressAtTime, retime, routeIndexAt, travelTurns } from './Fleet';
 
 describe('turn-based fleet movement', () => {
   it('route has distance+1 adjacent hexes', () => {
@@ -32,9 +32,24 @@ describe('turn-based fleet movement', () => {
     expect(progressAt(m, 0)).toBe(0);
   });
 
-  it('rejects fractional speeds and turns', () => {
+  it('rejects fractional speeds and negative times', () => {
     expect(() => planMovement(hex(0, 0), hex(1, 0), 0, 1.5)).toThrow();
-    expect(() => planMovement(hex(0, 0), hex(1, 0), 0.5, 1)).toThrow();
+    expect(() => planMovement(hex(0, 0), hex(1, 0), -1, 1)).toThrow();
+  });
+
+  it('a fleet redirected between ticks sets off from exactly where it was, and arrives on a tick', () => {
+    const pointAt = (h: { q: number; r: number }) => ({ x: h.q, z: h.r });
+    const old = planMovement(hex(0, 0), hex(10, 0), 0, 1);
+    const at = positionAt(old, 3.4, pointAt);
+    expect(at.x).toBeCloseTo(3.4);
+    const m = planMovement(hexAt(old, 3.4), hex(3, 5), 3.4, 1, at);
+    const now = positionAt(m, 3.4, pointAt);
+    expect(now.x).toBeCloseTo(3.4); // no jump back to the hex centre
+    expect(now.z).toBeCloseTo(0);
+    expect(Number.isInteger(arrivalTurn(m))).toBe(true);
+    expect(arrivalTurn(m)).toBe(9); // 5 hexes from 3.4 at 1 ly/turn -> 8.4, on the next tick
+    expect(hexAt(m, 9)).toEqual(hex(3, 5));
+    expect(positionAt(m, 8.4, pointAt)).toEqual({ x: 3, z: 5 });
   });
 
   it('glides continuously between ticks and lands on the tick position', () => {
@@ -42,5 +57,24 @@ describe('turn-based fleet movement', () => {
     expect(progressAtTime(m, 1)).toBeCloseTo(progressAt(m, 1));
     expect(progressAtTime(m, 1.5)).toBeCloseTo(0.3);
     expect(progressAtTime(m, 99)).toBe(1);
+  });
+});
+
+describe('retime', () => {
+  const a = { q: 0, r: 0 }, b = { q: 10, r: 0 };
+  it('continues a journey from the hex it has reached, at the new speed', () => {
+    const fast = planMovement(a, b, 0, 4);
+    const slow = retime(fast, 1, 1);
+    expect(slow.route[0]).toEqual({ q: 4, r: 0 });
+    expect(slow.departTurn).toBe(1);
+    expect(arrivalTurn(slow)).toBe(7);
+  });
+  it('keeps an arrived fleet where it is and leaves matching speeds alone', () => {
+    const done = planMovement(a, b, 0, 4);
+    const parked = retime(done, 20, 1);
+    expect(parked.route).toEqual([b]);
+    expect(arrivalTurn(parked)).toBe(20);
+    const same = planMovement(a, b, 0, 1);
+    expect(retime(same, 3, 1)).toBe(same);
   });
 });

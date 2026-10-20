@@ -20,4 +20,18 @@ export function clear(el: HTMLElement): void {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
 
+/**
+ * Run a rebuild of `el`'s contents without moving any scrolled box round it: emptying it first
+ * shrinks them for a moment and the browser clamps their scroll, which made lists jump on a click.
+ */
+export function keepScroll(el: HTMLElement, rebuild: () => void): void {
+  const saved: Array<[HTMLElement, number]> = [];
+  for (let p: HTMLElement | null = el; p; p = p.parentElement) if (p.scrollTop) saved.push([p, p.scrollTop]);
+  rebuild();
+  for (const [p, top] of saved) p.scrollTop = top;
+}
+
 export const fmt = (n: number): string => Math.round(n).toLocaleString('en-US');
+
+/** A touch screen is the main input (phones, tablets): hints say tap and long-press, not click. */
+export const touchFirst = (): boolean => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;

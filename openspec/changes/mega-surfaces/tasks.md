@@ -1,0 +1,27 @@
+## 1. Core
+- [x] 1.1 Ground height and city sites per structure (pure, seeded), with tests
+
+## 2. Render
+- [x] 2.1 Ground: nested grids round the camera, bent to each shape, terrain and city shading
+- [x] 2.2 Far view and sky: the Arch, the shell, the disc and its star, the habitat's windows; day and night
+- [x] 2.3 Towers and trees near the camera
+- [x] 2.4 MegaSurfaceLayer: fade in and out, glide down, drag and turn, zoom out to leave
+
+## 3. Wiring
+- [x] 3.1 Land button on the megastructure card; GameController land/leave; HUD altitude; Escape
+- [x] 3.2 Screenshots of each structure from the sky and the ground
+
+## 4. Clutter and polish
+- [x] 4.1 Shrubs and boulders beside the trees, by how wet and how high the land is; thinning to the window's edge
+- [x] 4.2 Far land blurred to its average once its features are smaller than a pixel (the shell's far side)
+- [x] 4.3 The swarm habitat after Star Crew Bridge Simulator's O'Neill cylinder: its painted land stripe with rivers and lakes, close-up detail, dome machinery on the end caps, mirrors that open by day, cloud puffs from its cloud map, the light down the axis (textures in public/textures/oneill)
+- [x] 4.4 The topopolis: an endless tube habitat, its land repeating along the tube with towns and cities, clouds, the tube's other loops through the windows, haze down its length
+- [x] 4.5 Scroll-driven dissolve between the system view and the ground (no fade); the system view slides onto the land; tops at 3,000 km
+- [x] 4.6 Coasts per pixel near the shore; system-view land in 3D noise on the ring, the sphere's inside and the disc; dusk nights
+- [x] 4.7 One camera from the system view to the ground (ring, sphere, disc): the map camera carried into the structure's frame at true scale, the close-up's sky ray-casting the whole structure from out there, the near field only below twice its top
+- [x] 4.8 One land at every distance: broad octaves in groundNoise (core and GLSL), the far view and the system view's hulls drawing it from the same noise and site, scales fading in by pixel, land and sea blended by coverage
+- [x] 4.9 Climates (desert to ice) at large scales and trees by climate; broad octaves per structure (the disc to its own size); heights eased; ridged hills in rugged country; land noise at the land's 3D point (no sphere pinch, no ring seam)
+- [x] 4.10 Terrain levels without cracks; far terrain takes the far view's land (no horizon stripes)
+- [x] 4.11 The star drawn wherever it is in front, with a corona sized to it
+- [x] 4.12 Right-drag circles the ground at the screen's centre; the daylight clock; lighter nights
+- [x] 4.13 The Dyson sphere's plates shared by the system view and the close-up (sphereShell): lattice, seams, the same missing plates

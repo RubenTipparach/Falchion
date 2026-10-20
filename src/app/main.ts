@@ -1,37 +1,49 @@
 import '../ui/styles.css';
 import { EncounterResolver } from '../core/encounters/Encounters';
-import { newEmpire } from '../core/empire/Empire';
-import { planMovement, travelTurns } from '../core/fleet/Fleet';
 import { formatDuration } from '../core/time/WorldTime';
 import { CLOCK, connectWorldClock } from './WorldClock';
-import { SaveGame } from './SaveGame';
+import { SaveGame, savedHome, type SavedGame, upgradeSave } from './SaveGame';
 import { DEFAULT_ADDRESS_SCHEME } from '../core/galaxy/GalacticAddress';
 import { GalaxyModel } from '../core/galaxy/GalaxyModel';
-import { hexAdd, hexDistance, hexToWorld } from '../core/hex/Hex';
+import { hexToWorld, worldToHex } from '../core/hex/Hex';
 import { TechTree } from '../core/research/TechTree';
-import { DEFAULT_DESIGN } from '../core/ships/ShipDesign';
 import { DEFAULT_LOOT_TABLES } from '../content/lootTables';
 import { SHARD_SOURCES } from '../content/shardSources';
 import { ALIEN_TECH, BRANCHES, DOMAINS, TECH_NODES } from '../content/techTree';
 import { SHIP_CLASSES } from '../content/shipClasses';
 import { GOVERNMENTS, POLICIES, TENETS } from '../content/society';
-import type { Colony, EconomyTables } from '../core/economy/Economy';
-import type { Squadron } from '../core/combat/Combat';
-import { fullStores } from '../core/fleet/Logistics';
-import type { Loadout } from '../core/fleet/Presence';
+import type { EconomyTables } from '../core/economy/Economy';
+import type { Market } from '../core/economy/Trade';
 import { BUILDINGS, STORAGE } from '../content/buildings';
-import { specOf, upkeepOf } from '../content/logistics';
-import { planetsOf, Planet } from '../core/galaxy/Planets';
+import { upkeepOf } from '../content/logistics';
+import { Planet } from '../core/galaxy/Planets';
 import { PlanetThumbnails } from '../render/planets/PlanetThumbnails';
+import { createThumbs } from '../render/thumbs/Thumbnails';
+import { preloadHullTextures } from '../render/ships/hullTextures';
+import { setThumbs } from '../ui/thumbs';
+import { ResourceLedger } from '../ui/ResourceLedger';
 import { NebulaLayer } from '../render/map/NebulaLayer';
+import { LowResBackground } from '../render/map/LowResBackground';
+import { h, touchFirst } from '../ui/dom';
+import { OrbitStick } from '../ui/OrbitStick';
+import { LoadingPill } from '../ui/LoadingPill';
+import { ShaderWarmup } from '../render/planets/surface/ShaderWarmup';
+import { planetLightMap, planetLook } from '../render/planets/planetLayouts';
+import { NebulaSkyboxLayer } from '../render/map/NebulaSkyboxLayer';
 import { GalaxyDiscLayer } from '../render/map/GalaxyDiscLayer';
 import { StarfieldLayer } from '../render/map/StarfieldLayer';
 import { SystemLayer } from '../render/map/SystemLayer';
+import { SurfaceLayer } from '../render/planets/surface/SurfaceLayer';
+import { MegaSurfaceLayer } from '../render/megastructures/surface/MegaSurfaceLayer';
+import { BattleLayer } from '../render/battle/BattleLayer';
+import { MegaBeaconLayer } from '../render/map/MegaBeaconLayer';
+import { BattleMarkerLayer } from '../render/map/BattleMarkerLayer';
+import { BattleHud } from '../ui/BattleHud';
 import { Dispatches } from '../ui/Dispatches';
 import type { Drawer } from '../ui/Drawer';
 import { EmpirePanel } from '../ui/panels/EmpirePanel';
 import { WarRoomPanel } from '../ui/panels/WarRoomPanel';
-import { FleetLayer, FleetView } from '../render/map/FleetLayer';
+import { FleetLayer } from '../render/map/FleetLayer';
 import { GalaxyCloudLayer } from '../render/map/GalaxyCloudLayer';
 import { HexGridLayer } from '../render/map/HexGridLayer';
 import { MapView } from '../render/map/MapView';
@@ -43,19 +55,35 @@ import { TerritoryLayer } from '../render/map/TerritoryLayer';
 import { createDefaultShipFactory } from '../render/ships/defaultRegistries';
 import { Hud } from '../ui/Hud';
 import { StarInfoPanel } from '../ui/StarInfoPanel';
+import { CityLocator } from '../ui/CityLocator';
 import { TopBar } from '../ui/TopBar';
 import { ExplorePanel } from '../ui/panels/ExplorePanel';
 import { FleetsPanel } from '../ui/panels/FleetsPanel';
 import { ResearchPanel } from '../ui/panels/ResearchPanel';
 import { ShipyardPanel } from '../ui/panels/ShipyardPanel';
+import { SearchPanel } from '../ui/panels/SearchPanel';
+import { MissionsPanel } from '../ui/panels/MissionsPanel';
 import type { PanelId } from '../ui/GameActions';
-import { GameController, tradePartners } from './GameController';
+import { GameController } from './GameController';
+import { SharedWorldClient } from './SharedWorldClient';
 import type { GameState } from './GameState';
 import { GUEST, probeSession } from './identity';
-import { colorFor, othersOnMap, publicEmpire, ServerSaves } from './ServerSync';
+import { colorFor, ownClaim, publicEmpire, ServerSaves } from './ServerSync';
+import { cleanIdentity, suggestIdentity } from '../core/empire/Identity';
+import { HERALDRY } from '../content/heraldry';
+import { showFounding } from '../ui/Founding';
 import { showSignIn } from '../ui/SignIn';
 import { Store } from './Store';
 import { createWorld } from './World';
+import { setupChat } from './ChatSetup';
+import { setupPlayers } from './PlayersSetup';
+import { setupRouting } from './Router';
+import { ServerAuthority } from './Authority';
+import { COMMANDS, encodeCommand, type CommandName } from '../sim/commands';
+import { newEmpireState } from '../sim/newEmpireState';
+import { reportActivity } from './GalaxyApi';
+import { CLEAR_FLEET, PlayerVision } from './Vision';
+import { FogOfWarLayer } from '../render/map/FogOfWarLayer';
 
 /** Composition root: build the pure services, the views, and wire them together. */
 async function bootstrap(): Promise<void> {
@@ -69,116 +97,298 @@ async function bootstrap(): Promise<void> {
   const galaxy = new GalaxyModel();
   const tree = new TechTree(TECH_NODES, SHARD_SOURCES);
   const encounters = new EncounterResolver(DEFAULT_LOOT_TABLES, tree);
-  const world = createWorld(galaxy, signedIn ? identity.id : undefined);
-  const { factory, styles, traits } = createDefaultShipFactory();
-  const partners = tradePartners(world, world.home);
-  const economyTables: EconomyTables = { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, partners, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf };
-
-  // Starting position: a young empire with a few roots researched and a small fleet.
-  let research = newEmpire(identity.displayName).research;
-  for (const id of ['t-alloys', 'u-modular', 'a-heritage', 'a-duelist-tradition', 'o-grown-hulls', 'u-logistics']) {
-    research = tree.research(tree.grantShards(research, id, 'science', tree.node(id).shards), id);
-  }
-  research = tree.grantShards(research, 't-lasers', 'science', 50);
-  research = tree.grantShards(research, 'u-mining', 'science', 4);
-  research = tree.grantShards(research, 'a-diplomacy', 'observation', 3);
-  const empire = { ...newEmpire(identity.displayName), research };
-
-  // Colonies are real planets: three in the home system (the capital has a shipyard) and one in each claimed system.
-  const homePlanets = planetsOf(world.home, galaxy.params.seed);
-  const colonyOf = (p: Planet, buildings: string[], capital = false): Colony =>
-    ({ name: capital ? `${p.name} (capital)` : p.name, biome: p.biome, planetId: p.id, starId: p.starId, size: p.size, capital, buildings });
-  // Capital on the most habitable world; gas giants cannot be settled.
-  const HABITABLE = ['terran', 'ocean', 'jungle', 'desert', 'ice', 'barren', 'volcanic', 'toxic'];
-  const settleable = homePlanets.filter((p) => p.biome !== 'gas')
-    .sort((a, b) => HABITABLE.indexOf(a.biome) - HABITABLE.indexOf(b.biome) || b.size - a.size);
-  const colonies: Colony[] = [
-    ...settleable.slice(0, 1).map((p) => colonyOf(p, ['shipyard', 'farm', 'trade-hub'], true)),
-    ...settleable.slice(1, 3).map((p) => colonyOf(p, ['mine'])),
-  ];
-  const claim = world.claims.find((c) => c.kind === 'player')!;
-  for (const c of claim.colonies.slice(1)) {
-    const star = galaxy.starAt(c.hex);
-    const p = star && star.id !== world.home.id ? planetsOf(star, galaxy.params.seed).find((x) => x.biome !== 'gas') : undefined;
-    if (p && !colonies.some((x) => x.planetId === p.id)) colonies.push(colonyOf(p, ['farm']));
-  }
-  const clock = await connectWorldClock();
   const saveGame = new SaveGame(galaxy.params.seed, undefined, signedIn ? identity.id : undefined);
   const serverSaves = signedIn ? new ServerSaves() : null;
   let saved = saveGame.load();
-  if (serverSaves) {
-    // The server copy follows the player between devices; use whichever is further along.
-    const remote = await serverSaves.load();
-    if (saveGame.valid(remote) && (!saved || remote.turn >= saved.turn)) saved = remote;
-  }
-  const t0 = clock.tick();
-  const start = initialFleets(galaxy, world, identity.displayName, t0);
-  const houseDesign = { ...DEFAULT_DESIGN, colors: { primary: '#c8d0dc', secondary: '#2b3448', accent: '#ffb547' } };
+  // The server runs signed-in players' empires: its copy is the empire, on every device.
+  const remote = serverSaves ? await serverSaves.load() : null;
+  const onServer = saveGame.valid(remote);
+  if (onServer) saved = upgradeSave(remote);
+  // A saved empire keeps its home system wherever the galaxy puts stars now.
+  const world = createWorld(galaxy, signedIn ? identity.id : undefined, savedHome(saved));
+  const { factory, styles, traits } = createDefaultShipFactory();
+  const economyTables: EconomyTables = { tree, classes: SHIP_CLASSES, governments: GOVERNMENTS, policies: POLICIES, tenets: TENETS, alienTech: ALIEN_TECH, buildings: BUILDINGS, storage: STORAGE, upkeepOf };
 
-  const fresh: GameState = {
-    turn: t0, empire,
-    economy: {
-      roster: start.roster, government: 'council', policies: [], routes: [{ partnerId: partners[0].id }],
-      faith: null, spyNetworks: [], focus: 't-fusion', colonies,
-    },
-    designs: { prospector: { ...houseDesign, name: 'Prospector Skiff', style: 'utilitarian', seed: 4, length: 0.8, bulk: 0.8, engines: 2, weapons: 0 } },
-    shipyardClass: 'prospector', hiddenTraits: [], home: world.home,
-    selected: null, selectedFleet: null, selectedPlanet: null, explored: {}, openedCrates: [], collectedCaches: [], fleets: start.fleets, loadouts: start.loadouts, dockSpent: { supply: 0, ammo: 0 }, depots: [], construction: [], playerName: identity.displayName,
-    lastReport: null, engaged: [],
-    dispatches: [{ turn: t0, text: 'Welcome, Commander. One year passes every minute. Survey Group Alpha is on station nearby: explore its planets and collect what you find. Ships need supply to explore and ammunition to fight; both refill in friendly systems.' }],
-  };
+  // Hull plating textures load with the clock, before any ship or thumbnail is drawn.
+  const [clock] = await Promise.all([connectWorldClock(), preloadHullTextures()]);
+  // A new empire (or the template a save is laid over): see newEmpireState.
+  const fresh = newEmpireState({ galaxy, tree, world, playerName: identity.displayName, t0: clock.tick() });
   // A saved empire carries on where it left off; the missed years are caught up below.
-  const store = new Store<GameState>(saved ? { ...fresh, ...saved } : fresh);
+  const store = new Store<GameState>(saved ? { ...fresh, ...saved, home: world.home, identity: cleanIdentity(saved.identity, HERALDRY) } : fresh);
 
-  const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame,
-    // Signed-in players' notable news goes to the Discord channel (the server rate-limits it).
-    report: signedIn ? (kind, text) => { void fetch('./api/events', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, text }) }).catch(() => {}); } : undefined,
+  // Asteroid fields and NPC empires everyone shares (the server's when signed in).
+  const shared = await SharedWorldClient.connect(!!serverSaves && probe.server);
+  // The server runs the NPC empires for signed-in players; a guest's browser runs its own.
+  const onlineWorld = !!serverSaves && probe.server;
+  // Other players' worlds are markets for trade goods, from the live players list (PlayersSetup).
+  let otherMarkets: readonly Market[] = [];
+  const controller = new GameController({ store, galaxy, tree, encounters, world, economy: economyTables, clock, save: saveGame, shared,
+    playerId: onlineWorld ? identity.id : 'local', ...(onlineWorld ? {} : { npcs: 'local' as const }),
+    // Signed-in players' notable news goes to the galaxy feed and the Discord channel (the server rate-limits it).
+    report: signedIn ? reportActivity : undefined,
+    markets: () => otherMarkets,
   });
+  // Signed in: the server runs the empire. Every order is applied here at once and sent to the
+  // server as a command (only the outermost call: an order that gives others sends just itself);
+  // the server's answer is the truth the browser adopts. Guests play on their own.
+  const authority = serverSaves && probe.server ? new ServerAuthority(store, onServer, (text) => store.update((s) => ({ dispatches: [{ turn: s.turn, text, tone: 'bad' as const }, ...s.dispatches].slice(0, 40) }))) : null;
+  if (authority) {
+    let depth = 0;
+    const calls = controller as unknown as Record<string, (...args: unknown[]) => unknown>;
+    for (const name of Object.keys(COMMANDS) as CommandName[]) {
+      const original = calls[name].bind(controller);
+      calls[name] = (...args: unknown[]) => {
+        if (depth > 0 || !authority.running) return original(...args);
+        depth++;
+        try {
+          return original(...args);
+        } finally {
+          depth--;
+          try {
+            authority.send(encodeCommand(name, args), controller.worldTime());
+          } catch {
+            // Not sendable (should not happen): the next state from the server corrects it.
+          }
+        }
+      };
+    }
+    controller.beforeReset = async () => { await fetch('./api/save', { method: 'DELETE', credentials: 'same-origin' }).catch(() => {}); };
+  }
+
+  // What the player sees of the galaxy (change admin-snapshots-and-fog): their own vision, their
+  // allies', and the server's hide-systems flag. The map, selection, search and links read it.
+  const vision = new PlayerVision(store, galaxy);
+  controller.lens = () => vision.lens;
 
   // ── Views ──
   const app = document.getElementById('app')!;
   const mapEl = document.createElement('div');
   mapEl.className = 'map';
   app.append(mapEl);
-  const map = new MapView({ container: mapEl, galaxyRadius: galaxy.params.radius, onClick: controller.handleClick, onRightClick: controller.handleRightClick, onHover: controller.handleHover, onFrame: controller.onFrame });
+  // Phones and tablets get lighter rendering: the heavy nebula and galaxy shaders at a third of the resolution.
+  const lite = touchFirst();
+  const map = new MapView({ container: mapEl, galaxyRadius: galaxy.params.radius, onClick: controller.handleClick, onRightClick: controller.handleRightClick, onHover: controller.handleHover, onFrame: controller.onFrame, lite });
 
   map.layers.add(new StarfieldLayer(galaxy.params.seed));
-  map.layers.add(new NebulaLayer(galaxy.params.seed));
-  map.layers.add(new GalaxyDiscLayer(galaxy.params));
-  map.layers.add(new GalaxyCloudLayer(galaxy));
+  const nebula = new NebulaLayer(galaxy.params.seed, lite);
+  const disc = new GalaxyDiscLayer(galaxy.params, lite);
+  if (lite) map.layers.add(new LowResBackground([nebula, disc], 0.25));
+  else map.layers.add(nebula);
+  // System view: the star (or a followed ship in deep space) sits inside the map's nebula.
+  map.layers.add(new NebulaSkyboxLayer(galaxy.params.seed, (x, z) => {
+    const star = galaxy.nearestStar(worldToHex(x, z), 1);
+    return star && { id: star.id, x: star.position.x, z: star.position.z };
+  }));
+  if (!lite) map.layers.add(disc);
+  map.layers.add(new GalaxyCloudLayer(galaxy, lite ? 70_000 : undefined));
   map.layers.add(new MidStarLayer(galaxy));
   const sectors = map.layers.add(new SectorOverlayLayer(galaxy.params.radius, DEFAULT_ADDRESS_SCHEME));
-  const territory = map.layers.add(new TerritoryLayer(world.claims));
-  const hexGrid = map.layers.add(new HexGridLayer(galaxy.params.radius));
-  map.layers.add(new NearStarLayer(galaxy));
-  const system = map.layers.add(new SystemLayer(galaxy, { isHome: (s) => s.id === world.home.id, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet) }));
+  // Neighbours are fixed; your own territory follows your colonies and identity.
+  const territory = map.layers.add(new TerritoryLayer(world.claims.filter((c) => c.kind !== 'player')));
+  territory.setOwn(ownClaim(store.state));
+  store.subscribe((s, prev) => { if (s.identity !== prev.identity || s.economy.colonies !== prev.economy.colonies) territory.setOwn(ownClaim(s)); });
+  const hexGrid = map.layers.add(new HexGridLayer(galaxy.params.radius, lite));
+  const nearStars = map.layers.add(new NearStarLayer(galaxy));
+  nearStars.surveyed = controller.surveyedPercent;
+  nearStars.lens = () => vision.lens;
+  // Fog of war: clear round what you have explored and sighted and round your fleets (see FogOfWarLayer).
+  map.layers.add(new FogOfWarLayer({
+    get version() { return vision.lens.version; },
+    get dense() { return vision.hideSystems; },
+    clearings: () => vision.clearings(),
+    moving: () => {
+      const s = store.state, out: Array<{ x: number; z: number; r: number }> = [];
+      for (const f of s.fleets) {
+        if (!s.loadouts[f.id]) continue;
+        const p = fleetLayer.positionOf(f.id);
+        if (p) out.push({ x: p.x, z: p.z, r: CLEAR_FLEET });
+      }
+      return out;
+    },
+  }));
+  const system = map.layers.add(new SystemLayer(galaxy, { colonyOf: (planet) => controller.surfaceTarget(planet)?.colony ?? null, onPlanetClick: (star, planet) => controller.focusPlanet(star, planet), planets: (star) => controller.planets(star), fields: (star) => controller.fieldReport(star), see: (star) => vision.lens.see(star) }));
+  // Asteroid belts thin as fields are mined and fill back as they refill: re-read them when the shared world or the year changes.
+  shared.onChange(() => system.refreshFields());
+  store.subscribe((s, prev) => { if (s.turn !== prev.turn) system.refreshFields(); });
+  // Surface view: the focused planet's close-up, below planet view (draws its own scene when near).
+  const surface = map.layers.add(new SurfaceLayer({ zoom: map.controller.zoom, input: map.controller, frame: (id) => system.planetFrame(id), hold: (id) => system.holdPlanet(id), canvas: map.canvas, lite }));
+  // Landing on a megastructure: its own close-up (change mega-surfaces).
+  const mega = map.layers.add(new MegaSurfaceLayer({ zoom: map.controller.zoom, input: map.controller, canvas: map.canvas, lite, frame: (id) => system.megaFrame(id) }));
+  // Megastructures are seen from across the galaxy (change megastructures).
+  // Only the ones you (or an ally) have found (change admin-snapshots-and-fog).
+  const beacons = map.layers.add(new MegaBeaconLayer(galaxy.megastructures().map((m) => {
+    const star = galaxy.starAt(m.hex)!;
+    return { starId: m.starId, starName: star.name, type: m.type, x: star.position.x, z: star.position.z };
+  }), (starId) => {
+    const star = controller.starById(starId);
+    const mega = star && controller.planets(star)[0];
+    if (star && mega) controller.focusPlanet(star, mega);
+  }, (starId) => vision.lens.megastructureSeen(starId)));
+  vision.onChange(() => {
+    nearStars.refreshSight();
+    beacons.refresh();
+    controller.refreshSight();
+  });
   const selection = map.layers.add(new SelectionLayer());
   const fleetLayer = map.layers.add(new FleetLayer(factory, (years) => formatDuration(years, CLOCK), (h) => galaxy.starAt(h)?.position ?? hexToWorld(h), (id) => controller.selectFleet(id)));
+  // Battles at sea: a marker on the map for each one you can see, and the view that covers the map to watch one.
+  const battleMarkers = map.layers.add(new BattleMarkerLayer((key) => controller.openBattle(key)));
+  const battle = map.layers.add(new BattleLayer(factory, SHIP_CLASSES, { worldTime: () => controller.worldTime(), ending: (t) => controller.battleEnding(t), lite }));
+  const battleHud = new BattleHud({ leave: () => controller.leaveBattle(), retreat: (id) => controller.retreat(id), replayAgain: () => battle.restartReplay() }, battle.controls);
+  battle.onFrame = (f) => battleHud.render(f);
 
   const zoomCfg = map.controller.zoom.config;
-  const topBar = new TopBar(store, controller, identity, clock, controller.caps);
-  const hud = new Hud({ min: zoomCfg.minAltitude, max: zoomCfg.maxAltitude }, (alt) => controller.zoomTo(alt));
+  const ledger = new ResourceLedger(store, { forecast: () => controller.forecast(), caps: () => controller.caps() });
+  const topBar = new TopBar(store, controller, identity, clock, controller.caps, (r, el) => ledger.toggle(r, el));
+  const hud = new Hud({ min: zoomCfg.minAltitude / 10, max: zoomCfg.maxAltitude }, (alt) => controller.zoomTo(alt), () => {
+    const s = store.state;
+    if (s.selected && s.selectedPlanet && s.selectedPlanet.biome !== 'gas') controller.land(s.selected, s.selectedPlanet);
+    else hud.setHover('Focus a rocky planet first, then land on it');
+  });
+  // Rendered thumbnails for ships, buildings, resources, encounters and research (one studio).
+  setThumbs(createThumbs({ factory, design: (classId) => controller.effectiveDesign(classId) }));
   const thumbs = new PlanetThumbnails(80);
   const thumb = (p: Planet) => thumbs.url(p);
   const starInfo = new StarInfoPanel(store, controller, controller, controller.describe, thumb, economyTables);
-  const dispatches = new Dispatches(store);
+  const dispatches = new Dispatches(store, (id) => controller.replayBattle(id));
   const panels: Record<PanelId, Drawer> = {
     shipyard: new ShipyardPanel(store, controller, controller, factory, styles, traits, tree, {
       isUnlocked: controller.isClassUnlocked,
       designFor: controller.designFor,
       effectiveDesign: controller.effectiveDesign,
       unlockedTraits: controller.unlockedTraits,
+      unlockedStyles: controller.unlockedStyles,
+      foundingStyle: controller.foundingStyle,
       buildDiscount: () => Math.min(40, controller.bonus('build')),
     }),
     research: new ResearchPanel(store, controller, tree, BRANCHES, DOMAINS, economyTables),
-    empire: new EmpirePanel(store, controller, controller, economyTables, world.neighbours.map((n) => n.name), thumb),
+    empire: new EmpirePanel(store, controller, controller, economyTables, thumb),
     war: new WarRoomPanel(store, controller, controller),
     explore: new ExplorePanel(store, controller, controller, controller.planets, tree, thumb),
     fleets: new FleetsPanel(store, controller, controller),
+    search: new SearchPanel(store, controller, controller, galaxy, controller.planets, thumb),
+    missions: new MissionsPanel(store, controller, controller),
   };
-  app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, dispatches.el, ...Object.values(panels).map((p) => p.el));
+  // City locator: the focused planet's major cities, also while its card is closed.
+  const cityLocator = new CityLocator(store, controller, controller, starInfo);
+  starInfo.onCardChange = () => cityLocator.render();
+  controller.onFocusPlanet = () => starInfo.showPlanet();
+  app.append(topBar.el, hud.banner, hud.el, hud.ladder, starInfo.el, cityLocator.el, dispatches.el, battleHud.el, ...Object.values(panels).map((p) => p.el));
 
-  controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system });
+  controller.attach({ map, hexGrid, selection, sectors, fleets: fleetLayer, hud, topBar, panels, system, surface, mega, battle, battleMarkers });
+  // Phones: the star, planet and fleet card is a bottom sheet; keep what you look at centred above it.
+  if (lite) {
+    const phone = window.matchMedia('(max-width: 720px)');
+    map.setBottomInset(() => {
+      if (!phone.matches || starInfo.el.classList.contains('hidden')) return 0;
+      const top = starInfo.el.getBoundingClientRect().top;
+      const box = mapEl.getBoundingClientRect();
+      const covered = Math.max(0, Math.min(box.height * 0.7, box.bottom - top));
+      // The top bar covers the map's top edge too: centre between the two.
+      return covered && Math.max(0, covered - Math.max(0, topBar.el.getBoundingClientRect().bottom - box.top));
+    });
+  }
+  // Planet close-ups: compile their shaders up front once the game is up, and say so; then show
+  // the same pill while a planet's close-up is being built (change surface-perf).
+  const pill = new LoadingPill();
+  app.append(pill.el);
+  const warmup = new ShaderWarmup();
+  // It covers the system view and planet close-ups, quietly: nothing shows unless you wait on it.
+  // A planet's close-up opens once its own shaders are ready: landing on one (or zooming all the
+  // way in) moves them to the front, says so, and lands when they are (change surface-perf).
+  let warming = true;
+  let nudgeUntil = 0;
+  let nudged: Planet | null = null;
+  const showWarmup = () => {
+    if (!warming) return;
+    // A planet waiting to be landed on (or zoomed all the way into): its own shaders, which go first.
+    const planet = controller.landingWaitsFor ?? (performance.now() < nudgeUntil ? nudged : null);
+    if (planet && warmup.total) {
+      const p = warmup.progressFor(planetLook(planet));
+      pill.set(`Preparing ${planet.name} · ${p.ready}/${p.total} · ${controller.landingWaitsFor ? 'landing when ready' : 'zoom in when ready'}`, p.total ? p.ready / p.total : null);
+    } else pill.set(null);
+    pill.el.classList.toggle('nudge', !!planet);
+  };
+  controller.closeUpReady = (planet) => !warming || warmup.readyFor(planetLook(planet));
+  controller.onShadersBusy = (ms, planet) => {
+    if (!warming) return;
+    const now = performance.now(), shown = now < nudgeUntil;
+    nudgeUntil = Math.max(nudgeUntil, now + ms);
+    nudged = planet;
+    if (shown) return;
+    showWarmup();
+    const done = () => (performance.now() < nudgeUntil ? setTimeout(done, nudgeUntil - performance.now() + 20) : showWarmup());
+    setTimeout(done, ms + 20);
+  };
+  let warmStart = 0;
+  const warmed = () => {
+    if (!warming) return;
+    warming = false;
+    // How long it took: much less once the browser has these shaders in its cache from a visit before.
+    if (warmStart) console.info(`Shaders prepared: ${warmup.total} in ${((performance.now() - warmStart) / 1000).toFixed(1)} s`);
+    pill.el.classList.remove('nudge');
+    pill.set(null);
+    controller.shadersChanged();
+    // Then, one at a time while idle, your worlds' night-light maps (a layout and a texture, tens of
+    // milliseconds each), so the first look at your systems does not stop to draw them.
+    const queue = controller.ownPlanets().slice(0, 6);
+    const idle = (fn: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(fn, { timeout: 3000 }) : setTimeout(fn, 500));
+    const next = () => {
+      const planet = queue.shift();
+      if (!planet) return;
+      planetLightMap(planet, controller.surfaceTarget(planet)?.colony ?? null);
+      idle(next);
+    };
+    idle(next);
+  };
+  warmup.onProgress((ready, total) => {
+    if (ready >= total) return warmed();
+    controller.shadersChanged();
+    showWarmup();
+  });
+  showWarmup();
+  setTimeout(() => {
+    warmStart = performance.now();
+    try { warmup.start(map.renderer, lite, map.scene); if (!warmup.total) warmed(); } catch (e) { console.warn('shader warm-up', e); warmed(); }
+  }, 1000);
+  setInterval(() => { if (!warming || (!controller.landingWaitsFor && performance.now() >= nudgeUntil)) pill.set(surface.status.building ? 'Building the surface' : null); }, 200);
+  // Touch screens: a joystick to orbit the view (the battle's camera while one is open), kept above
+  // the bottom sheet on a phone.
+  if (lite) {
+    const stick = new OrbitStick((dx, dy) => (battle.isOpen ? battle.controls.drag(dx, dy, false) : map.controller.orbit(dx, dy)));
+    app.append(stick.el);
+    const phone = window.matchMedia('(max-width: 720px)');
+    const lift = () => stick.lift(phone.matches && !starInfo.el.classList.contains('hidden') ? starInfo.el.getBoundingClientRect().height : 0);
+    new ResizeObserver(lift).observe(starInfo.el);
+    new MutationObserver(lift).observe(starInfo.el, { attributes: true, attributeFilter: ['class', 'hidden'] });
+    phone.addEventListener('change', lift);
+    lift();
+  }
+  // The NPC empires you know: drawn now, every year, and whenever the shared world changes.
+  const drawNpcs = () => controller.drawNpcs(territory);
+  drawNpcs();
+  shared.onChange(drawNpcs);
+  store.subscribe((s, prev) => { if (s.turn !== prev.turn) drawNpcs(); });
+  // Other players, live: the Players drawer, Galaxy feed, toasts and their fleets and territory (see PlayersSetup).
+  const players = setupPlayers({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, store, territory,
+    fetchPlayers: serverSaves && (() => serverSaves.players()), message: (id) => chat.openThread(id),
+    setMarkets: (markets) => { otherMarkets = markets; } });
+  // In-game chat (global + DMs, location links, @mentions): see ChatSetup. Its stream also carries the players' live events.
+  // The live stream also carries the server's state of this empire each year.
+  // It also announces changes to the shared world.
+  // And the server's hide-systems flag when an admin changes it: what the server sends changes with it.
+  const live = { ...players.live, taps: { ...players.live.taps, state: (data: unknown) => authority?.onServerState((data as { save?: SavedGame }).save), world: (data: unknown) => shared.adopt(data),
+    settings: (data: unknown) => {
+      vision.setHideSystems((data as { hideSystems?: unknown })?.hideSystems === true);
+      void vision.poll(signedIn);
+      void players.refresh();
+      void shared.reload();
+    } } };
+  const chat = setupChat({ identity, canSignIn: probe.server && probe.authEnabled, galaxy, controller, panels: Object.values(panels), live });
+  players.alongside([...Object.values(panels), chat]);
+  topBar.addTab(players.panel.tab);
+  topBar.addTab(chat.tab);
+  app.append(chat.el, players.panel.el, players.toasts.el);
 
   // ── Start ──
   const home = hexToWorld(world.home.hex);
@@ -186,35 +396,80 @@ async function bootstrap(): Promise<void> {
   map.controller.zoom.setTargetAltitude(48);
   map.controller.zoom.snap();
   controller.select(world.home);
+  // Hotlinks (/system/q,r/Name, /hex/q,r, /player/id): open where the link points; the address bar follows the selection.
+  setupRouting({ controller, store, galaxy, map, showPlayer: (id) => players.panel.show(id) });
 
   window.addEventListener('keydown', (e) => {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === 'Escape' && battle.isOpen) { controller.leaveBattle(); return; }
+    if (battle.isOpen) return;
     if (e.key === 'g' || e.key === 'G') controller.toggleView();
+    if (e.key === '/') { e.preventDefault(); controller.openPanel('search'); return; }
     if (e.key === 'Escape' && store.state.selectedFleet) { controller.selectFleet(null); return; }
+    if (e.key === 'Escape' && (surface.status.active || mega.status.active)) { controller.leaveSurface(); return; }
     if (e.key === 'Escape') { if (store.state.selectedPlanet && store.state.selected) controller.focusPlanet(store.state.selected, null); else controller.select(null); }
     if (e.key === 'h' || e.key === 'H') controller.flyTo(world.home, true);
     if (import.meta.env.DEV && e.key === 'Enter' && tag !== 'BUTTON') controller.skipYear();
   });
   // The world runs on: one year per minute, pushed by the server when there is one.
-  // Other players in the shared galaxy: their territory and fleets, refreshed every year.
-  const refreshOthers = async () => {
-    if (!serverSaves) return;
-    const { fleets, claims } = othersOnMap(await serverSaves.players());
-    controller.setOtherFleets(fleets);
-    territory.setDynamic(claims);
-  };
+  // Other players in the shared galaxy: live over the stream, and polled every year as a fallback.
+  const refreshOthers = () => players.refresh();
   void refreshOthers();
-  clock.onTick((tick) => { controller.advanceTo(tick); void refreshOthers(); });
-  controller.advanceTo(clock.tick());
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) controller.advanceTo(clock.tick()); });
+  // Signed in: the server runs the empire and each year sends what it decided; guests (and an
+  // empire not yet founded) run it here.
+  const yearly = (tick: number) => { if (authority?.running) authority.expectTick(tick); else controller.advanceTo(tick); };
+  clock.onTick((tick) => { yearly(tick); void refreshOthers(); if (probe.server) void vision.poll(signedIn); });
+  // The hide-systems flag and what allies share, now and every year.
+  if (probe.server) void vision.poll(signedIn);
+  if (!authority?.running) {
+    // Saved journeys planned at other speeds continue at the empire's speed, then the missed years run.
+    controller.retimeFleets();
+    controller.advanceTo(clock.tick());
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    if (authority?.running) void authority.refresh();
+    else controller.advanceTo(clock.tick());
+  });
   let saveTimer = 0;
+  let creating = false;
   const persist = () => {
     saveGame.save(store.state);
-    if (serverSaves && !saveGame.stoppedSaving) serverSaves.push(saveGame.snapshot(store.state), publicEmpire(store.state, colorFor(identity.id)));
+    // The server's copy starts once the empire is founded, so the galaxy (and the Discord channel)
+    // first hears of a new player with their chosen name and flag. From then on the server runs it.
+    if (!serverSaves || !authority || authority.running || creating || !store.state.identity || saveGame.stoppedSaving) return;
+    creating = true;
+    void serverSaves.create(saveGame.snapshot(store.state), publicEmpire(store.state, colorFor(identity.id))).then((r) => {
+      creating = false;
+      if (r.created) authority.activate();
+      else if (r.existing) { authority.activate(); authority.adopt(r.existing); }
+    });
   };
-  store.subscribe(() => { clearTimeout(saveTimer); saveTimer = window.setTimeout(persist, 1500); });
-  window.addEventListener('pagehide', () => saveGame.save(store.state));
+  // The local copy (guests' only one; a cache for signed-in players) follows every change.
+  store.subscribe(() => {
+    clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(persist, 1500);
+  });
+  // Leaving or reloading: write the local save and send the server copy now, so another device
+  // (or this one after a reload) picks up exactly where this tab left off.
+  const persistNow = () => { clearTimeout(saveTimer); persist(); };
+  window.addEventListener('pagehide', () => persistNow());
+  // A new version on the server: save, and offer to reload onto it. A player away from the keys
+  // for a minute is reloaded for them; one who is playing chooses when.
+  let lastInput = performance.now();
+  for (const e of ['pointerdown', 'keydown', 'wheel', 'touchstart']) window.addEventListener(e, () => { lastInput = performance.now(); }, { passive: true, capture: true });
+  let updateShown = false;
+  clock.onNewVersion(() => {
+    persistNow();
+    if (updateShown) return;
+    updateShown = true;
+    const reload = () => { persistNow(); setTimeout(() => location.reload(), 300); };
+    app.append(h('div', { class: 'update-banner frame', role: 'status' },
+      h('span', {}, 'Falchion was updated.'),
+      h('button', { class: 'btn primary', onclick: reload }, 'Refresh now')));
+    const idle = setInterval(() => { if (performance.now() - lastInput >= 60_000) { clearInterval(idle); reload(); } }, 5_000);
+  });
   // One tab plays the empire: if another tab saves it, this one stops writing and offers to take over.
   // Server announcements (set in the admin portal) show as a banner for everyone.
   let tabWarning = false;
@@ -237,44 +492,26 @@ async function bootstrap(): Promise<void> {
   });
   persist();
   map.start();
-  if (import.meta.env.DEV) Object.assign(window, { falchion: controller });
-}
 
-/** Starting fleets, timed relative to the year the empire is founded (t0). */
-function initialFleets(galaxy: GalaxyModel, world: ReturnType<typeof createWorld>, player: string, t0: number) {
-  const home = world.home.hex;
-  const near = (dq: number, dr: number) => galaxy.nearestStar(hexAdd(home, { q: dq, r: dr }), 10) ?? world.home;
-  const target = near(22, -9);
-  const survey = near(5, -3);
-  const nova = world.neighbours.find((n) => n.name === 'Nova Collective')!;
-  const vossk = world.neighbours.find((n) => n.name === 'Vossk Hegemony')!;
-  const arrakai = world.neighbours.find((n) => n.name === 'House Arrakai')!;
-  const house = (name: string, seed: number, style = DEFAULT_DESIGN.style) => ({ ...DEFAULT_DESIGN, name, style, seed, colors: { primary: '#c8d0dc', secondary: '#2b3448', accent: '#ffb547' } });
-  // Raiders sit 15% of the way to Vossk space; a strike group is already on its way.
-  const toVossk = { q: Math.round(home.q + (vossk.home.hex.q - home.q) * 0.15), r: Math.round(home.r + (vossk.home.hex.r - home.r) * 0.15) };
-  const raiders = galaxy.nearestStar(toVossk, 12) ?? world.home;
-  const fleets: FleetView[] = [
-    { id: 'scout-1', name: 'Scout Wing I', owner: player, color: '#e6b450', movement: planMovement(home, target.hex, t0 - 2, 4), design: house('Scout', 7, 'technological') },
-    { id: 'survey-1', name: 'Survey Group Alpha', owner: player, color: '#e6b450', movement: planMovement(home, survey.hex, t0 - 6, 3), design: house('Survey', 9, 'technological') },
-    { id: 'strike-1', name: '1st Strike Group', owner: player, color: '#e6b450', movement: planMovement(home, raiders.hex, t0 + 3 - hexDistance(home, raiders.hex), 1), design: house('Strike', 21, 'classic') },
-    { id: 'nova-1', name: 'Nova Survey Group', owner: 'Nova Collective', color: '#4fd1ff', movement: planMovement(nova.home.hex, target.hex, t0 + 7 - travelTurns(hexDistance(nova.home.hex, target.hex), 3), 3),
-      design: { ...DEFAULT_DESIGN, name: 'Nova', style: 'geometric', seed: 31, colors: { primary: '#e8f6ff', secondary: '#1b4b6b', accent: '#4fd1ff' } } },
-    { id: 'vossk-1', name: 'Vossk Raiders', owner: 'alien:Vossk', color: '#ff5d5d', movement: planMovement(vossk.home.hex, world.home.hex, t0 - 10, 2),
-      design: { ...DEFAULT_DESIGN, name: 'Vossk', style: 'organic', seed: 66, colors: { primary: '#5a1f1f', secondary: '#2a0d0d', accent: '#ff3b3b' }, weapons: 4 } },
-    { id: 'arrakai-1', name: 'Arrakai Expedition', owner: 'House Arrakai', color: '#c792ea', movement: planMovement(arrakai.home.hex, world.home.hex, t0 - 100, 3),
-      design: { ...DEFAULT_DESIGN, name: 'Arrakai', style: 'classic', seed: 12, colors: { primary: '#f2f2f2', secondary: '#c9a227', accent: '#7ad7ff' } } },
-  ];
-  const loadout = (ships: Squadron[], supply?: number): Loadout => ({ ships, ...fullStores(ships, specOf), ...(supply === undefined ? {} : { supply }) });
-  const loadouts: Record<string, Loadout> = {
-    'scout-1': loadout([{ classId: 'pathfinder', count: 2 }]),
-    'survey-1': { ...loadout([{ classId: 'survey-cutter', count: 2 }], 15), orders: { autoReturn: true } },
-    // Wins against the raiders with full magazines, loses at half: ammunition matters.
-    'strike-1': loadout([{ classId: 'lancer', count: 6 }, { classId: 'railgun-monitor', count: 2 }, { classId: 'interceptor', count: 2 }]),
+  // Founding screen: a new empire (or one saved before identities existed) chooses its name,
+  // ruler, capital, colour and flag; the Empire panel and top bar reopen it to edit.
+  const capitalName = () => store.state.economy.colonies.find((c) => c.capital)?.name.replace(/ \(capital\)$/, '') ?? world.home.name;
+  const found = async () => {
+    const chosen = await showFounding(suggestIdentity(galaxy.params.seed, identity.displayName, capitalName(), HERALDRY), HERALDRY, 'found');
+    if (!chosen) return;
+    controller.setIdentity(chosen, true);
+    persistNow();
   };
-  // Roster = every ship owned: deployed fleets plus the home dock.
-  const roster: Record<string, number> = { prospector: 3, 'ice-cutter': 1, 'bulk-freighter': 1, interceptor: 2, 'survey-cutter': 1, 'colony-ark': 1, 'construction-tender': 1 };
-  for (const l of Object.values(loadouts)) for (const x of l.ships) roster[x.classId] = (roster[x.classId] ?? 0) + x.count;
-  return { fleets, loadouts, roster };
+  controller.onEditEmpire = async () => {
+    const current = store.state.identity;
+    if (!current) return void found();
+    const chosen = await showFounding(current, HERALDRY, 'edit');
+    if (!chosen) return;
+    controller.setIdentity(chosen, false);
+    persistNow();
+  };
+  if (!store.state.identity) void found();
+  if (import.meta.env.DEV) Object.assign(window, { falchion: controller });
 }
 
 bootstrap();

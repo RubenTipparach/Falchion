@@ -1,13 +1,19 @@
-import type { EconomyState, TurnReport } from '../core/economy/Economy';
+import type { EconomyState, Flow, TurnReport } from '../core/economy/Economy';
 import type { EmpireState } from '../core/empire/Empire';
+import type { EmpireIdentity } from '../core/empire/Identity';
 import type { EncounterResult } from '../core/encounters/types';
 import type { StarSystem } from '../core/galaxy/GalaxyModel';
 import type { Planet } from '../core/galaxy/Planets';
 import type { Stores } from '../core/fleet/Logistics';
 import type { Loadout } from '../core/fleet/Presence';
+import type { BattleLogEntry } from '../core/combat/BattleLog';
 import type { Job } from '../core/construction/Construction';
 import type { ShipDesign } from '../core/ships/ShipDesign';
 import type { FleetView } from '../render/map/FleetLayer';
+import type { CommerceState } from '../core/economy/Commerce';
+import type { GovernorState } from '../core/empire/Governor';
+import type { MissionsState } from '../core/missions/Missions';
+import type { CourtState } from '../core/empire/Court';
 
 /** Policy side of the economy; the stockpile lives on the empire. */
 export type EconomySettings = Omit<EconomyState, 'stock'>;
@@ -28,26 +34,57 @@ export interface GameState {
   readonly selectedFleet: string | null;
   /** Planet the camera is following in system view. */
   readonly selectedPlanet: Planet | null;
+  /** The asteroid field whose card is open (view state: not saved). */
+  readonly selectedField?: string | null;
   readonly explored: Readonly<Record<string, EncounterResult>>;
   /** Planet ids whose loot crate has been opened. */
   readonly openedCrates: readonly string[];
   /** Planet ids whose one-time resource cache has been collected. */
   readonly collectedCaches: readonly string[];
   readonly fleets: readonly FleetView[];
-  /** Ships, supply and ammunition of each of the player's deployed fleets (by fleet id). */
+  /** Ships, supply and damage of each of the player's deployed fleets (by fleet id). */
   readonly loadouts: Readonly<Record<string, Loadout>>;
-  /** Supply and ammunition the home dock has used this turn (it refills every turn). */
+  /** Supply the home dock has used this turn (it refills every turn). */
   readonly dockSpent: Stores;
   /** Ships and buildings under construction. */
   readonly construction: readonly Job[];
   /** Stars with a supply depot: friendly ports for resupply. */
   readonly depots: readonly string[];
   readonly playerName: string;
+  /** Name, ruler, capital, colour and flag; null until the empire is founded on the founding screen. */
+  readonly identity: EmpireIdentity | null;
   readonly lastReport: TurnReport | null;
   /** Newest first. */
-  readonly dispatches: ReadonlyArray<{ readonly turn: number; readonly text: string; readonly tone?: 'good' | 'bad' }>;
+  /** News, newest first; one about a battle names its battle log entry (`battle`), to replay it from. */
+  readonly dispatches: ReadonlyArray<{ readonly turn: number; readonly text: string; readonly tone?: 'good' | 'bad'; readonly battle?: string }>;
   /** War Room targets already engaged this turn. */
   readonly engaged: readonly string[];
+  /** Reputation history for the chart: standing with each known NPC faction, sampled every few years. */
+  readonly relations?: Relations;
+  /** Raids on our worlds and fleets, battles at sea and our assaults, newest first (War Room › Battle log). */
+  readonly battleLog?: readonly BattleLogEntry[];
+  /** One-off changes to the stores (purchases, sales, loot, plunder), newest first: the resource ledger. */
+  readonly flows?: readonly Flow[];
+  /** Tariffs, exchange pressure, companies and shares (change commerce); missing in older saves. */
+  readonly commerce?: CommerceState;
+  /** The empire governor's settings (change empire-governor); missing: no governor. */
+  readonly governor?: GovernorState;
+  /** Story missions and faction quests (change missions-and-court); missing in older saves. */
+  readonly missions?: MissionsState;
+  /** The ruler's level and the advisors (change missions-and-court); missing in older saves. */
+  readonly court?: CourtState;
+  /**
+   * Star ids of the systems the empire's ships have passed through or stopped in (change
+   * admin-snapshots-and-fog): explored, for vision. Missing in older saves.
+   */
+  readonly visited?: readonly string[];
+}
+
+export interface Relations {
+  /** Years of the samples (shared by every faction's series). */
+  readonly years: readonly number[];
+  /** Faction id -> standing at each sampled year (null before it was met). */
+  readonly series: Readonly<Record<string, ReadonlyArray<number | null>>>;
 }
 
 export function formatTurn(turn: number): string {

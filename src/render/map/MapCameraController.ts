@@ -2,11 +2,44 @@ import * as THREE from 'three';
 import { hexToWorld, worldToHex } from '../../core/hex/Hex';
 import { ZoomModel } from './ZoomModel';
 
+/** Where zooming in close pulls the view: a point, or a moving target to follow (a ship). */
+export interface Magnet {
+  readonly x: number;
+  readonly z: number;
+  readonly follow?: () => THREE.Vector3 | null;
+}
+
+/**
+ * A close-up view (a planet's surface) that takes the pointer while it is shown: drags turn into
+ * its own camera moves and clicks into its own picks, instead of panning the map. The wheel and
+ * pinch still drive the zoom model, which the close-up reads.
+ */
+export interface InputCapture {
+  /** A drag by (dx, dy) pixels; `turn` for right-drag or shift-drag (heading and tilt). */
+  drag(dx: number, dy: number, turn: boolean): void;
+  /** A click or tap at client coordinates; `double` for the second of a double-click. */
+  click(clientX: number, clientY: number, double: boolean): void;
+}
+
 /** Rebase once the focus drifts this far (ly) from the render origin. */
 const REBASE_DISTANCE = 256;
+/** A finger may wander this far (px) and still count as a tap or a long press. */
+const TOUCH_SLOP = 10;
+/** Hold a finger this long (ms) for the touch equivalent of a right-click: a move order. */
+const LONG_PRESS_MS = 450;
+/**
+ * Pinch zoom goes further than the fingers spread (altitude scales by the spread to this
+ * power): the map spans planets to the whole galaxy, and a 1:1 pinch made that a long trip.
+ */
+const PINCH_POWER = 1.8;
 
 /**
  * Turns pointer/wheel input into camera focus, exponential zoom, yaw and tilt.
+ *
+ * Mouse: drag pans, right-drag (or shift-drag) turns and tilts, wheel zooms, right-click
+ * orders. Touch: one finger pans, two fingers only zoom (toward where the pinch began; moving
+ * both fingers together does not pan); a long press is the right-click. Touch gestures never turn
+ * or tilt the view (on a phone that only got in the way): the orbit joystick does (`orbit`).
  *
  * Floating origin: the galaxy spans 70,000 ly but a planet is ~0.005 ly, far
  * below float32 resolution at that range. The camera therefore lives near (0,0,0)
@@ -30,9 +63,12 @@ export class MapCameraController {
    * Optional magnet for zooming in close: returns a point (e.g. the nearest star) to
    * centre on instead of the cursor, given the ground point and the target view width.
    */
-  attractor: ((ground: THREE.Vector3, viewWidth: number) => { x: number; z: number } | null) | null = null;
+  attractor: ((ground: THREE.Vector3, viewWidth: number, touch?: boolean) => Magnet | null) | null = null;
   /** Right-click without dragging: an RTS-style command at that ground point. Right-drag still rotates. */
   onRightClick: ((world: THREE.Vector3, ray: THREE.Raycaster) => void) | null = null;
+  /** While set, drags and clicks go to a close-up view instead of the map (see InputCapture). */
+  capture: InputCapture | null = null;
+  private lastCaptureClick = 0;
   private follow: (() => THREE.Vector3 | null) | null = null;
   /**
    * Focus minus the followed target. It decays to zero, so the view glides onto a moving
@@ -40,7 +76,17 @@ export class MapCameraController {
    * amount that wobbles with frame time).
    */
   private followOffset: THREE.Vector2 | null = null;
-  private drag: { button: number; x: number; y: number; moved: number } | null = null;
+  private drag: { button: number; x: number; y: number; moved: number; touch: boolean } | null = null;
+  /** Fingers on the map (pointer id → position). */
+  private readonly touches = new Map<number, { x: number; y: number }>();
+  private longPress: ReturnType<typeof setTimeout> | null = null;
+  /** The current touch was a long press or a pinch: lifting it is not a tap. */
+  private consumed = false;
+  /** Both fingers where the last two-finger step left them; each finger reports on its own, so steps run once a frame. */
+  private pinchFrom: Array<{ x: number; y: number }> | null = null;
+  /** Where the pinch began (the fingers' midpoint): it zooms toward here, wherever the fingers go. */
+  private pinchAnchor: { x: number; y: number } | null = null;
+  private pinchFrame: number | null = null;
   private readonly raycaster = new THREE.Raycaster();
   private readonly plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private readonly euler = new THREE.Euler();
@@ -58,6 +104,7 @@ export class MapCameraController {
     dom.addEventListener('pointerdown', this.handleDown);
     window.addEventListener('pointermove', this.handleMove);
     window.addEventListener('pointerup', this.handleUp);
+    window.addEventListener('pointercancel', this.handleCancel);
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
@@ -83,6 +130,12 @@ export class MapCameraController {
     // Same as fly-to: pan onto the target first, dive once it is in view.
     if (altitude >= this.zoom.targetAltitude) this.zoom.setTargetAltitude(altitude);
     else this.flyAltitude = altitude;
+  }
+
+  /** Drop a dive or glide under way (a close-up has taken the zoom over). */
+  cancelFlight(): void {
+    this.flyAltitude = null;
+    this.flyTarget = null;
   }
 
   get following(): boolean {
@@ -188,7 +241,7 @@ export class MapCameraController {
     this.flyAltitude = null;
     const delta = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
     this.zoom.wheel(delta);
-    if (this.follow) return; // Keep the followed planet centred; just zoom.
+    if (this.follow || this.capture) return; // Keep the followed planet centred (or the close-up in charge); just zoom.
     const ground = this.groundAt(e.clientX, e.clientY);
     if (!ground) return;
     // Zooming in close: let a nearby star pull the view to centre on it, so you land in its system.
@@ -196,7 +249,8 @@ export class MapCameraController {
     const magnet = delta < 0 ? this.attractor?.(ground, targetWidth) : null;
     if (magnet) {
       this.zoomAnchor = null;
-      this.flyTarget = new THREE.Vector2(magnet.x, magnet.z);
+      if (magnet.follow) this.followTarget(magnet.follow);
+      else this.flyTarget = new THREE.Vector2(magnet.x, magnet.z);
       return;
     }
     // Otherwise zoom toward the cursor, easing, with the point under it held fixed.
@@ -205,14 +259,98 @@ export class MapCameraController {
   };
 
   private readonly handleDown = (e: PointerEvent): void => {
-    this.drag = { button: e.button, x: e.clientX, y: e.clientY, moved: 0 };
     this.flyTarget = null;
     this.flyAltitude = null;
     this.zoomAnchor = null;
+    if (e.pointerType === 'touch') {
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.touches.size >= 2) {
+        this.pinchFrom = null;
+        const [a, b] = [...this.touches.values()];
+        this.pinchAnchor ??= { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        // A second finger: zoom from here on; no pan, no tap, no long press.
+        this.cancelLongPress();
+        this.consumed = true;
+        this.drag = null;
+        return;
+      }
+      this.consumed = false;
+      this.cancelLongPress();
+      this.longPress = setTimeout(() => this.firePress(), LONG_PRESS_MS);
+    }
+    this.drag = { button: e.button, x: e.clientX, y: e.clientY, moved: 0, touch: e.pointerType === 'touch' };
   };
 
+  /** Long press: the touch right-click (a move order where the finger is). */
+  private firePress(): void {
+    this.longPress = null;
+    const d = this.drag;
+    if (!d || !d.touch || d.moved >= TOUCH_SLOP || this.touches.size !== 1 || this.capture) return;
+    this.consumed = true;
+    const p = this.groundAt(d.x, d.y);
+    if (p) {
+      navigator.vibrate?.(12);
+      this.onRightClick?.(p, this.rayAt(d.x, d.y));
+    }
+  }
+
+  private cancelLongPress(): void {
+    if (this.longPress !== null) clearTimeout(this.longPress);
+    this.longPress = null;
+  }
+
+  /** A finger of a two-finger gesture moved: apply the gesture once this frame, with both fingers' moves. */
+  private pinchMove(id: number, x: number, y: number): void {
+    this.pinchFrom ??= [...this.touches.values()].slice(0, 2).map((p) => ({ ...p }));
+    this.touches.set(id, { x, y });
+    this.pinchFrame ??= requestAnimationFrame(() => {
+      this.pinchFrame = null;
+      const from = this.pinchFrom;
+      this.pinchFrom = null;
+      const to = [...this.touches.values()];
+      if (from && to.length >= 2) this.pinchStep(from[0], from[1], to[0], to[1]);
+    });
+  }
+
+  /**
+   * Two fingers moved from a0, b0 to a1, b1: zoom by how far apart they are, toward where the pinch
+   * began. Only the spread counts: the fingers moving together do not pan.
+   */
+  private pinchStep(a0: { x: number; y: number }, b0: { x: number; y: number }, a1: { x: number; y: number }, b1: { x: number; y: number }): void {
+    const d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y), d1 = Math.hypot(b1.x - a1.x, b1.y - a1.y);
+    if (d0 < 1 || d1 < 1) return;
+    const m = this.pinchAnchor ?? { x: (a0.x + b0.x) / 2, y: (a0.y + b0.y) / 2 };
+    const before = this.groundAt(m.x, m.y);
+    this.zoom.setAltitude(this.zoom.altitude * (d0 / d1) ** PINCH_POWER);
+    this.place();
+    if (this.capture) return; // a close-up is in charge: the fingers only zoom
+    // Pinching in close: glide onto the nearest star system or ship (and keep following a ship).
+    if (d1 > d0 && before && !this.follow) {
+      const magnet = this.attractor?.(before, this.visibleWidth(), true);
+      if (magnet) {
+        if (magnet.follow) this.followTarget(magnet.follow);
+        else this.flyTarget = new THREE.Vector2(magnet.x, magnet.z);
+        return;
+      }
+    }
+    if (this.flyTarget) return; // already gliding onto a star: the fingers only zoom
+    // Keep the ground at the pinch's anchor where it was on screen (unless following a ship: then just zoom).
+    const after = this.groundAt(m.x, m.y);
+    if (before && after && !this.follow) {
+      this.focus.x += before.x - after.x;
+      this.focus.y += before.z - after.z;
+      this.clampFocus();
+      this.place();
+    }
+  }
+
   private readonly handleMove = (e: PointerEvent): void => {
+    if (e.pointerType === 'touch' && this.touches.has(e.pointerId)) {
+      if (this.touches.size >= 2) { this.pinchMove(e.pointerId, e.clientX, e.clientY); return; }
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
     if (!this.drag) {
+      if (this.capture) return;
       if (e.target === this.dom || this.dom.contains(e.target as Node)) {
         const g = this.groundAt(e.clientX, e.clientY);
         this.onHover(g, this.rayAt(e.clientX, e.clientY));
@@ -221,8 +359,15 @@ export class MapCameraController {
     }
     const dx = e.clientX - this.drag.x, dy = e.clientY - this.drag.y;
     this.drag.moved += Math.abs(dx) + Math.abs(dy);
+    if (this.drag.moved >= TOUCH_SLOP) this.cancelLongPress();
+    if (this.capture) {
+      this.capture.drag(dx, dy, this.drag.button !== 0 || e.shiftKey || e.ctrlKey);
+      this.drag.x = e.clientX;
+      this.drag.y = e.clientY;
+      return;
+    }
     if (this.drag.button === 0 && !e.shiftKey) {
-      if (this.drag.moved > 4) this.follow = null;
+      if (this.drag.moved > (this.drag.touch ? TOUCH_SLOP : 4)) this.follow = null;
       const a = this.groundAt(this.drag.x, this.drag.y);
       const b = this.groundAt(e.clientX, e.clientY);
       if (a && b && !this.follow) {
@@ -231,8 +376,7 @@ export class MapCameraController {
         this.clampFocus();
       }
     } else {
-      this.yaw -= dx * 0.005;
-      this.tilt = THREE.MathUtils.clamp(this.tilt - dy * 0.004, 0, 1.4);
+      this.turn(dx, dy);
     }
     this.drag.x = e.clientX;
     this.drag.y = e.clientY;
@@ -240,12 +384,59 @@ export class MapCameraController {
   };
 
   private readonly handleUp = (e: PointerEvent): void => {
-    if (this.drag && this.drag.moved < 5 && (this.drag.button === 0 || this.drag.button === 2)) {
+    if (e.pointerType === 'touch' && this.touches.has(e.pointerId)) {
+      this.touches.delete(e.pointerId);
+      this.cancelLongPress();
+      this.pinchFrom = null;
+      if (this.touches.size < 2) this.pinchAnchor = null;
+      if (this.touches.size === 1) {
+        // One finger left after a pinch: it carries on panning from where it is.
+        const [rest] = [...this.touches.values()];
+        this.drag = { button: 0, x: rest.x, y: rest.y, moved: TOUCH_SLOP, touch: true };
+        return;
+      }
+      if (this.touches.size > 1) return;
+      if (this.consumed) { this.drag = null; return; }
+    }
+    const slop = this.drag?.touch ? TOUCH_SLOP : 5;
+    if (this.capture) {
+      if (this.drag && this.drag.moved < slop && this.drag.button === 0) {
+        const now = performance.now();
+        this.capture.click(e.clientX, e.clientY, now - this.lastCaptureClick < 400);
+        this.lastCaptureClick = now;
+      }
+      this.drag = null;
+      return;
+    }
+    if (this.drag && this.drag.moved < slop && (this.drag.button === 0 || this.drag.button === 2)) {
       const p = this.groundAt(e.clientX, e.clientY);
       if (p && this.drag.button === 0) this.onClick(p, this.rayAt(e.clientX, e.clientY));
       else if (p) this.onRightClick?.(p, this.rayAt(e.clientX, e.clientY));
     }
     this.drag = null;
+  };
+
+  /**
+   * Orbit the view as a right-drag of (dx, dy) pixels would: the heading round the point looked at
+   * and the tilt, or the close-up's own turn while one is shown (the touch joystick, OrbitStick).
+   */
+  orbit(dx: number, dy: number): void {
+    if (this.capture) return this.capture.drag(dx, dy, true);
+    this.turn(dx, dy);
+    this.place();
+  }
+
+  private turn(dx: number, dy: number): void {
+    this.yaw -= dx * 0.005;
+    this.tilt = THREE.MathUtils.clamp(this.tilt - dy * 0.004, 0, 1.4);
+  }
+
+  /** The browser took the touch over (e.g. a system gesture): drop it without a tap. */
+  private readonly handleCancel = (e: PointerEvent): void => {
+    this.touches.delete(e.pointerId);
+    this.cancelLongPress();
+    if (this.touches.size < 2) this.pinchAnchor = null;
+    if (!this.touches.size) this.drag = null;
   };
 
   private clampFocus(): void {

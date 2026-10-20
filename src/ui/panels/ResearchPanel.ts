@@ -1,3 +1,4 @@
+import { SHIP_STYLES } from '../../content/shipStyles';
 import type { GameState } from '../../app/GameState';
 import type { Store } from '../../app/Store';
 import { sciencePerTurn, EconomyTables } from '../../core/economy/Economy';
@@ -8,6 +9,7 @@ import { SHIP_CLASSES } from '../../content/shipClasses';
 import { Drawer } from '../Drawer';
 import type { GameActions } from '../GameActions';
 import { clear, h } from '../dom';
+import { thumb } from '../thumbs';
 
 const SLOT = 104; // px per half-column
 const NODE_W = 94;
@@ -53,6 +55,26 @@ export class ResearchPanel extends Drawer {
     this.render();
   }
 
+  /** Where science aimed at a focus goes this year: the focus, the next step on its path, or nowhere yet. */
+  private flowNote(focusId: string): HTMLElement {
+    const state = this.store.state.empire.research;
+    const target = this.tree.scienceTarget(state, focusId);
+    if (target === focusId) return h('small', { class: 'flow-note' }, 'Science goes here each year');
+    if (target) return h('small', { class: 'flow-note' }, 'Science goes to ', h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.focusNode(target); } }, this.tree.node(target).name), ' first, on the way');
+    return h('small', { class: 'flow-note red' }, this.tree.canResearch(state, focusId) ? 'Ready: press Research' : 'Nothing on the way can take shards yet');
+  }
+
+  /** Open on one technology: its area, selected, scrolled into view (e.g. what a locked item needs). */
+  focusNode(nodeId: string): void {
+    const node = this.tree.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    this.selected = node.id;
+    this.domain = node.domain;
+    if (!this.opened) this.open();
+    else this.render();
+    this.canvas.querySelector('.tnode.selected')?.scrollIntoView({ block: 'center', inline: 'center' });
+  }
+
   private computeLayout(domain: DomainId): { placed: Placed[]; height: number } {
     const nodes = this.tree.nodes.filter((n) => n.domain === domain);
     const col = new Map(this.branches.map((b, i) => [b.id, i]));
@@ -89,7 +111,7 @@ export class ResearchPanel extends Drawer {
     this.summary.replaceChildren(
       h('div', { class: 'kv' }, h('span', {}, 'Researched'), h('b', {}, `${state.researched.length} / ${this.tree.nodes.length}`)),
       h('div', { class: 'kv' }, h('span', {}, 'Science'), h('b', {}, `+${science} shards / yr`)),
-      h('div', { class: 'kv grow' }, h('span', {}, 'Focus'), h('b', {}, focus ? focus.name : 'None — pick a node and press Set focus')),
+      h('div', { class: 'kv grow' }, h('span', {}, 'Focus'), h('b', {}, focus ? focus.name : 'None — pick a node and press Set focus'), focus ? this.flowNote(focus.id) : ''),
     );
     this.tabs.replaceChildren(
       this.tabButton('overview', 'Overview'),
@@ -173,6 +195,7 @@ export class ResearchPanel extends Drawer {
         title: `${node.name} — ${STATUS_LABEL[status]}`,
         onclick: () => { this.selected = node.id; this.render(); },
       },
+      thumb('research', node.id, 40),
       h('span', { class: 'tname' }, node.crossover ? '⇄ ' : node.exclusiveGroup ? '◆ ' : node.analogOf ? '≈ ' : '', node.name),
       h('span', { class: 'tbar' }, h('i', { style: `width:${Math.round(this.tree.progress(state, node.id) * 100)}%` })),
       h('span', { class: 'tshards' },
@@ -193,6 +216,7 @@ export class ResearchPanel extends Drawer {
     clear(this.detail);
     this.detail.append(
       h('div', { class: 'td-head' },
+        thumb('research', node.id, 72),
         h('h3', { style: `color:${branch.color}` }, node.name),
         h('span', { class: `pill ${status}` }, STATUS_LABEL[status]),
         h('span', { class: 'muted small' }, `${this.domains.find((d) => d.id === node.domain)!.name} · ${node.crossover ? node.crossover.map((b) => this.branches.find((x) => x.id === b)!.name).join(' ⇄ ') : branch.name} · Tier ${node.tier}`)),
@@ -205,7 +229,8 @@ export class ResearchPanel extends Drawer {
         h('li', {}, `Grants: ${node.grants.map(grantText).join(', ')}`)),
       h('div', { class: 'td-shards' },
         h('span', { class: 'mono' }, `${this.tree.shardsOf(state, node.id)} / ${node.shards} shards`),
-        ...SHARD_SOURCES.filter((src) => src.id !== 'loot' && src.id !== 'science').map((src) => {
+        // Free shards: a development aid only (the server refuses them).
+        ...SHARD_SOURCES.filter((src) => import.meta.env.DEV && src.id !== 'loot' && src.id !== 'science').map((src) => {
           const amount = Math.max(1, Math.round(node.shards / 10));
           const ok = this.tree.canReceive(state, node.id, src.id) && this.tree.shardsOf(state, node.id) < node.shards;
           return h('button', { class: 'chip', disabled: !ok, title: src.reachesUnconnected ? `${src.name} can reach unconnected nodes` : `${src.name} only reaches connected nodes`, onclick: () => this.actions.grantShards(node.id, src.id, amount) }, `+${amount} ${src.name}`);
@@ -213,6 +238,7 @@ export class ResearchPanel extends Drawer {
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', disabled: status !== 'researchable', onclick: () => this.actions.research(node.id) }, status === 'researched' ? 'Researched' : 'Research'),
         h('button', { class: `btn ${isFocus ? 'on' : ''}`, disabled: status === 'researched' || status === 'locked', onclick: () => this.actions.setFocus(isFocus ? null : node.id) }, isFocus ? 'Focused — science flows here each year' : 'Set focus')),
+      isFocus ? this.flowNote(node.id) : '',
     );
   }
 }
@@ -220,6 +246,7 @@ export class ResearchPanel extends Drawer {
 function grantText(g: Grant): string {
   switch (g.kind) {
     case 'trait': return `ship trait “${g.id}”`;
+    case 'style': return `ship style “${SHIP_STYLES.find((x) => x.id === g.id)?.name ?? g.id}”`;
     case 'chassis': return `ship class ${SHIP_CLASSES.find((c) => c.id === g.id)?.name ?? g.id}`;
     case 'part': return g.id.startsWith('gov:') ? `government option` : g.id === 'faith' ? 'founding a faith' : `part ${g.id}`;
     case 'biome': return `colonise ${g.id} worlds`;

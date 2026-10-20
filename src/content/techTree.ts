@@ -24,6 +24,7 @@ const SHARDS = [0, 10, 50, 100, 250, 500];
 
 // Grant shorthands
 const trait = (id: string): Grant => ({ kind: 'trait', id });
+const style = (id: string): Grant => ({ kind: 'style', id });
 const ship = (id: string): Grant => ({ kind: 'chassis', id });
 const part = (id: string): Grant => ({ kind: 'part', id });
 const biome = (id: string): Grant => ({ kind: 'biome', id });
@@ -40,27 +41,28 @@ const TREE: Record<DomainId, Record<BranchId, Row[]>> = {
   hulls: {
     organic: [
       ['o-grown-hulls', 'Grown Hulls', 1, [bonus('hull', 1)], 'Ships are cultured, not built.', { requires: [] }],
-      ['o-spore-drive', 'Spore Drive', 2, [part('spore-drive'), bonus('speed', 1)], 'Mycelial propulsion between stars.'],
+      ['o-spore-drive', 'Spore Drive', 2, [style('organic'), part('spore-drive'), bonus('speed', 1)], 'Mycelial propulsion between stars. Unlocks the Organic ship style.'],
       ['o-regeneration', 'Regenerative Tissue', 2, [trait('regeneration')], 'Hulls heal between battles.', { requires: ['o-grown-hulls'] }],
       ['o-neural-lattice', 'Neural Lattice', 3, [trait('neural')], 'A nervous system spanning the hull.', { requires: ['o-spore-drive'] }],
       ['o-leviathan', 'Leviathan Gestation', 5, [ship('leviathan')], 'Capital-class living ships.', { requires: ['x-hive-mind'] }],
     ],
     technological: [
       ['t-alloys', 'Composite Alloys', 1, [bonus('hull', 1)], 'Light, rigid hull frames.', { requires: [] }],
-      ['t-fusion', 'Fusion Torches', 2, [part('fusion-torch'), bonus('speed', 1)], 'Faster sublight and jump spool.'],
+      ['t-fusion', 'Fusion Torches', 2, [style('technological'), part('fusion-torch'), bonus('speed', 1)], 'Faster sublight and jump spool. Unlocks the Technological ship style.'],
       ['t-warp-lanes', 'Warp Lane Theory', 3, [bonus('speed', 1)], 'Charted lanes shorten long hauls.'],
       ['t-capital-spines', 'Capital Spines', 4, [bonus('hull', 2)], 'Keel structures for ships a kilometre long.'],
       ['t-dreadnought', 'Dreadnought Program', 5, [ship('dreadnought')], 'A spine of lances wrapped in armour.'],
     ],
     utilitarian: [
       ['u-modular', 'Modular Frames', 1, [ship('prospector')], 'Bolt-together hulls; unlocks the Prospector Skiff.', { requires: [] }],
-      ['u-slipways', 'Orbital Slipways', 2, [bonus('build', 10)], 'Ships cost 10% less to build.'],
+      ['u-slipways', 'Orbital Slipways', 2, [style('utilitarian'), bonus('build', 10)], 'Ships cost 10% less to build. Unlocks the Utilitarian ship style.'],
       ['u-shipyards', 'Mobile Shipyards', 3, [part('fabricator')], 'Build ships far from home.'],
-      ['u-titan-frames', 'Titan Frames', 4, [bonus('hull', 2)], 'Oversized frames for oversized jobs.'],
+      ['u-heavy-haulage', 'Heavy Haulage', 3, [style('industrial'), bonus('hull', 1)], 'Towing tugs and refinery haulers built to last, not to look at. Unlocks the Industrial ship style.', { requires: ['u-slipways'] }],
+      ['u-titan-frames', 'Titan Frames', 4, [bonus('hull', 2)], 'Oversized frames for oversized jobs.', { requires: ['u-shipyards'] }],
     ],
     geometric: [
       ['g-prism', 'Prismatic Frames', 1, [bonus('hull', 1)], 'Pure-form hulls with no wasted volume.', { requires: [] }],
-      ['g-tessellation', 'Tessellated Armour', 2, [trait('armor')], 'Interlocking tiles spread impacts.'],
+      ['g-tessellation', 'Tessellated Armour', 2, [style('geometric'), trait('armor')], 'Interlocking tiles spread impacts. Unlocks the Simple Geometry ship style.'],
       ['g-gyroscopic', 'Gyroscopic Cores', 2, [bonus('speed', 1)], 'Spinning cores that never lose heading.', { requires: ['g-prism'] }],
       ['g-sphere', 'Spherical Doctrine', 3, [bonus('hull', 2)], 'Maximum volume, minimum surface.', { requires: ['g-tessellation'], exclusiveGroup: 'geo-form' }],
       ['g-spike', 'Spike Doctrine', 3, [bonus('short', 2)], 'Every surface is a blade.', { requires: ['g-tessellation'], exclusiveGroup: 'geo-form' }],
@@ -70,7 +72,7 @@ const TREE: Record<DomainId, Record<BranchId, Row[]>> = {
     ],
     aesthetic: [
       ['a-heritage', 'Heritage Shipwrights', 1, [bonus('hull', 1)], 'Elegant lines from a proud tradition.', { requires: [] }],
-      ['a-ornament', 'Ornamental Plating', 2, [trait('ornate'), bonus('influence', 1)], 'Gilded trim that inspires awe.'],
+      ['a-ornament', 'Ornamental Plating', 2, [style('classic'), trait('ornate'), bonus('influence', 1)], 'Gilded trim that inspires awe. Unlocks the Classic ship style.'],
       ['a-sail-yachts', 'Solar Sail Yachts', 2, [bonus('speed', 1)], 'Light sails for long, graceful voyages.', { requires: ['a-heritage'] }],
       ['a-grand-halls', 'Grand Halls', 3, [bonus('morale', 5)], 'Crews fight harder aboard beautiful ships.', { requires: ['a-ornament'] }],
       ['a-flagship', 'Grand Flagships', 5, [ship('flagship')], 'The pride of an empire.', { requires: ['x-sacred-geometry'] }],
@@ -145,7 +147,7 @@ const TREE: Record<DomainId, Record<BranchId, Row[]>> = {
   industry: {
     organic: [
       ['o-bio-refineries', 'Bio-refineries', 1, [bonus('mining', 1)], 'Bacteria that digest ore.'],
-      ['o-ice-grazers', 'Ice Grazers', 2, [ship('ice-cutter')], 'Unlocks the Ice Grazer (mines ice).'],
+      ['o-ice-grazers', 'Ice Grazers', 2, [ship('ice-cutter')], 'Unlocks the Ice Grazer (mines gases, faster).'],
       ['o-living-foundries', 'Living Foundries', 3, [bonus('build', 10)], 'Hulls that grow their own parts.'],
       ['o-void-trawlers', 'Void Trawlers', 4, [ship('void-trawler')], 'Unlocks the Void Trawler (mines dark matter).'],
     ],
@@ -157,7 +159,7 @@ const TREE: Record<DomainId, Record<BranchId, Row[]>> = {
     ],
     utilitarian: [
       ['u-mining', 'Deep-core Mining', 1, [bonus('mining', 1)], 'Every mining ship yields more.'],
-      ['u-gas-scoops', 'Gas Scoops', 2, [ship('gas-harvester')], 'Unlocks the Gas Harvester (mines volatiles).'],
+      ['u-gas-scoops', 'Gas Scoops', 2, [ship('gas-harvester')], 'Unlocks the Gas Harvester (mines gases).'],
       ['u-ore-processing', 'Ore Processing', 3, [bonus('mining', 1)], 'Refine before you haul.'],
       ['u-strip-mining', 'Strip Mining', 4, [bonus('mining', 2), bonus('stability', -5)], 'Huge yields, unhappy colonists.', { exclusiveGroup: 'util-mining' }],
       ['u-sustainable-mining', 'Sustainable Mining', 4, [bonus('mining', 1), bonus('stability', 5)], 'Smaller yields, happier colonists.', { requires: ['u-ore-processing'], exclusiveGroup: 'util-mining' }],
@@ -170,7 +172,7 @@ const TREE: Record<DomainId, Record<BranchId, Row[]>> = {
     ],
     aesthetic: [
       ['a-artisan-guilds', 'Artisan Guilds', 1, [bonus('credits', 5)], 'Fine goods fetch fine prices.'],
-      ['a-luxury-goods', 'Luxury Goods', 2, [bonus('trade', 15)], 'Trade routes earn 15% more.'],
+      ['a-luxury-goods', 'Luxury Goods', 2, [bonus('trade', 15)], 'Trade goods sell for 15% more.'],
       ['a-jewel-cutting', 'Jewel Cutting', 3, [bonus('crystals', 2)], 'Crystals become heirlooms.'],
       ['a-patronage', 'Patronage', 4, [bonus('influence', 3)], 'Fund the arts, buy the senate.'],
     ],
@@ -183,16 +185,16 @@ const TREE: Record<DomainId, Record<BranchId, Row[]>> = {
       ['o-gestalt-council', 'Gestalt Council', 4, [bonus('stability', 10)], 'One will, many voices.'],
     ],
     technological: [
-      ['t-market-algorithms', 'Market Algorithms', 1, [bonus('trade', 10)], 'Trade routes earn 10% more.'],
+      ['t-market-algorithms', 'Market Algorithms', 1, [bonus('trade', 10)], 'Trade goods sell for 10% more.'],
       ['t-technocracy', 'Technocracy', 2, [{ kind: 'part', id: 'gov:directorate' }], 'Unlocks the Directorate government.'],
       ['t-media-networks', 'Media Networks', 3, [bonus('influence', 2)], 'Shape opinion across the stars.'],
       ['t-ai-governors', 'AI Governors', 4, [bonus('science', 5)], 'Machine administrators free up scientists.'],
     ],
     utilitarian: [
-      ['u-logistics', 'Container Logistics', 1, [ship('bulk-freighter')], 'Unlocks the Bulk Freighter (trade routes).'],
-      ['u-free-ports', 'Free Ports', 2, [bonus('routes', 1), bonus('trade', 10)], 'One more trade route, and better ones.'],
+      ['u-logistics', 'Container Logistics', 1, [ship('bulk-freighter')], 'Unlocks the Bulk Freighter (carries trade goods).'],
+      ['u-free-ports', 'Free Ports', 2, [bonus('cargo', 10), bonus('trade', 10)], 'Freighters carry 10 more goods, and sell them for 10% more.'],
       ['u-corporate-charters', 'Corporate Charters', 3, [{ kind: 'part', id: 'gov:corporate' }], 'Unlocks the Corporate Syndicate government.'],
-      ['u-trade-federation', 'Trade Federation', 4, [bonus('routes', 2)], 'Two more trade routes.'],
+      ['u-trade-federation', 'Trade Federation', 4, [bonus('cargo', 20)], 'Freighters carry 20 more goods.'],
     ],
     geometric: [
       ['g-axiomatic-law', 'Axiomatic Law', 1, [bonus('stability', 5)], 'Laws derived like theorems.'],
@@ -205,7 +207,7 @@ const TREE: Record<DomainId, Record<BranchId, Row[]>> = {
       ['a-republic', 'Stellar Republic', 2, [{ kind: 'part', id: 'gov:republic' }], 'Unlocks the Republic government.'],
       ['a-cathedral', 'Cathedral Ships', 2, [{ kind: 'part', id: 'faith' }, { kind: 'part', id: 'gov:theocracy' }, bonus('faith', 2)], 'Unlocks founding a faith and the Theocracy government.', { requires: ['a-diplomacy'] }],
       ['a-missionaries', 'Missionary Orders', 3, [bonus('spread', 3)], 'Faith spreads faster to other empires.', { requires: ['a-cathedral'] }],
-      ['a-pilgrim-routes', 'Pilgrim Routes', 4, [bonus('trade', 10), bonus('faith', 2)], 'Pilgrims travel your trade lanes.'],
+      ['a-pilgrim-routes', 'Pilgrim Routes', 4, [bonus('trade', 10), bonus('faith', 2)], 'Pilgrims ride your freighters.'],
     ],
   },
   intel: {
@@ -280,7 +282,7 @@ const CROSSOVERS: TechNode[] = [
     grants: [ship('exotic-siphon')], description: 'Unlocks the Singularity Siphon (mines exotic matter).' },
   { id: 'x-galactic-bazaar', name: 'Galactic Bazaar', branch: 'utilitarian', domain: 'society', tier: 4, shards: 250, requires: [],
     requiresAny: ['t-market-algorithms', 'u-free-ports'], crossover: ['technological', 'utilitarian'],
-    grants: [bonus('trade', 20), bonus('routes', 1)], description: 'A market spanning every empire you trade with.' },
+    grants: [bonus('trade', 20), bonus('cargo', 10)], description: 'A market spanning every empire you trade with.' },
   { id: 'x-sacred-geometry', name: 'Sacred Geometry', branch: 'geometric', domain: 'hulls', tier: 4, shards: 500, requires: [],
     requiresAny: ['g-fractal-lattice', 'a-cathedral'], crossover: ['geometric', 'aesthetic'],
     grants: [trait('fractal'), trait('ornate')], description: 'Form as faith. Opens the Monolith and the Grand Flagship.' },

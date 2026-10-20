@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Thumbnail Contact Sheet</title>
+<style>
+  body { margin: 0; padding: 16px; background: #0b0f17; color: #c9d4e3; font: 12px system-ui, sans-serif; }
+  h2 { font-size: 14px; margin: 18px 0 8px; color: #8fb3d9; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, calc(var(--tile, 96px) + 16px)); gap: 8px; }
+  figure { margin: 0; text-align: center; }
+  img { width: var(--tile, 96px); height: var(--tile, 96px); border-radius: 10px; background: radial-gradient(circle at 50% 40%, #223047, #0e131c 70%); }
+  figure.missing img { outline: 2px solid #ff5d5d; }
+  figcaption { font-size: 10px; line-height: 1.2; height: 2.4em; overflow: hidden; }
+</style>
+</head>
+<body>
+<div id="sheet"></div>
+<script type="module">
+  import { contactSheet } from '/src/render/thumbs/contactSheet.ts';
+  contactSheet(document.getElementById('sheet'));
+</script>
+</body>
+</html>
